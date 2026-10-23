@@ -18,7 +18,6 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
 	"github.com/hwq830/zeusai/server/internal/push"
-	"github.com/hwq830/zeusai/server/internal/search"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
 
@@ -64,10 +63,18 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	searcher, err := providers.Search(cfg)
+	if err != nil {
+		return err
+	}
+	reader, err := providers.Browse(cfg)
+	if err != nil {
+		return err
+	}
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{})
 	workflows.Register(w, &workflows.Activities{
 		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
-		Search: search.Mock{}, Push: &push.Log{L: log},
+		Search: searcher, Browse: reader, Push: &push.Log{L: log},
 	})
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)
 	return w.Run(worker.InterruptCh())

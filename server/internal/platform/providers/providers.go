@@ -4,13 +4,16 @@ package providers
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 
+	"github.com/hwq830/zeusai/server/internal/browse"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
+	"github.com/hwq830/zeusai/server/internal/search"
 )
 
 // Moderation returns the input/output checker, or nil (allow all) in dev without a list.
@@ -46,4 +49,31 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker) (llm.Provider
 		return nil, fmt.Errorf("unknown ZEUS_LLM_PROVIDER %q", cfg.LLMProvider)
 	}
 	return llm.Metered{Provider: p, Q: q}, nil
+}
+
+func Search(cfg config.Config) (search.Searcher, error) {
+	switch cfg.SearchProvider {
+	case "", "mock":
+		return search.Mock{}, nil
+	case "bocha":
+		return search.Bocha{APIKey: cfg.BochaAPIKey}, nil
+	default:
+		return nil, fmt.Errorf("unknown ZEUS_SEARCH_PROVIDER %q", cfg.SearchProvider)
+	}
+}
+
+// Browse returns the page reader, or nil with mock search: fake result URLs do not resolve.
+func Browse(cfg config.Config) (browse.Reader, error) {
+	if cfg.SearchProvider == "" || cfg.SearchProvider == "mock" {
+		return nil, nil
+	}
+	h := &browse.HTTP{}
+	if cfg.EgressProxy != "" {
+		u, err := url.Parse(cfg.EgressProxy)
+		if err != nil {
+			return nil, fmt.Errorf("ZEUS_EGRESS_PROXY: %w", err)
+		}
+		h.Proxy = u
+	}
+	return h, nil
 }

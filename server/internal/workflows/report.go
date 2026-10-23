@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	texttemplate "text/template"
 	"time"
 	"unicode/utf8"
@@ -31,12 +32,14 @@ const FollowupWorkflowName = "FollowupWorkflow"
 type depthBudget struct {
 	Questions, Sources int
 	LengthHint         string
+	// FullPages is how many top sources per sub-question are read in full, not just their snippet.
+	FullPages int
 }
 
 var budgets = map[string]depthBudget{
-	"quick":    {3, 4, "1500 字左右"},
-	"standard": {5, 6, "3000 字左右"},
-	"deep":     {7, 8, "5000 字左右"},
+	"quick":    {3, 4, "1500 字左右", 0},
+	"standard": {5, 6, "3000 字左右", 2},
+	"deep":     {7, 8, "5000 字左右", 3},
 }
 
 type Question struct {
@@ -223,8 +226,12 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 			Content string `json:"content"`
 		}
 		list := make([]ps, len(sources))
+		full := a.readPages(ctx, sources, b.FullPages)
 		for j, r := range sources {
 			list[j] = ps{Index: j + 1, Title: r.Title, Site: r.SiteName, Content: clip(r.Snippet, 2000)}
+			if t := full[j]; len(t) > len(r.Snippet) {
+				list[j].Content = clip(t, 6000)
+			}
 			if r.PublishedAt != nil {
 				list[j].Date = r.PublishedAt.Format(time.DateOnly)
 			}
@@ -415,4 +422,24 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 // EmitEvent publishes one event; used by workflows for terminal events after a failure.
 func (a *Activities) EmitEvent(ctx context.Context, userID, taskID uuid.UUID, ev events.Event) error {
 	return a.emit(ctx, userID, taskID, ev)
+}
+
+// readPages fetches the full text of the first n sources; a page that fails keeps its snippet.
+func (a *Activities) readPages(ctx context.Context, sources []search.Result, n int) []string {
+	out := make([]string, len(sources))
+	if a.Browse == nil {
+		return out
+	}
+	var wg sync.WaitGroup
+	for i := range sources[:min(n, len(sources))] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if p, err := a.Browse.Read(ctx, sources[i].URL); err == nil {
+				out[i] = p.Text
+			}
+		}()
+	}
+	wg.Wait()
+	return out
 }

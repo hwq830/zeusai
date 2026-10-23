@@ -28,7 +28,10 @@ type Config struct {
 	ModelGWConfig     string        `koanf:"modelgw_config"` // YAML routing file for the gateway
 	// ModerationKeywordsFile lists blocked terms, one per line. Required outside dev.
 	ModerationKeywordsFile string `koanf:"moderation_keywords_file"`
-	SearchProvider         string `koanf:"search_provider"`
+	SearchProvider         string `koanf:"search_provider"` // mock | bocha
+	BochaAPIKey            string `koanf:"bocha_api_key"`
+	// EgressProxy is the outbound proxy for page reads (http://host:port); empty = direct.
+	EgressProxy string `koanf:"egress_proxy"`
 }
 
 func defaults() Config {
@@ -66,8 +69,11 @@ func Load() (Config, error) {
 		}
 		cfg.JWTSecret = "dev-only-insecure-secret"
 	}
-	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.LLMProvider == "mock") {
-		return Config{}, errors.New("dev-only settings (DEV_SMS_CODE, mock LLM) are not allowed outside dev")
+	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.LLMProvider == "mock" || cfg.SearchProvider == "mock") {
+		return Config{}, errors.New("dev-only settings (DEV_SMS_CODE, mock LLM or search) are not allowed outside dev")
+	}
+	if cfg.SearchProvider == "bocha" && cfg.BochaAPIKey == "" {
+		return Config{}, errors.New("ZEUS_BOCHA_API_KEY is required when ZEUS_SEARCH_PROVIDER=bocha")
 	}
 	if !cfg.IsDev() && cfg.ModerationKeywordsFile == "" {
 		return Config{}, errors.New("ZEUS_MODERATION_KEYWORDS_FILE is required outside dev")

@@ -18,6 +18,7 @@ import (
 
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/briefing"
+	"github.com/hwq830/zeusai/server/internal/browse"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
@@ -41,6 +42,7 @@ type Activities struct {
 	Bus    *events.Bus
 	LLM    llm.Provider
 	Search search.Searcher
+	Browse browse.Reader // nil: research uses search snippets only
 	Push   push.Notifier
 	Now    func() time.Time
 }
