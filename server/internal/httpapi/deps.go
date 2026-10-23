@@ -13,6 +13,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -27,6 +28,7 @@ type Deps struct {
 	Redis  *redis.Client
 	Orch   orch.Client
 	LLM    llm.Provider
+	Mod    moderation.Checker // nil allows everything (dev)
 	Config config.Config
 	Now    func() time.Time
 }
@@ -37,7 +39,7 @@ func New(d Deps) *Server {
 	q := db.New(d.Pool)
 	tokens := auth.NewTokens(d.Config.JWTSecret, d.Config.AccessTTL)
 	qs := &quota.Service{Q: q, Now: d.Now}
-	tpl := &template.Service{Q: q, LLM: d.LLM}
+	tpl := &template.Service{Q: q, LLM: d.LLM, Mod: d.Mod}
 	return &Server{
 		Log: d.Log, Q: q, Tokens: tokens, Quota: qs, Templates: tpl,
 		Auth: &auth.Service{
@@ -45,10 +47,10 @@ func New(d Deps) *Server {
 			SMS: auth.LogSMSSender{Log: d.Log}, Apple: auth.DevApple{}, Wechat: auth.DevWechat{}, OneClick: auth.DevOneClick{},
 			FixedSMSCode: d.Config.DevSMSCode,
 		},
-		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Now: d.Now},
+		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Now: d.Now},
 		Tasks:      &task.Service{Q: q, Orch: d.Orch},
 		Connectors: &connector.Service{Q: q},
-		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, PublicBaseURL: d.Config.PublicBaseURL},
+		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, PublicBaseURL: d.Config.PublicBaseURL},
 		Bus:        &events.Bus{R: d.Redis},
 	}
 }

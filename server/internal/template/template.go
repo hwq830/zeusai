@@ -21,6 +21,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 )
 
@@ -222,6 +223,22 @@ func orEmpty[T any](s []T) []T {
 type Service struct {
 	Q   *db.Queries
 	LLM llm.Provider
+	Mod moderation.Checker
+}
+
+// texts is everything a user typed into a template, for moderation.
+func (in Input) texts() []string {
+	t := []string{in.Name, in.Description}
+	for _, f := range in.Fields {
+		t = append(t, f.Label)
+	}
+	for _, s := range in.Sections {
+		t = append(t, s.Title, s.Instruction)
+	}
+	for _, s := range in.Sources {
+		t = append(t, s.Value, s.Label)
+	}
+	return t
 }
 
 type ListParams struct {
@@ -291,6 +308,9 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in Input) (Templ
 	if err := in.Validate(); err != nil {
 		return Template{}, err
 	}
+	if err := moderation.Require(ctx, s.Mod, in.texts()...); err != nil {
+		return Template{}, err
+	}
 	existing, err := s.Q.ListUserTemplates(ctx, db.ListUserTemplatesParams{OwnerID: &userID, Limit: maxCustomTemplates, Offset: 0})
 	if err != nil {
 		return Template{}, apperr.Internal(err)
@@ -313,6 +333,9 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in Input) (Templ
 
 func (s *Service) Update(ctx context.Context, userID uuid.UUID, id string, in Input) (Template, error) {
 	if err := in.Validate(); err != nil {
+		return Template{}, err
+	}
+	if err := moderation.Require(ctx, s.Mod, in.texts()...); err != nil {
 		return Template{}, err
 	}
 	tid, err := uuid.Parse(id)
@@ -410,6 +433,9 @@ func (s *Service) Draft(ctx context.Context, userID uuid.UUID, tz, prompt string
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return Input{}, apperr.Invalid("请描述你想要的简报模板")
+	}
+	if err := moderation.Require(ctx, s.Mod, prompt); err != nil {
+		return Input{}, err
 	}
 	sys, err := renderPrompt("briefing/draft_template.md", map[string]any{"TZ": tz})
 	if err != nil {

@@ -14,9 +14,9 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
-	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
+	"github.com/hwq830/zeusai/server/internal/platform/providers"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/search"
 	"github.com/hwq830/zeusai/server/internal/workflows"
@@ -56,9 +56,17 @@ func run(log *slog.Logger) error {
 	defer tc.Close()
 
 	q := db.New(pool)
+	mod, err := providers.Moderation(cfg)
+	if err != nil {
+		return err
+	}
+	model, err := providers.LLM(cfg, q, mod)
+	if err != nil {
+		return err
+	}
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{})
 	workflows.Register(w, &workflows.Activities{
-		Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Metered{Provider: llm.Mock{}, Q: q},
+		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
 		Search: search.Mock{}, Push: &push.Log{L: log},
 	})
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)

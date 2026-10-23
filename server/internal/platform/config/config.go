@@ -23,9 +23,12 @@ type Config struct {
 	JWTSecret         string        `koanf:"jwt_secret"`
 	AccessTTL         time.Duration `koanf:"access_ttl"`
 	RefreshTTL        time.Duration `koanf:"refresh_ttl"`
-	DevSMSCode        string        `koanf:"dev_sms_code"` // dev only: fixed SMS code
-	LLMProvider       string        `koanf:"llm_provider"` // mock | openai
-	SearchProvider    string        `koanf:"search_provider"`
+	DevSMSCode        string        `koanf:"dev_sms_code"`   // dev only: fixed SMS code
+	LLMProvider       string        `koanf:"llm_provider"`   // mock | gateway
+	ModelGWConfig     string        `koanf:"modelgw_config"` // YAML routing file for the gateway
+	// ModerationKeywordsFile lists blocked terms, one per line. Required outside dev.
+	ModerationKeywordsFile string `koanf:"moderation_keywords_file"`
+	SearchProvider         string `koanf:"search_provider"`
 }
 
 func defaults() Config {
@@ -65,6 +68,12 @@ func Load() (Config, error) {
 	}
 	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.LLMProvider == "mock") {
 		return Config{}, errors.New("dev-only settings (DEV_SMS_CODE, mock LLM) are not allowed outside dev")
+	}
+	if !cfg.IsDev() && cfg.ModerationKeywordsFile == "" {
+		return Config{}, errors.New("ZEUS_MODERATION_KEYWORDS_FILE is required outside dev")
+	}
+	if cfg.LLMProvider == "gateway" && cfg.ModelGWConfig == "" {
+		return Config{}, errors.New("ZEUS_MODELGW_CONFIG is required when ZEUS_LLM_PROVIDER=gateway")
 	}
 	return cfg, nil
 }

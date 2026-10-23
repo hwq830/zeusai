@@ -13,7 +13,29 @@ import (
 type Notification struct {
 	Title    string
 	Body     string
-	DeepLink string // zeus://briefing/{id} etc.
+	DeepLink string // zeus://briefing/{id}, zeus://report/{id}
+	Image    string // optional https cover image, shown by the iOS notification service extension
+}
+
+// APNsPayload is the JSON body sent to APNs. The iOS app reads the deep link from the
+// top-level "deeplink" key and the cover from "image"; mutable-content lets its service
+// extension download the image.
+func APNsPayload(n Notification) map[string]any {
+	aps := map[string]any{
+		"alert": map[string]string{"title": n.Title, "body": n.Body},
+		"sound": "default",
+	}
+	if n.Image != "" {
+		aps["mutable-content"] = 1
+	}
+	p := map[string]any{"aps": aps}
+	if n.DeepLink != "" {
+		p["deeplink"] = n.DeepLink
+	}
+	if n.Image != "" {
+		p["image"] = n.Image
+	}
+	return p
 }
 
 type Notifier interface {

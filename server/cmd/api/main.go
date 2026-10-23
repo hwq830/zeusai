@@ -16,9 +16,9 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/httpapi"
-	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
+	"github.com/hwq830/zeusai/server/internal/platform/providers"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
 
@@ -55,9 +55,17 @@ func run(log *slog.Logger) error {
 	}
 	defer tc.Close()
 
+	mod, err := providers.Moderation(cfg)
+	if err != nil {
+		return err
+	}
+	model, err := providers.LLM(cfg, db.New(pool), mod)
+	if err != nil {
+		return err
+	}
 	srv := httpapi.New(httpapi.Deps{
 		Log: log, Pool: pool, Redis: rdb, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
-		LLM: llmFor(cfg, db.New(pool)), Config: cfg,
+		LLM: model, Mod: mod, Config: cfg,
 	})
 	hs := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
@@ -71,9 +79,4 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	return nil
-}
-
-func llmFor(cfg config.Config, q *db.Queries) llm.Provider {
-	// Real providers are reached through modelgw (stage 4); until then only the mock exists.
-	return llm.Metered{Provider: llm.Mock{}, Q: q}
 }

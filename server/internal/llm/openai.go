@@ -41,6 +41,22 @@ type chatResponse struct {
 	} `json:"usage"`
 }
 
+// StatusError is a non-200 reply from an upstream endpoint.
+type StatusError struct {
+	Provider string
+	Status   int
+	Body     string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s: HTTP %d: %s", e.Provider, e.Status, e.Body)
+}
+
+// Retryable reports whether another attempt (or another provider) may succeed.
+func (e *StatusError) Retryable() bool {
+	return e.Status == http.StatusTooManyRequests || e.Status >= 500
+}
+
 func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, error) {
 	msgs := req.Messages
 	if req.System != "" {
@@ -73,7 +89,7 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode != http.StatusOK {
-		return Response{}, fmt.Errorf("%s: %s: %s", c.Name, resp.Status, bytes.TrimSpace(raw[:min(len(raw), 512)]))
+		return Response{}, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 512)]))}
 	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {

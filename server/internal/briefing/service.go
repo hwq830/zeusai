@@ -15,6 +15,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/schedule"
@@ -27,6 +28,7 @@ type Service struct {
 	Templates *template.Service
 	Orch      orch.Client
 	LLM       llm.Provider
+	Mod       moderation.Checker
 	Now       func() time.Time
 }
 
@@ -64,6 +66,13 @@ func (s *Service) validate(ctx context.Context, userID uuid.UUID, in *Input) (*t
 	}
 	if len(in.Topics) > 10 {
 		return nil, apperr.Invalid("关注点最多 10 个")
+	}
+	texts := append([]string{in.Name}, in.Topics...)
+	for _, v := range in.FieldValues {
+		texts = append(texts, template.ValueString(v))
+	}
+	if err := moderation.Require(ctx, s.Mod, texts...); err != nil {
+		return nil, err
 	}
 	if in.FieldValues == nil {
 		in.FieldValues = map[string]any{}
@@ -360,6 +369,9 @@ func (s *Service) Draft(ctx context.Context, u db.User, prompt string) (Input, e
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return Input{}, apperr.Invalid("请描述你想要的简报")
+	}
+	if err := moderation.Require(ctx, s.Mod, prompt); err != nil {
+		return Input{}, err
 	}
 	sys, err := prompts.FS.ReadFile("briefing/draft_subscription.md")
 	if err != nil {

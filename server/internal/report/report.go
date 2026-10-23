@@ -19,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
@@ -78,6 +79,7 @@ type Service struct {
 	Q             *db.Queries
 	Quota         *quota.Service
 	Orch          orch.Client
+	Mod           moderation.Checker
 	PublicBaseURL string
 }
 
@@ -122,6 +124,9 @@ func (s *Service) Create(ctx context.Context, u db.User, in Input) (db.Task, err
 	}
 	if len(in.Focuses) > 6 {
 		return db.Task{}, apperr.Invalid("侧重角度最多 6 个")
+	}
+	if err := moderation.Require(ctx, s.Mod, append([]string{in.Topic}, in.Focuses...)...); err != nil {
+		return db.Task{}, err
 	}
 	if err := s.Quota.CheckReport(ctx, u); err != nil {
 		return db.Task{}, err
@@ -253,6 +258,9 @@ func (s *Service) Followup(ctx context.Context, userID uuid.UUID, id, question s
 	question = strings.TrimSpace(question)
 	if question == "" || utf8.RuneCountInString(question) > 1000 {
 		return db.Task{}, apperr.Invalid("问题不能为空且不超过 1000 字")
+	}
+	if err := moderation.Require(ctx, s.Mod, question); err != nil {
+		return db.Task{}, err
 	}
 	r, err := s.getRow(ctx, userID, id)
 	if err != nil {

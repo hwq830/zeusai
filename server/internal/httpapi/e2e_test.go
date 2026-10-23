@@ -26,6 +26,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/httpapi"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
@@ -71,7 +72,11 @@ func setup(t *testing.T) *harness {
 
 	oc := &workflows.Client{C: tc, TaskQueue: queue}
 	cfg := config.Config{Env: "dev", JWTSecret: "test", AccessTTL: time.Minute, RefreshTTL: time.Hour, DevSMSCode: smsCode}
-	srv := httpapi.New(httpapi.Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Pool: pool, Redis: rdb, Orch: oc, LLM: llm.Mock{}, Config: cfg})
+	mod, err := moderation.NewKeywords(strings.NewReader(blockedTerm))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httpapi.New(httpapi.Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Pool: pool, Redis: rdb, Orch: oc, LLM: llm.Mock{}, Mod: mod, Config: cfg})
 	srv.SSEPing = 200 * time.Millisecond
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
@@ -590,5 +595,25 @@ func TestDraftTemplate(t *testing.T) {
 	h.do("POST", "/v1/templates", in, 201, &created)
 	if created.Kind != "custom" {
 		t.Fatalf("created: %+v", created)
+	}
+}
+
+const blockedTerm = "违禁测试词"
+
+func TestContentBlocked(t *testing.T) {
+	h := setup(t)
+	h.login(randomPhone())
+	var e apiError
+	// Spaces and punctuation between characters do not get past the check.
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "关于 违禁-测试 词 的调研"}, 422, &e)
+	if e.Code != "content_blocked" {
+		t.Fatalf("report: %+v", e)
+	}
+	h.do("POST", "/v1/briefing-subscriptions/draft", map[string]string{"prompt": "每天推送" + blockedTerm}, 422, &e)
+	h.do("POST", "/v1/templates/draft", map[string]string{"prompt": blockedTerm}, 422, &e)
+	var me session
+	h.do("GET", "/v1/me", nil, 200, &me.Me)
+	if me.Me.Quota.Reports.Used != 0 {
+		t.Fatalf("blocked report was charged: %+v", me.Me.Quota)
 	}
 }
