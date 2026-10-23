@@ -12,6 +12,7 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 
+	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
@@ -74,7 +75,7 @@ func run(log *slog.Logger) error {
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{})
 	workflows.Register(w, &workflows.Activities{
 		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
-		Search: searcher, Browse: reader, Push: &push.Log{L: log},
+		Search: searcher, Browse: reader, Tools: &connector.Toolbox{Q: q}, Push: &push.Log{L: log},
 	})
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)
 	return w.Run(worker.InterruptCh())

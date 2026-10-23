@@ -212,6 +212,7 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 			return QuestionNotes{}, err
 		}
 	}
+	sources = append(sources, a.callTools(ctx, plan, q)...)
 	out := QuestionNotes{Question: q.Question, Sources: sources}
 	if len(sources) > 0 {
 		sys, err := render("research.md", map[string]any{"Title": plan.Title, "Question": q.Question, "Notes": notes})
@@ -441,5 +442,57 @@ func (a *Activities) readPages(ctx context.Context, sources []search.Result, n i
 		}()
 	}
 	wg.Wait()
+	return out
+}
+
+const maxToolCalls = 2
+
+// callTools lets the model pick up to two read-only connector calls for a sub-question and
+// returns their results as extra sources. Any failure just means no extra sources.
+func (a *Activities) callTools(ctx context.Context, plan ReportPlan, q Question) []search.Result {
+	if a.Tools == nil {
+		return nil
+	}
+	specs, err := a.Tools.Available(ctx, plan.UserID)
+	if err != nil || len(specs) == 0 {
+		return nil
+	}
+	sys, err := render("tools.md", map[string]any{"Title": plan.Title, "Question": q.Question})
+	if err != nil {
+		return nil
+	}
+	in, _ := json.Marshal(map[string]any{"question": q.Question, "tools": specs})
+	var pick struct {
+		Calls []struct {
+			Connector string         `json:"connector"`
+			Tool      string         `json:"tool"`
+			Arguments map[string]any `json:"arguments"`
+		} `json:"calls"`
+	}
+	if _, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{
+		Purpose: "report.tools", Tier: llm.TierFast, System: sys,
+		Messages: []llm.Message{{Role: "user", Content: "<tools>" + string(in) + "</tools>"}},
+		UserID:   &plan.UserID, TaskID: &plan.TaskID,
+	}, &pick); err != nil {
+		return nil
+	}
+	names := map[string]string{}
+	for _, s := range specs {
+		names[s.Connector] = s.ConnectorName
+	}
+	var out []search.Result
+	for _, c := range pick.Calls[:min(maxToolCalls, len(pick.Calls))] {
+		text, err := a.Tools.Call(ctx, plan.UserID, c.Connector, c.Tool, c.Arguments)
+		if err != nil || strings.TrimSpace(text) == "" {
+			continue
+		}
+		r := search.Result{
+			Title: names[c.Connector] + "：" + c.Tool, URL: "mcp://" + c.Connector + "/" + c.Tool,
+			Snippet: clip(text, 2000), SiteName: names[c.Connector],
+		}
+		_ = a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeSourceReading,
+			Source: &events.Source{URL: r.URL, Title: r.Title, SiteName: r.SiteName}})
+		out = append(out, r)
+	}
 	return out
 }

@@ -43,6 +43,8 @@
   kind: mcp
   category: 生活
   transport: http
+  # Full Streamable HTTP endpoint including the server-side key, e.g. https://mcp.amap.com/mcp?key=…
+  endpoint_env: ZEUS_MCP_AMAP_URL
   tools:
     - { name: place_search, write: false }
     - { name: route_planning, write: false }

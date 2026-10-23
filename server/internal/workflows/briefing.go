@@ -19,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/briefing"
 	"github.com/hwq830/zeusai/server/internal/browse"
+	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
@@ -43,8 +44,15 @@ type Activities struct {
 	LLM    llm.Provider
 	Search search.Searcher
 	Browse browse.Reader // nil: research uses search snippets only
+	Tools  Tools         // nil: no connector tools
 	Push   push.Notifier
 	Now    func() time.Time
+}
+
+// Tools is the read-only connector toolbox (connector.Toolbox in production).
+type Tools interface {
+	Available(ctx context.Context, userID uuid.UUID) ([]connector.ToolSpec, error)
+	Call(ctx context.Context, userID uuid.UUID, connectorID, tool string, args map[string]any) (string, error)
 }
 
 func (a *Activities) now() time.Time {

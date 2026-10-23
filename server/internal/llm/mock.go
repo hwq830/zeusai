@@ -49,6 +49,8 @@ func (Mock) Complete(_ context.Context, req Request) (Response, error) {
 		out = mockResearch(user)
 	case "report.write":
 		out = mockWrite(user)
+	case "report.tools":
+		out = mockToolCalls(user)
 	case "report.followup":
 		out = map[string]string{"answer": "根据报告内容，" + user + " 的答案见正文第一节 [1]。"}
 	default:
@@ -171,4 +173,23 @@ func mockTemplateDraft(prompt string) any {
 		"defaultSchedule": map[string]any{"freq": "daily", "time": "08:00", "tz": "Asia/Shanghai"},
 		"defaultLength":   "standard",
 	}
+}
+
+// mockToolCalls calls the first offered tool once, passing the question as "query".
+func mockToolCalls(user string) any {
+	var in struct {
+		Question string `json:"question"`
+		Tools    []struct {
+			Connector string `json:"connector"`
+			Tool      string `json:"tool"`
+		} `json:"tools"`
+	}
+	user = strings.TrimSuffix(strings.TrimPrefix(user, "<tools>"), "</tools>")
+	_ = json.Unmarshal([]byte(user), &in)
+	calls := []map[string]any{}
+	if len(in.Tools) > 0 {
+		calls = append(calls, map[string]any{"connector": in.Tools[0].Connector, "tool": in.Tools[0].Tool,
+			"arguments": map[string]any{"query": in.Question}})
+	}
+	return map[string]any{"calls": calls}
 }

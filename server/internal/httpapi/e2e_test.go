@@ -64,7 +64,14 @@ func setup(t *testing.T) *harness {
 	queue := "test-" + uuid.NewString()
 	pushes := &push.Log{}
 	w := worker.New(tc, queue, worker.Options{})
-	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: pushes})
+	amap := fakeMCP(t)
+	tools := &connector.Toolbox{Q: q, Endpoint: func(id string) string {
+		if id == "amap" {
+			return amap.URL
+		}
+		return ""
+	}}
+	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: pushes, Tools: tools})
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -623,5 +630,68 @@ func TestContentBlocked(t *testing.T) {
 	h.do("GET", "/v1/me", nil, 200, &me.Me)
 	if me.Me.Quota.Reports.Used != 0 {
 		t.Fatalf("blocked report was charged: %+v", me.Me.Quota)
+	}
+}
+
+// fakeMCP is a stateless MCP server offering amap's place_search plus a write tool that the
+// catalog does not list, which must never be offered.
+func fakeMCP(t *testing.T) *httptest.Server {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Name      string         `json:"name"`
+				Arguments map[string]any `json:"arguments"`
+			} `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any = map[string]any{}
+		switch req.Method {
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{
+				// Listed first: the mock model picks the first offered tool, so offering it would fail the test.
+				{"name": "delete_everything", "inputSchema": map[string]any{"type": "object"}},
+				{"name": "place_search", "description": "搜地点", "inputSchema": map[string]any{"type": "object"}},
+			}}
+		case "tools/call":
+			result = map[string]any{"content": []map[string]string{{"type": "text", "text": fmt.Sprintf("%s 结果：%v", req.Params.Name, req.Params.Arguments["query"])}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result})
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func TestReportUsesConnectorTool(t *testing.T) {
+	h := setup(t)
+	h.login(randomPhone())
+	run := func() []events.Event {
+		var tk struct{ ID string }
+		h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "上海周末亲子去处", "depth": "quick"}, 202, &tk)
+		return h.streamEvents(tk.ID, 0)
+	}
+	mcpSources := func(evs []events.Event) (n int) {
+		for _, ev := range evs {
+			if ev.Type == events.TypeSourceReading && strings.HasPrefix(ev.Source.URL, "mcp://") {
+				if ev.Source.URL != "mcp://amap/place_search" {
+					t.Fatalf("unexpected tool source %+v", ev.Source)
+				}
+				n++
+			}
+		}
+		return n
+	}
+	if n := mcpSources(run()); n != 0 {
+		t.Fatalf("connector is off by default, got %d tool sources", n)
+	}
+	h.do("PATCH", "/v1/connectors/amap", map[string]any{"enabled": true}, 200, nil)
+	if n := mcpSources(run()); n != 3 { // one call per sub-question of a quick report
+		t.Fatalf("tool sources: %d", n)
 	}
 }

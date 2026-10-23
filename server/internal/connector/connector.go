@@ -48,15 +48,21 @@ type catalogEntry struct {
 	RequiresAuth bool   `yaml:"requires_auth"`
 	DefaultOn    bool   `yaml:"default_on"`
 	Transport    string `yaml:"transport"`
+	EndpointEnv  string `yaml:"endpoint_env"` // http transport: env var with the server URL
 	Tools        []Tool `yaml:"tools"`
+}
+
+func catalog() ([]catalogEntry, error) {
+	var entries []catalogEntry
+	return entries, yaml.Unmarshal(catalogYAML, &entries)
 }
 
 type Service struct{ Q *db.Queries }
 
 // SeedCatalog upserts catalog.yaml into the connectors table.
 func (s *Service) SeedCatalog(ctx context.Context) (int, error) {
-	var entries []catalogEntry
-	if err := yaml.Unmarshal(catalogYAML, &entries); err != nil {
+	entries, err := catalog()
+	if err != nil {
 		return 0, err
 	}
 	for i, e := range entries {
