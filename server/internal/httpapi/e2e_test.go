@@ -439,3 +439,156 @@ func TestDraftSubscription(t *testing.T) {
 		t.Fatalf("draft: %+v", in)
 	}
 }
+
+func (h *harness) raw(path string, auth bool) (int, string) {
+	h.t.Helper()
+	req, _ := http.NewRequest("GET", h.url+path, nil)
+	if auth {
+		req.Header.Set("Authorization", "Bearer "+h.token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestReportEndToEnd(t *testing.T) {
+	h := setup(t)
+	h.login(randomPhone())
+
+	type taskT struct {
+		ID       string `json:"id"`
+		Kind     string `json:"kind"`
+		Subtitle string `json:"subtitle"`
+		ReportID string `json:"reportId"`
+		Status   string `json:"status"`
+	}
+	var tk taskT
+	var e apiError
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": ""}, 400, &e)
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "2026 年中国新能源车出海", "depth": "quick", "focuses": []string{"市场规模", "竞品对比"}}, 202, &tk)
+	if tk.Kind != "report" || tk.ReportID == "" || tk.Subtitle != "快速报告 · 侧重市场规模、竞品对比" {
+		t.Fatalf("task: %+v", tk)
+	}
+	evs := h.streamEvents(tk.ID, 0)
+	var plan []events.Step
+	var summary strings.Builder
+	for _, ev := range evs {
+		if ev.Type == events.TypePlan {
+			plan = ev.Steps
+		}
+		if ev.Type == events.TypeTextDelta {
+			summary.WriteString(ev.Delta)
+		}
+	}
+	if last := evs[len(evs)-1]; last.Type != events.TypeCompleted || last.ReportID != tk.ReportID {
+		t.Fatalf("last: %+v", last)
+	}
+	if len(plan) != 4 || plan[3].Title != "撰写报告" || summary.Len() == 0 {
+		t.Fatalf("plan %+v summary %q", plan, summary.String())
+	}
+
+	var rep struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		Title       string `json:"title"`
+		Summary     string `json:"summary"`
+		SourceCount int    `json:"sourceCount"`
+		HTMLURL     string `json:"htmlUrl"`
+	}
+	h.do("GET", "/v1/reports/"+tk.ReportID, nil, 200, &rep)
+	if rep.Status != "done" || rep.SourceCount == 0 || rep.HTMLURL != "/v1/reports/"+rep.ID+"/html" || rep.Summary != summary.String() {
+		t.Fatalf("report: %+v", rep)
+	}
+	code, page := h.raw(rep.HTMLURL, true)
+	if code != 200 || !strings.Contains(page, "<h1>"+rep.Title+"</h1>") || !strings.Contains(page, `href="#src-1"`) || !strings.Contains(page, "<table>") {
+		t.Fatalf("html %d: %.400s", code, page)
+	}
+	if code, _ := h.raw(rep.HTMLURL, false); code != 401 {
+		t.Fatalf("html without token: %d", code)
+	}
+	var list struct {
+		Items []struct{ ID string } `json:"items"`
+	}
+	h.do("GET", "/v1/reports?status=done", nil, 200, &list)
+	if len(list.Items) != 1 {
+		t.Fatalf("list: %+v", list)
+	}
+
+	// Follow-up streams an answer and appends it to the report.
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups", map[string]string{"question": "欧洲市场的关税影响多大？"}, 202, &tk)
+	answer := ""
+	for _, ev := range h.streamEvents(tk.ID, 0) {
+		answer += ev.Delta
+	}
+	if answer == "" {
+		t.Fatal("no streamed answer")
+	}
+	if _, page = h.raw(rep.HTMLURL, true); !strings.Contains(page, "追问：欧洲市场的关税影响多大？") {
+		t.Fatal("follow-up not appended")
+	}
+
+	// Shares: full and summary-only, public, revocable.
+	var full, sum struct {
+		ID  string `json:"id"`
+		URL string `json:"url"`
+	}
+	h.do("POST", "/v1/reports/"+rep.ID+"/shares", map[string]string{"scope": "full"}, 201, &full)
+	h.do("POST", "/v1/reports/"+rep.ID+"/shares", map[string]string{"scope": "summary"}, 201, &sum)
+	path := func(u string) string { return u[strings.Index(u, "/s/"):] }
+	if code, page := h.raw(path(full.URL), false); code != 200 || !strings.Contains(page, "来源") || !strings.Contains(page, "og:title") {
+		t.Fatalf("full share %d", code)
+	}
+	if code, page := h.raw(path(sum.URL), false); code != 200 || strings.Contains(page, "<article>") || !strings.Contains(page, rep.Summary) {
+		t.Fatalf("summary share %d: %.300s", code, page)
+	}
+	h.do("DELETE", "/v1/shares/"+full.ID, nil, 204, nil)
+	if code, _ := h.raw(path(full.URL), false); code != 404 {
+		t.Fatalf("revoked share: %d", code)
+	}
+
+	h.do("GET", "/v1/reports/"+rep.ID+"/pdf", nil, 503, &e)
+	h.do("DELETE", "/v1/reports/"+rep.ID, nil, 204, nil)
+	h.do("GET", "/v1/reports/"+rep.ID, nil, 404, nil)
+}
+
+func TestReportQuota(t *testing.T) {
+	h := setup(t)
+	h.login(randomPhone())
+	for i := 0; i < 5; i++ {
+		var tk struct{ ID string }
+		h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": fmt.Sprintf("题目 %d", i), "depth": "quick"}, 202, &tk)
+		h.streamEvents(tk.ID, 0) // wait, so the concurrency cap does not trigger first
+	}
+	var e apiError
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "第六份"}, 403, &e)
+	if e.Code != "quota_exceeded" {
+		t.Fatalf("got %+v", e)
+	}
+	var me session
+	h.do("GET", "/v1/me", nil, 200, &me.Me)
+	if me.Me.Quota.Reports.Used != 5 {
+		t.Fatalf("quota: %+v", me.Me.Quota)
+	}
+}
+
+func TestDraftTemplate(t *testing.T) {
+	h := setup(t)
+	h.login(randomPhone())
+	var in struct {
+		Name     string                   `json:"name"`
+		Sections []struct{ Title string } `json:"sections"`
+	}
+	h.do("POST", "/v1/templates/draft", map[string]string{"prompt": "每天汇总我关注的几个关键词的新闻"}, 200, &in)
+	if in.Name == "" || len(in.Sections) == 0 {
+		t.Fatalf("draft: %+v", in)
+	}
+	var created struct{ ID, Kind string }
+	h.do("POST", "/v1/templates", in, 201, &created)
+	if created.Kind != "custom" {
+		t.Fatalf("created: %+v", created)
+	}
+}

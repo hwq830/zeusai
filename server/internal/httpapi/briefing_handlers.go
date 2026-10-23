@@ -70,7 +70,15 @@ func (s *Server) CopyTemplate(ctx context.Context, req gen.CopyTemplateRequestOb
 }
 
 func (s *Server) DraftTemplate(ctx context.Context, req gen.DraftTemplateRequestObject) (gen.DraftTemplateResponseObject, error) {
-	return nil, errNotImplemented
+	u, err := s.currentUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	in, err := s.Templates.Draft(ctx, u.ID, u.Timezone, req.Body.Prompt)
+	if err != nil {
+		return nil, err
+	}
+	return gen.DraftTemplate200JSONResponse(recode[gen.TemplateInput](in)), nil
 }
 
 // ---- subscriptions

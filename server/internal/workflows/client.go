@@ -110,6 +110,10 @@ func (c *Client) StartReport(ctx context.Context, run orch.ReportRun) error {
 	return c.start(ctx, run.TaskID, ReportWorkflowName, run)
 }
 
+func (c *Client) StartFollowup(ctx context.Context, run orch.FollowupRun) error {
+	return c.start(ctx, run.TaskID, FollowupWorkflowName, run)
+}
+
 func (c *Client) CancelTask(ctx context.Context, taskID uuid.UUID) error {
 	return c.C.CancelWorkflow(ctx, orch.WorkflowID(taskID), "")
 }

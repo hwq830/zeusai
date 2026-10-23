@@ -83,7 +83,7 @@ func (q *Queries) CompleteReport(ctx context.Context, arg CompleteReportParams) 
 }
 
 const countReportsSince = `-- name: CountReportsSince :one
-SELECT count(*)::int FROM reports WHERE user_id = $1 AND created_at >= $2
+SELECT count(*)::int FROM reports WHERE user_id = $1 AND created_at >= $2 AND status <> 'failed'
 `
 
 type CountReportsSinceParams struct {

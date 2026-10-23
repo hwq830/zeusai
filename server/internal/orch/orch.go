@@ -25,11 +25,20 @@ type ReportRun struct {
 	ReportID uuid.UUID
 }
 
+// FollowupRun answers one question about a finished report.
+type FollowupRun struct {
+	UserID   uuid.UUID
+	TaskID   uuid.UUID
+	ReportID uuid.UUID
+	Question string
+}
+
 type Client interface {
 	UpsertBriefingSchedule(ctx context.Context, userID, subscriptionID uuid.UUID, s schedule.Schedule, paused bool) error
 	DeleteBriefingSchedule(ctx context.Context, subscriptionID uuid.UUID) error
 	StartBriefing(ctx context.Context, run BriefingRun) error
 	StartReport(ctx context.Context, run ReportRun) error
+	StartFollowup(ctx context.Context, run FollowupRun) error
 	CancelTask(ctx context.Context, taskID uuid.UUID) error
 	SendTaskMessage(ctx context.Context, taskID uuid.UUID, text string) error
 	ResolveConfirm(ctx context.Context, taskID uuid.UUID, confirmID, decision string) error

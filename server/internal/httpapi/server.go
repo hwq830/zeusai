@@ -25,6 +25,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/report"
 	"github.com/hwq830/zeusai/server/internal/task"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
@@ -39,6 +40,7 @@ type Server struct {
 	Briefings  *briefing.Service
 	Tasks      *task.Service
 	Connectors *connector.Service
+	Reports    *report.Service
 	Bus        *events.Bus
 	// SSEPing is the keep-alive interval for event streams.
 	SSEPing time.Duration
@@ -51,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	r.Get("/s/{token}", s.sharePage)
 
 	strict := gen.NewStrictHandlerWithOptions(s, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -161,8 +164,6 @@ func deref[T any](p *T) T {
 	}
 	return *p
 }
-
-var errNotImplemented = apperr.NotImplemented()
 
 func isNotFound(err error) bool {
 	var e *apperr.Error

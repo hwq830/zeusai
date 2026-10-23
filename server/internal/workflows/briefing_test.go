@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 
 	"github.com/hwq830/zeusai/server/internal/db"
@@ -118,5 +120,38 @@ func TestScheduledBriefingPausesWhenUnread(t *testing.T) {
 	f.run(t, f.now, orch.BriefingRun{UserID: f.user.ID, SubscriptionID: sub.ID, Scheduled: true})
 	if len(f.pushes.Sent) != 2 {
 		t.Fatalf("paused subscription pushed again: %+v", f.pushes.Sent)
+	}
+}
+
+func TestReportFailureIsRecordedAndNotCharged(t *testing.T) {
+	f := newFixture(t, time.Now())
+	ctx := context.Background()
+	task, err := f.q.CreateTask(ctx, db.CreateTaskParams{UserID: f.user.ID, Kind: "report", Title: "t", Input: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := f.q.CreateReport(ctx, db.CreateReportParams{UserID: f.user.ID, TaskID: &task.ID, Title: "t", Topic: "储能电池", Depth: "quick", Focuses: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var ts testsuite.WorkflowTestSuite
+	env := ts.NewTestWorkflowEnvironment()
+	env.RegisterWorkflow(workflows.ReportWorkflow)
+	env.RegisterActivity(f.acts)
+	env.OnActivity(f.acts.ResearchQuestion, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(workflows.QuestionNotes{}, temporal.NewNonRetryableApplicationError("search down", "test", nil))
+	env.ExecuteWorkflow(workflows.ReportWorkflow, orch.ReportRun{UserID: f.user.ID, TaskID: task.ID, ReportID: rep.ID})
+	if env.GetWorkflowError() == nil {
+		t.Fatal("expected workflow error")
+	}
+
+	rep, _ = f.q.GetReport(ctx, db.GetReportParams{ID: rep.ID, UserID: f.user.ID})
+	task, _ = f.q.GetTask(ctx, db.GetTaskParams{ID: task.ID, UserID: f.user.ID})
+	if rep.Status != "failed" || task.Status != "failed" || task.Error == nil {
+		t.Fatalf("report %s task %s err %s", rep.Status, task.Status, task.Error)
+	}
+	if n, _ := f.q.CountReportsSince(ctx, db.CountReportsSinceParams{UserID: f.user.ID, CreatedAt: time.Now().Add(-time.Hour)}); n != 0 {
+		t.Fatalf("failed report counted against quota: %d", n)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"sort"
 )
 
-//go:embed briefing briefing-templates
+//go:embed briefing briefing-templates report
 var FS embed.FS
 
 // Version is a short content hash over every embedded file.

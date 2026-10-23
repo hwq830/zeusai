@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -40,6 +41,16 @@ func (Mock) Complete(_ context.Context, req Request) (Response, error) {
 		out = map[string]string{"headline": h}
 	case "subscription.draft":
 		out = mockSubscriptionDraft(user)
+	case "template.draft":
+		out = mockTemplateDraft(user)
+	case "report.plan":
+		out = mockReportPlan(user, req.System)
+	case "report.research":
+		out = mockResearch(user)
+	case "report.write":
+		out = mockWrite(user)
+	case "report.followup":
+		out = map[string]string{"answer": "根据报告内容，" + user + " 的答案见正文第一节 [1]。"}
 	default:
 		out = map[string]string{"text": "mock: " + user}
 	}
@@ -103,4 +114,61 @@ func mockSubscriptionDraft(prompt string) any {
 		freq = "weekly"
 	}
 	return map[string]any{"name": "我的简报", "topics": topics, "freq": freq, "time": t}
+}
+
+var questionsRe = regexp.MustCompile(`(\d+) 个互不重叠的子问题`)
+
+func mockReportPlan(topic, system string) any {
+	n := 3
+	if m := questionsRe.FindStringSubmatch(system); m != nil {
+		fmt.Sscan(m[1], &n)
+	}
+	angles := []string{"现状与规模", "主要参与者", "技术路线", "政策环境", "商业模式", "风险", "未来趋势"}
+	qs := []map[string]any{}
+	for i := 0; i < n && i < len(angles); i++ {
+		qs = append(qs, map[string]any{"question": topic + "：" + angles[i], "queries": []string{topic + " " + angles[i]}})
+	}
+	return map[string]any{"title": topic + "调研", "questions": qs}
+}
+
+func mockResearch(user string) any {
+	type src struct {
+		Index   int    `json:"index"`
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	var sources []src
+	if m := sourcesRe.FindStringSubmatch(user); m != nil {
+		_ = json.Unmarshal([]byte(m[1]), &sources)
+	}
+	var b strings.Builder
+	for _, s := range sources {
+		fmt.Fprintf(&b, "- %s [%d]\n", s.Content, s.Index)
+	}
+	return map[string]string{"notes": b.String()}
+}
+
+var notesRe = regexp.MustCompile(`(?s)<notes>(.*?)</notes>`)
+
+func mockWrite(user string) any {
+	notes := ""
+	if m := notesRe.FindStringSubmatch(user); m != nil {
+		notes = strings.ReplaceAll(m[1], "### ", "## ")
+	}
+	md := "## 核心结论\n\n- 结论一 [1]\n- 结论二\n\n" + notes + "## 风险与不确定性\n\n- 以上为模拟数据。\n\n| 指标 | 数值 |\n| --- | --- |\n| 示例 | 42 |\n"
+	return map[string]string{"summary": "这是一份由模拟模型生成的报告摘要，用于开发联调。", "markdown": md}
+}
+
+func mockTemplateDraft(prompt string) any {
+	return map[string]any{
+		"name": "自定义简报", "description": prompt,
+		"fields": []map[string]any{{"key": "keywords", "label": "关键词", "type": "tags", "required": true, "max": 5}},
+		"sections": []map[string]any{
+			{"key": "news", "title": "最新动态", "instruction": "{{keywords}} 的最新消息", "maxItems": 5},
+			{"key": "analysis", "title": "观点与分析", "instruction": "关于 {{keywords}} 的评论和分析", "maxItems": 3},
+		},
+		"sources":         []map[string]any{{"type": "search", "value": "{{keywords}}"}},
+		"defaultSchedule": map[string]any{"freq": "daily", "time": "08:00", "tz": "Asia/Shanghai"},
+		"defaultLength":   "standard",
+	}
 }

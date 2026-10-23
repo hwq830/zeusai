@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"regexp"
 	"strings"
+	texttemplate "text/template"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,7 @@ import (
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 )
 
@@ -217,7 +219,10 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-type Service struct{ Q *db.Queries }
+type Service struct {
+	Q   *db.Queries
+	LLM llm.Provider
+}
 
 type ListParams struct {
 	Scope, Category, Q string
@@ -398,4 +403,40 @@ func (s *Service) SeedOfficial(ctx context.Context) (int, error) {
 		}
 	}
 	return len(files), nil
+}
+
+// Draft turns one sentence into a template draft; nothing is saved.
+func (s *Service) Draft(ctx context.Context, userID uuid.UUID, tz, prompt string) (Input, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return Input{}, apperr.Invalid("请描述你想要的简报模板")
+	}
+	sys, err := renderPrompt("briefing/draft_template.md", map[string]any{"TZ": tz})
+	if err != nil {
+		return Input{}, apperr.Internal(err)
+	}
+	var in Input
+	if _, err := llm.CompleteJSON(ctx, s.LLM, llm.Request{
+		Purpose: "template.draft", Tier: llm.TierStrong, System: sys,
+		Messages: []llm.Message{{Role: "user", Content: prompt}}, UserID: &userID,
+	}, &in); err != nil {
+		return Input{}, apperr.Unavailable("没能生成模板，换个说法试试").WithCause(err)
+	}
+	if in.DefaultSchedule != nil {
+		in.DefaultSchedule.TZ = tz
+	}
+	if err := in.Validate(); err != nil {
+		return Input{}, apperr.Unavailable("没能生成可用的模板，换个说法试试").WithCause(err)
+	}
+	return in, nil
+}
+
+func renderPrompt(name string, data any) (string, error) {
+	t, err := texttemplate.ParseFS(prompts.FS, name)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	err = t.Execute(&b, data)
+	return b.String(), err
 }
