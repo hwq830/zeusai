@@ -2,6 +2,8 @@
 
 Zeus（暂定名）是一款全云端运行的个人 AI 助理，面向 C 端用户，先做中国市场，再拓展海外。每个任务在独立的云端沙箱中执行，用户只需一个 iOS App 即可使用。
 
+本仓库存放服务端、沙箱、接口契约等代码。iOS 客户端代码在 [hwq830/zeusai-ios](https://github.com/hwq830/zeusai-ios)。
+
 ## MVP 场景
 
 - **每日简报**：官方模板 + 用户自定义模板，按计划定时生成并推送
@@ -20,17 +22,16 @@ Zeus（暂定名）是一款全云端运行的个人 AI 助理，面向 C 端用
 | 基础设施 | 阿里云 + 托管 Kubernetes |
 | 接口契约 | REST + OpenAPI，流式输出用 SSE |
 
-## 仓库结构（monorepo）
+## 仓库结构
 
 ```
 zeusai/
-├── ios/                    # iOS 原生客户端（SwiftUI）
 ├── server/                 # Go 服务端：api / orchestrator / modelgw / sandboxmgr / egress
 ├── sandbox/                # 沙箱镜像与沙箱内守护进程 sandboxd
 ├── web/
 │   ├── report-template/    # 报告 HTML 模板（App WebView / H5 分享页 / PDF 共用）
 │   └── admin/              # 运营后台
-├── api/                    # OpenAPI 契约，客户端与服务端代码由此生成
+├── api/                    # OpenAPI 契约，服务端与 iOS 客户端代码由此生成
 ├── prompts/                # 提示词与简报模板
 ├── evals/                  # 评测集与评测脚本
 └── deploy/                 # K8s 清单、Helm、基础设施配置

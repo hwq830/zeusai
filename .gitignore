@@ -8,12 +8,6 @@
 *.test
 *.out
 
-# Xcode / Swift
-xcuserdata/
-DerivedData/
-.build/
-*.xcworkspace/xcuserdata/
-
 # Node
 node_modules/
 dist/
