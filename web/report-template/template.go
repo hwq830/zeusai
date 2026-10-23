@@ -3,12 +3,12 @@
 package reporttemplate
 
 import (
-	"strings"
 	"bytes"
 	_ "embed"
 	"html/template"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
