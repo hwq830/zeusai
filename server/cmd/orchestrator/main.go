@@ -18,7 +18,6 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
-	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
 
@@ -72,11 +71,15 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	notifier, err := providers.Push(cfg, q, log)
+	if err != nil {
+		return err
+	}
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{})
 	workflows.Register(w, &workflows.Activities{
 		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
 		Search: searcher, Browse: reader, Tools: &connector.Toolbox{Q: q},
-		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: &push.Log{L: log},
+		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: notifier,
 	})
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)
 	return w.Run(worker.InterruptCh())

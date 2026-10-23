@@ -63,7 +63,9 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	ids := providers.Identities(cfg, log)
 	srv := httpapi.New(httpapi.Deps{
+		SMS: ids.SMS, Apple: ids.Apple, Wechat: ids.Wechat, OneClick: ids.OneClick,
 		Log: log, Pool: pool, Redis: rdb, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
 		LLM: model, Mod: mod, Blob: providers.Blob(cfg), Config: cfg,
 	})

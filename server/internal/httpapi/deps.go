@@ -25,20 +25,36 @@ import (
 )
 
 type Deps struct {
-	Log    *slog.Logger
-	Pool   *pgxpool.Pool
-	Redis  *redis.Client
-	Orch   orch.Client
-	LLM    llm.Provider
-	Mod    moderation.Checker // nil allows everything (dev)
-	Blob   blob.Store         // nil: PDF export unavailable
-	Config config.Config
-	Now    func() time.Time
+	Log   *slog.Logger
+	Pool  *pgxpool.Pool
+	Redis *redis.Client
+	Orch  orch.Client
+	LLM   llm.Provider
+	Mod   moderation.Checker // nil allows everything (dev)
+	Blob  blob.Store         // nil: PDF export unavailable
+	// Identity providers; nil fields fall back to the dev fakes (tests).
+	SMS      auth.SMSSender
+	Apple    auth.AppleVerifier
+	Wechat   auth.WechatExchanger
+	OneClick auth.OneClickVerifier
+	Config   config.Config
+	Now      func() time.Time
 }
 
-// New wires the domain services. Identity providers are the dev fakes until the Aliyun,
-// Apple and WeChat accounts exist; config.Load refuses dev settings outside dev.
+// New wires the domain services.
 func New(d Deps) *Server {
+	if d.SMS == nil {
+		d.SMS = auth.LogSMSSender{Log: d.Log}
+	}
+	if d.Apple == nil {
+		d.Apple = auth.DevApple{}
+	}
+	if d.Wechat == nil {
+		d.Wechat = auth.DevWechat{}
+	}
+	if d.OneClick == nil {
+		d.OneClick = auth.DevOneClick{}
+	}
 	q := db.New(d.Pool)
 	tokens := auth.NewTokens(d.Config.JWTSecret, d.Config.AccessTTL)
 	qs := &quota.Service{Q: q, Now: d.Now}
@@ -47,7 +63,7 @@ func New(d Deps) *Server {
 		Log: d.Log, Q: q, Tokens: tokens, Quota: qs, Templates: tpl,
 		Auth: &auth.Service{
 			Q: q, Redis: d.Redis, Tokens: tokens, RefreshTTL: d.Config.RefreshTTL,
-			SMS: auth.LogSMSSender{Log: d.Log}, Apple: auth.DevApple{}, Wechat: auth.DevWechat{}, OneClick: auth.DevOneClick{},
+			SMS: d.SMS, Apple: d.Apple, Wechat: d.Wechat, OneClick: d.OneClick,
 			FixedSMSCode: d.Config.DevSMSCode,
 		},
 		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Now: d.Now},

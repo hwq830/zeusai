@@ -96,7 +96,7 @@ func (s *Service) VerifySMSCode(ctx context.Context, phone, code string) (Sessio
 func (s *Service) LoginOneClick(ctx context.Context, token string) (Session, error) {
 	phone, err := s.OneClick.PhoneNumber(ctx, token)
 	if err != nil {
-		return Session{}, apperr.Unauthenticated("一键登录失败，请改用验证码登录").WithCause(err)
+		return Session{}, providerErr(err, "一键登录失败，请改用验证码登录")
 	}
 	return s.loginByPhone(ctx, phone)
 }
@@ -117,7 +117,7 @@ func (s *Service) loginByPhone(ctx context.Context, phone string) (Session, erro
 func (s *Service) LoginApple(ctx context.Context, identityToken, nickname string) (Session, error) {
 	sub, err := s.Apple.Verify(ctx, identityToken)
 	if err != nil {
-		return Session{}, apperr.Unauthenticated("Apple 登录失败").WithCause(err)
+		return Session{}, providerErr(err, "Apple 登录失败")
 	}
 	u, err := s.Q.GetUserByAppleSub(ctx, &sub)
 	isNew := false
@@ -137,7 +137,7 @@ func (s *Service) LoginApple(ctx context.Context, identityToken, nickname string
 func (s *Service) LoginWechat(ctx context.Context, code string) (Session, error) {
 	id, err := s.Wechat.Exchange(ctx, code)
 	if err != nil {
-		return Session{}, apperr.Unauthenticated("微信登录失败").WithCause(err)
+		return Session{}, providerErr(err, "微信登录失败")
 	}
 	u, err := s.Q.GetUserByWechatUnionID(ctx, &id.UnionID)
 	isNew := false
@@ -199,3 +199,17 @@ func maskPhone(p string) string {
 
 // MaskPhone is exported for the profile response.
 func MaskPhone(p string) string { return maskPhone(p) }
+
+// providerErr maps an identity provider failure: a rejected credential is the user's
+// problem (401), anything else (network, provider outage, config) is retryable.
+func providerErr(err error, rejected string) error {
+	var ae *apperr.Error
+	switch {
+	case errors.As(err, &ae):
+		return ae
+	case errors.Is(err, ErrProviderRejected):
+		return apperr.Unauthenticated(rejected).WithCause(err)
+	default:
+		return apperr.Unavailable("登录服务暂时不可用，请稍后再试").WithCause(err)
+	}
+}

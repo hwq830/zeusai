@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+
+	"github.com/hwq830/zeusai/server/internal/apperr"
 )
 
 // Identity providers. Production implementations call Aliyun SMS / 号码认证, Apple and
@@ -72,3 +74,17 @@ func (DevOneClick) PhoneNumber(_ context.Context, tok string) (string, error) {
 	}
 	return "", ErrProviderRejected
 }
+
+// Unconfigured stands in for a provider whose account is not set up yet (outside dev).
+type Unconfigured struct{}
+
+func unconfigured() error {
+	return apperr.Unavailable("该登录方式暂未开放，请使用其他方式登录")
+}
+
+func (Unconfigured) SendCode(context.Context, string, string) error { return unconfigured() }
+func (Unconfigured) Verify(context.Context, string) (string, error) { return "", unconfigured() }
+func (Unconfigured) Exchange(context.Context, string) (WechatIdentity, error) {
+	return WechatIdentity{}, unconfigured()
+}
+func (Unconfigured) PhoneNumber(context.Context, string) (string, error) { return "", unconfigured() }

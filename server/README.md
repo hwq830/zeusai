@@ -57,6 +57,13 @@ go run ./server/cmd/orchestrator &
 | 博查搜索 | `ZEUS_SEARCH_PROVIDER=bocha`、`ZEUS_BOCHA_API_KEY`；网页读取走 `ZEUS_EGRESS_PROXY`（可选） |
 | 高德 MCP | `ZEUS_MCP_AMAP_URL`（含 key 的完整 Streamable HTTP 地址） |
 | PDF 导出 | api 和 orchestrator 都设 `ZEUS_BLOB_DIR`（同一目录）；orchestrator 设 `ZEUS_CHROMIUM_PATH`，容器里以 root 运行时加 `ZEUS_CHROMIUM_NO_SANDBOX=true` |
+| 短信验证码 | `ZEUS_ALIYUN_ACCESS_KEY_ID`、`ZEUS_ALIYUN_ACCESS_KEY_SECRET`、`ZEUS_SMS_SIGN_NAME`、`ZEUS_SMS_TEMPLATE_CODE`（模板变量 `${code}`） |
+| 一键登录 | 同上 AccessKey，加 `ZEUS_ONECLICK_ENABLED=true` |
+| Apple 登录 | `ZEUS_APPLE_CLIENT_IDS`（Bundle ID，多个用逗号分隔） |
+| 微信登录 | `ZEUS_WECHAT_APP_ID`、`ZEUS_WECHAT_SECRET`（App 需绑定开放平台账号，才有 unionid） |
+| APNs 推送 | `ZEUS_APNS_KEY_FILE`（.p8）、`ZEUS_APNS_KEY_ID`、`ZEUS_APNS_TEAM_ID`、`ZEUS_APNS_TOPIC` |
+
+非 dev 环境里，没配置的登录方式会返回 `unavailable`（“该登录方式暂未开放”），不会退回到假实现。
 
 ## 测试
 

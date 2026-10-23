@@ -39,6 +39,21 @@ type Config struct {
 	// ChromiumPath enables PDF printing in the orchestrator.
 	ChromiumPath      string `koanf:"chromium_path"`
 	ChromiumNoSandbox bool   `koanf:"chromium_no_sandbox"`
+
+	// Identity and push providers. Each one is used when its settings are present; otherwise
+	// dev gets the fakes and other environments answer "not available yet".
+	AliyunAccessKeyID     string `koanf:"aliyun_access_key_id"`
+	AliyunAccessKeySecret string `koanf:"aliyun_access_key_secret"`
+	SMSSignName           string `koanf:"sms_sign_name"`
+	SMSTemplateCode       string `koanf:"sms_template_code"`
+	OneClickEnabled       bool   `koanf:"oneclick_enabled"` // Aliyun 号码认证, same AccessKey
+	AppleClientIDs        string `koanf:"apple_client_ids"` // comma-separated audiences
+	WechatAppID           string `koanf:"wechat_app_id"`
+	WechatSecret          string `koanf:"wechat_secret"`
+	APNsKeyFile           string `koanf:"apns_key_file"` // .p8
+	APNsKeyID             string `koanf:"apns_key_id"`
+	APNsTeamID            string `koanf:"apns_team_id"`
+	APNsTopic             string `koanf:"apns_topic"` // bundle id
 }
 
 func defaults() Config {
