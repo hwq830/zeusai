@@ -1,0 +1,23 @@
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go
+/bin/
+*.test
+*.out
+
+# Xcode / Swift
+xcuserdata/
+DerivedData/
+.build/
+*.xcworkspace/xcuserdata/
+
+# Node
+node_modules/
+dist/
+
+# Env
+.env
+.env.*
