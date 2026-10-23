@@ -1,0 +1,1592 @@
+openapi: 3.0.3
+info:
+  title: Zeus API
+  version: 0.1.0
+  description: |
+    Zeus App 与服务端之间的唯一接口契约。iOS 客户端用 swift-openapi-generator 生成，
+    服务端用 oapi-codegen（strict server）生成接口层。
+
+    约定：
+    - 所有业务接口挂在 `/v1` 下，只加字段不删字段。客户端必须忽略未知字段、未知枚举值和未知事件类型。
+    - 鉴权：`Authorization: Bearer <accessToken>`。访问令牌 15 分钟，刷新令牌 30 天。
+    - 时间均为 RFC 3339（UTC）；日期为 `YYYY-MM-DD`（用户时区）。
+    - 列表接口统一用 `cursor` + `limit` 分页，响应带 `nextCursor`，为空表示没有更多。
+    - 错误统一返回 `Error`：`{code, message, retryable}`。App 按 `code` 展示提示，`message` 可直接给用户看。
+    - 任务进度走 SSE：`GET /v1/tasks/{taskId}/events`，事件格式见 `TaskEvent`。
+    - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`。
+servers:
+  - url: https://api.zeus.example.com
+    description: 生产（域名待定）
+  - url: http://localhost:8080
+    description: 本地开发
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+  - name: me
+  - name: devices
+  - name: templates
+  - name: subscriptions
+  - name: briefings
+  - name: reports
+  - name: shares
+  - name: tasks
+  - name: connectors
+  - name: memories
+
+paths:
+  # ---------------------------------------------------------------- auth
+  /v1/auth/sms/send:
+    post:
+      tags: [auth]
+      operationId: sendSmsCode
+      summary: 发送短信验证码
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendSmsCodeRequest' }
+      responses:
+        '204': { description: 已发送 }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/sms/verify:
+    post:
+      tags: [auth]
+      operationId: verifySmsCode
+      summary: 短信验证码登录（新用户自动注册）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifySmsCodeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/phone/oneclick:
+    post:
+      tags: [auth]
+      operationId: loginPhoneOneClick
+      summary: 运营商一键登录（阿里云号码认证 token）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PhoneOneClickRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/apple:
+    post:
+      tags: [auth]
+      operationId: loginApple
+      summary: Apple 登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppleLoginRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/wechat:
+    post:
+      tags: [auth]
+      operationId: loginWechat
+      summary: 微信登录（OpenSDK 授权 code）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WechatLoginRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refreshSession
+      summary: 用刷新令牌换新令牌（刷新令牌轮换，旧的立即失效）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: 退出登录（吊销该刷新令牌）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: 已退出 }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- me
+  /v1/me:
+    get:
+      tags: [me]
+      operationId: getMe
+      summary: 当前用户、套餐与额度
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [me]
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMeRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [me]
+      operationId: deleteAccount
+      summary: 注销账号（硬删除全部数据，不可恢复）
+      responses:
+        '204': { description: 已注销 }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- devices
+  /v1/devices:
+    post:
+      tags: [devices]
+      operationId: registerDevice
+      summary: 注册或更新推送设备（APNs token），幂等
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterDeviceRequest' }
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/devices/{pushToken}:
+    delete:
+      tags: [devices]
+      operationId: unregisterDevice
+      parameters:
+        - name: pushToken
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- templates
+  /v1/templates:
+    get:
+      tags: [templates]
+      operationId: listTemplates
+      summary: 模板列表（官方模板库 / 我的模板）
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [official, mine]
+            default: official
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          description: 按名称、描述搜索
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [templates]
+      operationId: createTemplate
+      summary: 新建自定义模板（仅自己可见）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TemplateInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/templates/draft:
+    post:
+      tags: [templates]
+      operationId: draftTemplate
+      summary: 一句话生成模板草稿（不落库，用户确认后再 createTemplate）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DraftRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplateInput' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/templates/{templateId}:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    get:
+      tags: [templates]
+      operationId: getTemplate
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [templates]
+      operationId: updateTemplate
+      summary: 修改自定义模板（官方模板不可改，可先复制）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TemplateInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [templates]
+      operationId: deleteTemplate
+      responses:
+        '204': { description: Deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/templates/{templateId}/copy:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    post:
+      tags: [templates]
+      operationId: copyTemplate
+      summary: 复制模板为我的模板
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Template' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- subscriptions
+  /v1/briefing-subscriptions:
+    get:
+      tags: [subscriptions]
+      operationId: listSubscriptions
+      summary: 我的定时简报
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubscriptionList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [subscriptions]
+      operationId: createSubscription
+      summary: 新建定时简报。超过套餐上限返回 403 quota_exceeded
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubscriptionInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefing-subscriptions/draft:
+    post:
+      tags: [subscriptions]
+      operationId: draftSubscription
+      summary: 一句话解析成定时简报草稿（不落库）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DraftRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubscriptionInput' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefing-subscriptions/{subscriptionId}:
+    parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+    get:
+      tags: [subscriptions]
+      operationId: getSubscription
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [subscriptions]
+      operationId: updateSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubscriptionPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Subscription' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [subscriptions]
+      operationId: deleteSubscription
+      responses:
+        '204': { description: Deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefing-subscriptions/{subscriptionId}/run:
+    parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+    post:
+      tags: [subscriptions]
+      operationId: runSubscription
+      summary: 立即生成一期（预览）。返回任务，进度走 SSE，完成事件带 briefingId
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- briefings
+  /v1/briefings:
+    get:
+      tags: [briefings]
+      operationId: listBriefings
+      summary: 历史简报，新的在前
+      parameters:
+        - name: subscriptionId
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BriefingList' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefings/today:
+    get:
+      tags: [briefings]
+      operationId: listTodayBriefings
+      summary: 今日简报（用户时区的今天，每个订阅最多一期，含完整内容）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TodayBriefings' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefings/{briefingId}:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    get:
+      tags: [briefings]
+      operationId: getBriefing
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Briefing' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefings/{briefingId}/feedback:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    put:
+      tags: [briefings]
+      operationId: putBriefingFeedback
+      summary: 对整期或单条打分（同一对象重复提交以最后一次为准）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Feedback' }
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- reports
+  /v1/reports:
+    get:
+      tags: [reports]
+      operationId: listReports
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ReportStatus' }
+        - name: q
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportList' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [reports]
+      operationId: getReport
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [reports]
+      operationId: deleteReport
+      responses:
+        '204': { description: Deleted }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}/html:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [reports]
+      operationId: getReportHtml
+      summary: 报告正文 HTML（App 用 WKWebView 带 Bearer 加载；与 H5 分享页同一模板）
+      responses:
+        '200':
+          description: OK
+          content:
+            text/html:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}/pdf:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [reports]
+      operationId: getReportPdf
+      summary: PDF 下载地址（短时签名链接）。尚未生成时返回 status=generating，稍后重试
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileLink' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}/followups:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [reports]
+      operationId: createReportFollowup
+      summary: 针对报告追问。返回任务，答案以 text_delta 事件流式返回，并追加到报告末尾
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FollowupRequest' }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}/shares:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [shares]
+      operationId: createShare
+      summary: 生成 H5 分享链接
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShareRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Share' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/shares/{shareId}:
+    parameters:
+      - name: shareId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [shares]
+      operationId: revokeShare
+      summary: 撤销分享，链接立即失效
+      responses:
+        '204': { description: Revoked }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- tasks
+  /v1/tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      parameters:
+        - name: active
+          in: query
+          description: true 只返回未结束的任务（queued / running / waiting_confirm）
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [tasks]
+      operationId: createTask
+      summary: 发起调研报告。超出本月额度返回 403 quota_exceeded
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTaskRequest' }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [tasks]
+      operationId: getTask
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/tasks/{taskId}/events:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [tasks]
+      operationId: streamTaskEvents
+      summary: 任务事件流（SSE）
+      description: |
+        `text/event-stream`。每条事件：
+        ```
+        id: <seq>
+        event: <type>
+        data: <TaskEvent JSON>
+        ```
+        - `seq` 从 1 开始，单任务内严格递增。断线后带 `Last-Event-ID`（或 `?after=`）重连，服务端从下一条续传。
+        - 服务端每 15 秒发一行 `: ping` 注释保活。
+        - 任务结束（completed / failed / cancelled）后服务端发完最后一条即关闭连接。
+        - 事件保留 24 小时；更早的任务直接读 `GET /v1/tasks/{taskId}`。
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          schema: { type: string }
+        - name: after
+          in: query
+          description: 与 Last-Event-ID 同义，二者都给时取较大者
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: SSE 事件流，每条 data 是一个 TaskEvent
+          content:
+            text/event-stream:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/tasks/{taskId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: sendTaskMessage
+      summary: 运行中补充要求，Agent 在下一步读取
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskMessageRequest' }
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/tasks/{taskId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: cancelTask
+      summary: 中止任务（已产出内容会尽量收尾保存）
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/tasks/{taskId}/confirmations/{confirmId}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+      - name: confirmId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [tasks]
+      operationId: resolveConfirmation
+      summary: 确认或拒绝一次写操作
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmationDecision' }
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- connectors
+  /v1/connectors:
+    get:
+      tags: [connectors]
+      operationId: listConnectors
+      summary: 内置工具 + 白名单 MCP 连接器，及我的开关和授权状态
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectorList' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/connectors/{connectorId}:
+    parameters:
+      - $ref: '#/components/parameters/ConnectorId'
+    patch:
+      tags: [connectors]
+      operationId: updateConnector
+      summary: 开关连接器。需要授权而未授权时开启返回 409 auth_required
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectorPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Connector' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/connectors/{connectorId}/authorize:
+    parameters:
+      - $ref: '#/components/parameters/ConnectorId'
+    post:
+      tags: [connectors]
+      operationId: authorizeConnector
+      summary: 开始授权。App 用 ASWebAuthenticationSession 打开 authUrl，完成后回调 zeus://oauth?connector={id}&status=ok|error
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthorizeResponse' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/connectors/{connectorId}/authorization:
+    parameters:
+      - $ref: '#/components/parameters/ConnectorId'
+    delete:
+      tags: [connectors]
+      operationId: revokeConnector
+      summary: 解除授权并删除凭证
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- memories
+  /v1/memories:
+    get:
+      tags: [memories]
+      operationId: listMemories
+      parameters:
+        - name: kind
+          in: query
+          schema: { $ref: '#/components/schemas/MemoryKind' }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemoryList' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [memories]
+      operationId: deleteAllMemories
+      summary: 清空全部记忆（硬删除，向量一起删）
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/memories/{memoryId}:
+    parameters:
+      - name: memoryId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [memories]
+      operationId: deleteMemory
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: 上一页响应里的 nextCursor
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: string }
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema: { type: string }
+    BriefingId:
+      name: briefingId
+      in: path
+      required: true
+      schema: { type: string }
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: { type: string }
+    ConnectorId:
+      name: connectorId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Session:
+      description: 登录成功
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Session' }
+
+  schemas:
+    # ------------------------------------------------------------ common
+    Error:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          description: |
+            已知取值（客户端需容忍新增）：
+            `unauthenticated` 令牌缺失或过期（先 refresh 再重试）、`forbidden`、`not_found`、
+            `invalid_argument`、`conflict`、`auth_required`（连接器需先授权）、
+            `quota_exceeded`（额度用尽，见 details.quota）、`content_blocked`（内容安全拦截）、
+            `rate_limited`、`sms_code_invalid`、`unavailable`、`internal`。
+          example: quota_exceeded
+        message:
+          type: string
+          description: 可直接展示给用户的中文说明
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+    Page:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+    DraftRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          maxLength: 500
+          example: 每天早上 8 点给我简报：科技新闻 + 我关注的公司
+    FileLink:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ready, generating]
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+
+    # ------------------------------------------------------------ auth
+    SendSmsCodeRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          description: E.164，如 +8613800138000
+    VerifySmsCodeRequest:
+      type: object
+      required: [phone, code]
+      properties:
+        phone: { type: string }
+        code: { type: string, minLength: 4, maxLength: 8 }
+    PhoneOneClickRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: 号码认证 SDK 返回的 token
+    AppleLoginRequest:
+      type: object
+      required: [identityToken]
+      properties:
+        identityToken: { type: string }
+        authorizationCode: { type: string }
+        nickname:
+          type: string
+          description: 首次授权时 Apple 给的姓名，仅首次有
+    WechatLoginRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    Session:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, isNewUser, me]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn:
+          type: integer
+          description: accessToken 剩余秒数
+        isNewUser: { type: boolean }
+        me: { $ref: '#/components/schemas/Me' }
+
+    # ------------------------------------------------------------ me
+    Me:
+      type: object
+      required: [user, plan, quota]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        plan: { $ref: '#/components/schemas/Plan' }
+        quota: { $ref: '#/components/schemas/Quota' }
+    User:
+      type: object
+      required: [id, nickname, timezone, createdAt, loginMethods]
+      properties:
+        id: { type: string }
+        nickname: { type: string }
+        avatarUrl: { type: string, format: uri }
+        phoneMasked:
+          type: string
+          example: 138****8000
+        timezone:
+          type: string
+          example: Asia/Shanghai
+        loginMethods:
+          type: array
+          items:
+            type: string
+            enum: [phone, wechat, apple]
+        createdAt: { type: string, format: date-time }
+    UpdateMeRequest:
+      type: object
+      properties:
+        nickname: { type: string, maxLength: 32 }
+        timezone: { type: string }
+    Plan:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          description: free / plus / pro（MVP 只有 free）
+          example: free
+        name: { type: string, example: 免费版 }
+        expiresAt: { type: string, format: date-time }
+    QuotaItem:
+      type: object
+      required: [used, limit]
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+        resetsAt:
+          type: string
+          format: date-time
+          description: 按周期重置的额度才有
+    Quota:
+      type: object
+      required: [briefingSubscriptions, reports]
+      properties:
+        briefingSubscriptions:
+          allOf: [{ $ref: '#/components/schemas/QuotaItem' }]
+          description: 可同时保留的定时简报数
+        reports:
+          allOf: [{ $ref: '#/components/schemas/QuotaItem' }]
+          description: 本月调研报告数
+
+    RegisterDeviceRequest:
+      type: object
+      required: [pushToken, platform]
+      properties:
+        pushToken: { type: string }
+        platform:
+          type: string
+          enum: [ios]
+        apnsEnv:
+          type: string
+          enum: [sandbox, production]
+          default: production
+        appVersion: { type: string }
+        locale: { type: string, example: zh-Hans }
+
+    # ------------------------------------------------------------ templates
+    TemplateFieldType:
+      type: string
+      enum: [text, tags, number, select, multiselect]
+    TemplateField:
+      type: object
+      required: [key, label, type, required]
+      properties:
+        key: { type: string, example: companies }
+        label: { type: string, example: 关注的公司 }
+        type: { $ref: '#/components/schemas/TemplateFieldType' }
+        required: { type: boolean }
+        placeholder: { type: string }
+        help: { type: string }
+        options:
+          type: array
+          description: select / multiselect 的可选项
+          items: { type: string }
+        max:
+          type: integer
+          description: tags / multiselect 最多个数；number 最大值；text 最大长度
+        min: { type: integer }
+    TemplateSection:
+      type: object
+      required: [key, title]
+      properties:
+        key: { type: string }
+        title: { type: string, example: 公司动态 }
+        instruction:
+          type: string
+          description: 给 Agent 的本节写作要求，可引用字段 {{companies}}
+        maxItems: { type: integer, default: 5 }
+    TemplateSource:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [search, site, rss, connector]
+        value:
+          type: string
+          description: search=检索词（可含 {{字段}}）；site=域名；rss=订阅地址；connector=连接器 id
+        label: { type: string }
+    Schedule:
+      type: object
+      required: [freq, time, tz]
+      properties:
+        freq:
+          type: string
+          enum: [daily, weekly, monthly]
+        weekdays:
+          type: array
+          description: weekly 时必填，1=周一 … 7=周日；daily 时可选，用于"仅工作日"
+          items: { type: integer, minimum: 1, maximum: 7 }
+        monthDay:
+          type: integer
+          minimum: 1
+          maximum: 28
+          description: monthly 时必填
+        time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: '08:00'
+          description: 推送时间（用户时区）；服务端会提前 15–30 分钟开始生成
+        tz:
+          type: string
+          example: Asia/Shanghai
+    BriefingLength:
+      type: string
+      enum: [short, standard, long]
+    TemplateInput:
+      type: object
+      required: [name, fields, sections]
+      properties:
+        name: { type: string, maxLength: 40 }
+        description: { type: string, maxLength: 200 }
+        category: { type: string }
+        icon:
+          type: string
+          description: SF Symbol 名
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateField' }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateSection' }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateSource' }
+        defaultSchedule: { $ref: '#/components/schemas/Schedule' }
+        defaultLength: { $ref: '#/components/schemas/BriefingLength' }
+        requiredConnectors:
+          type: array
+          items: { type: string }
+    Template:
+      allOf:
+        - $ref: '#/components/schemas/TemplateInput'
+        - type: object
+          required: [id, kind, version, createdAt, updatedAt]
+          properties:
+            id: { type: string }
+            kind:
+              type: string
+              enum: [official, custom]
+            version: { type: integer }
+            subscriberCount:
+              type: integer
+              description: 仅官方模板
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    TemplateList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items, categories]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Template' }
+            categories:
+              type: array
+              description: 所有分类，用于筛选条
+              items: { type: string }
+
+    # ------------------------------------------------------------ subscriptions
+    FieldValues:
+      type: object
+      description: 模板字段取值，key 为 TemplateField.key；值为 string / number / string[]
+      additionalProperties: true
+    SubscriptionInput:
+      type: object
+      required: [name, schedule]
+      properties:
+        templateId: { type: string }
+        name: { type: string, maxLength: 40 }
+        fieldValues: { $ref: '#/components/schemas/FieldValues' }
+        topics:
+          type: array
+          description: 自由关注点（不用模板时的主要输入）
+          items: { type: string }
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        length: { $ref: '#/components/schemas/BriefingLength' }
+        pushEnabled: { type: boolean, default: true }
+    SubscriptionPatch:
+      type: object
+      properties:
+        name: { type: string }
+        fieldValues: { $ref: '#/components/schemas/FieldValues' }
+        topics:
+          type: array
+          items: { type: string }
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        length: { $ref: '#/components/schemas/BriefingLength' }
+        pushEnabled: { type: boolean }
+        paused: { type: boolean }
+    Subscription:
+      allOf:
+        - $ref: '#/components/schemas/SubscriptionInput'
+        - type: object
+          required: [id, status, createdAt]
+          properties:
+            id: { type: string }
+            status:
+              type: string
+              enum: [active, paused]
+            pausedReason:
+              type: string
+              enum: [user, inactive]
+              description: inactive = 连续 7 天未打开，系统自动暂停
+            nextRunAt: { type: string, format: date-time }
+            lastBriefingId: { type: string }
+            createdAt: { type: string, format: date-time }
+    SubscriptionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Subscription' }
+
+    # ------------------------------------------------------------ briefings
+    Source:
+      type: object
+      required: [url, title]
+      properties:
+        url: { type: string, format: uri }
+        title: { type: string }
+        siteName: { type: string }
+        publishedAt: { type: string, format: date-time }
+    BriefingItem:
+      type: object
+      required: [id, title, summary, sources]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary:
+          type: string
+          description: 简单 Markdown（加粗、链接、列表）
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/Source' }
+        deepDivable:
+          type: boolean
+          description: 是否可"深入调研"（createTask 带 sourceBriefingItemId）
+    BriefingSection:
+      type: object
+      required: [key, title, items]
+      properties:
+        key: { type: string }
+        title: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/BriefingItem' }
+    BriefingStatus:
+      type: string
+      enum: [generating, ready, failed]
+    BriefingSummary:
+      type: object
+      required: [id, subscriptionId, title, date, status, itemCount, sourceCount]
+      properties:
+        id: { type: string }
+        subscriptionId: { type: string }
+        title: { type: string }
+        date: { type: string, format: date }
+        status: { $ref: '#/components/schemas/BriefingStatus' }
+        headline:
+          type: string
+          description: 一句话导语
+        itemCount: { type: integer }
+        sourceCount: { type: integer }
+        readAt: { type: string, format: date-time }
+        generatedAt: { type: string, format: date-time }
+    Briefing:
+      allOf:
+        - $ref: '#/components/schemas/BriefingSummary'
+        - type: object
+          required: [sections]
+          properties:
+            sections:
+              type: array
+              items: { $ref: '#/components/schemas/BriefingSection' }
+            taskId: { type: string }
+            feedback: { $ref: '#/components/schemas/FeedbackRating' }
+    BriefingList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/BriefingSummary' }
+    TodayBriefings:
+      type: object
+      required: [date, items]
+      properties:
+        date: { type: string, format: date }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Briefing' }
+        upcoming:
+          type: array
+          description: 今天还没到时间的订阅
+          items: { $ref: '#/components/schemas/Subscription' }
+    FeedbackRating:
+      type: string
+      enum: [useful, meh]
+    Feedback:
+      type: object
+      required: [rating]
+      properties:
+        rating: { $ref: '#/components/schemas/FeedbackRating' }
+        itemId:
+          type: string
+          description: 不填表示对整期打分
+        comment: { type: string, maxLength: 500 }
+
+    # ------------------------------------------------------------ reports
+    ReportStatus:
+      type: string
+      enum: [running, done, failed, cancelled]
+    ReportDepth:
+      type: string
+      enum: [quick, standard, deep]
+    Report:
+      type: object
+      required: [id, title, topic, depth, status, createdAt, taskId, sourceCount]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        topic: { type: string }
+        depth: { $ref: '#/components/schemas/ReportDepth' }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        summary:
+          type: string
+          description: 3–5 句摘要，列表和分享卡片用
+        taskId: { type: string }
+        sourceCount: { type: integer }
+        wordCount: { type: integer }
+        htmlUrl:
+          type: string
+          description: 相对路径 /v1/reports/{id}/html，done 时才有
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+    ReportList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Report' }
+    FollowupRequest:
+      type: object
+      required: [question]
+      properties:
+        question: { type: string, maxLength: 1000 }
+    ShareRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          type: string
+          enum: [full, summary]
+    Share:
+      type: object
+      required: [id, url, title, scope, createdAt]
+      properties:
+        id: { type: string }
+        url:
+          type: string
+          format: uri
+          description: H5 分享页，如 https://zeus.example.com/s/{token}
+        title: { type: string }
+        summary: { type: string }
+        scope:
+          type: string
+          enum: [full, summary]
+        createdAt: { type: string, format: date-time }
+
+    # ------------------------------------------------------------ tasks
+    TaskKind:
+      type: string
+      enum: [report, briefing, followup]
+    TaskStatus:
+      type: string
+      enum: [queued, running, waiting_confirm, done, failed, cancelled]
+    CreateTaskRequest:
+      type: object
+      required: [kind, topic]
+      properties:
+        kind:
+          type: string
+          enum: [report]
+          description: MVP 只开放 report；简报走订阅，追问走 followups
+        topic: { type: string, maxLength: 500 }
+        depth: { $ref: '#/components/schemas/ReportDepth' }
+        focuses:
+          type: array
+          description: 用户勾选的关注角度
+          items: { type: string }
+        sourceBriefingItemId:
+          type: string
+          description: 从简报条目"深入调研"发起时填
+    StepInfo:
+      type: object
+      required: [index, title]
+      properties:
+        index:
+          type: integer
+          description: 从 1 开始
+        title: { type: string, example: 搜索 2026 年新能源车销量 }
+        detail: { type: string }
+        tool:
+          type: string
+          description: search / browse / code / mcp:<connector> / write
+    Task:
+      type: object
+      required: [id, kind, status, title, createdAt, lastEventId]
+      properties:
+        id: { type: string }
+        kind: { $ref: '#/components/schemas/TaskKind' }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        title: { type: string }
+        reportId: { type: string }
+        briefingId: { type: string }
+        subscriptionId: { type: string }
+        currentStep: { $ref: '#/components/schemas/StepInfo' }
+        pendingConfirm: { $ref: '#/components/schemas/ConfirmRequest' }
+        lastEventId:
+          type: integer
+          format: int64
+          description: 已产生的最后一条事件序号，SSE 可从这里续
+        error: { $ref: '#/components/schemas/Error' }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    TaskList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Task' }
+    TaskMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, maxLength: 1000 }
+    ConfirmRequest:
+      type: object
+      required: [confirmId, title]
+      properties:
+        confirmId: { type: string }
+        title: { type: string, example: 在 GitHub 创建 issue }
+        detail:
+          type: string
+          description: 将要执行的具体内容（Markdown）
+        connectorId: { type: string }
+        expiresAt: { type: string, format: date-time }
+    ConfirmationDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, reject]
+    TaskEventType:
+      type: string
+      description: |
+        客户端必须忽略未知类型。
+        - `status` 任务状态变化（data: status）
+        - `step_started` / `step_done` 一个步骤开始 / 完成（step）
+        - `source_reading` 正在阅读的网页（source）
+        - `text_delta` 流式文本片段（delta），追问答案、报告摘要
+        - `confirm_required` 需要用户确认写操作（confirm）
+        - `confirm_resolved` 确认已处理（confirm.confirmId, decision）
+        - `completed` 任务完成（reportId / briefingId）
+        - `failed` 任务失败（error）
+        - `cancelled` 任务已中止
+      enum: [status, step_started, step_done, source_reading, text_delta, confirm_required, confirm_resolved, completed, failed, cancelled]
+    TaskEvent:
+      type: object
+      required: [seq, type, taskId, at]
+      properties:
+        seq:
+          type: integer
+          format: int64
+        type:
+          type: string
+          description: 见 TaskEventType；用 string 以便客户端容忍新类型
+        taskId: { type: string }
+        at: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        step: { $ref: '#/components/schemas/StepInfo' }
+        source: { $ref: '#/components/schemas/Source' }
+        delta: { type: string }
+        confirm: { $ref: '#/components/schemas/ConfirmRequest' }
+        decision:
+          type: string
+          enum: [approve, reject, expired]
+        reportId: { type: string }
+        briefingId: { type: string }
+        error: { $ref: '#/components/schemas/Error' }
+
+    # ------------------------------------------------------------ connectors
+    ConnectorTool:
+      type: object
+      required: [name, write]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        write:
+          type: boolean
+          description: 写操作，调用前一律需要用户确认
+    Connector:
+      type: object
+      required: [id, name, kind, enabled, requiresAuth, authorized]
+      properties:
+        id: { type: string, example: github }
+        name: { type: string }
+        description: { type: string }
+        iconUrl: { type: string, format: uri }
+        kind:
+          type: string
+          enum: [builtin, mcp]
+        category: { type: string }
+        enabled: { type: boolean }
+        requiresAuth: { type: boolean }
+        authorized: { type: boolean }
+        tools:
+          type: array
+          items: { $ref: '#/components/schemas/ConnectorTool' }
+    ConnectorList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Connector' }
+    ConnectorPatch:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    AuthorizeResponse:
+      type: object
+      required: [authUrl]
+      properties:
+        authUrl: { type: string, format: uri }
+        callbackScheme:
+          type: string
+          example: zeus
+
+    # ------------------------------------------------------------ memories
+    MemoryKind:
+      type: string
+      enum: [preference, fact, interest]
+    Memory:
+      type: object
+      required: [id, kind, content, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        kind: { $ref: '#/components/schemas/MemoryKind' }
+        content: { type: string, example: 关注新能源车行业，尤其是比亚迪和理想 }
+        sourceTaskId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MemoryList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Memory' }
