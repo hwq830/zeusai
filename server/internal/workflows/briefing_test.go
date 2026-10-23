@@ -79,8 +79,8 @@ func TestScheduledBriefingPushesAtDeliveryTime(t *testing.T) {
 	if got := env.Now().In(sh); got.Before(time.Date(2026, 10, 23, 8, 0, 0, 0, sh)) {
 		t.Fatalf("pushed at %v, before the 08:00 delivery time", got)
 	}
-	if len(f.pushes.Sent) != 1 || f.pushes.Sent[0].Title != "AI 早报" {
-		t.Fatalf("pushes: %+v", f.pushes.Sent)
+	if len(f.pushes.Notifications()) != 1 || f.pushes.Notifications()[0].Title != "AI 早报" {
+		t.Fatalf("pushes: %+v", f.pushes.Notifications())
 	}
 
 	ctx := context.Background()
@@ -88,8 +88,8 @@ func TestScheduledBriefingPushesAtDeliveryTime(t *testing.T) {
 	if err != nil || len(b) != 1 || b[0].Status != "ready" || b[0].ItemCount == 0 {
 		t.Fatalf("briefing: %+v %v", b, err)
 	}
-	if f.pushes.Sent[0].DeepLink != "zeus://briefing/"+b[0].ID.String() {
-		t.Fatalf("deep link: %s", f.pushes.Sent[0].DeepLink)
+	if f.pushes.Notifications()[0].DeepLink != "zeus://briefing/"+b[0].ID.String() {
+		t.Fatalf("deep link: %s", f.pushes.Notifications()[0].DeepLink)
 	}
 	tasks, _ := f.q.ListTasks(ctx, db.ListTasksParams{UserID: f.user.ID, Limit: 10})
 	if len(tasks) != 1 || tasks[0].Status != "done" || tasks[0].Subtitle != "定时简报" {
@@ -111,15 +111,15 @@ func TestScheduledBriefingPausesWhenUnread(t *testing.T) {
 	if err != nil || got.Status != "paused" || got.PausedReason == nil || *got.PausedReason != "inactive" {
 		t.Fatalf("subscription: %+v %v", got, err)
 	}
-	if len(f.pushes.Sent) != 2 || f.pushes.Sent[1].Title != "AI 早报 已暂停" {
-		t.Fatalf("pushes: %+v", f.pushes.Sent)
+	if len(f.pushes.Notifications()) != 2 || f.pushes.Notifications()[1].Title != "AI 早报 已暂停" {
+		t.Fatalf("pushes: %+v", f.pushes.Notifications())
 	}
 
 	// Further scheduled firings do nothing.
 	f.now = f.now.AddDate(0, 0, 1)
 	f.run(t, f.now, orch.BriefingRun{UserID: f.user.ID, SubscriptionID: sub.ID, Scheduled: true})
-	if len(f.pushes.Sent) != 2 {
-		t.Fatalf("paused subscription pushed again: %+v", f.pushes.Sent)
+	if len(f.pushes.Notifications()) != 2 {
+		t.Fatalf("paused subscription pushed again: %+v", f.pushes.Notifications())
 	}
 }
 

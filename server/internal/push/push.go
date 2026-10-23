@@ -58,3 +58,10 @@ func (l *Log) Notify(_ context.Context, userID uuid.UUID, n Notification) error 
 	}
 	return nil
 }
+
+// Notifications returns a copy of what was sent so far.
+func (l *Log) Notifications() []Notification {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]Notification(nil), l.Sent...)
+}

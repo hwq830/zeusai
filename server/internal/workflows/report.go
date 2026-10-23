@@ -21,6 +21,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/orch"
+	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/search"
 )
 
@@ -110,7 +111,20 @@ func ReportWorkflow(ctx workflow.Context, run orch.ReportRun) error {
 		_ = workflow.ExecuteActivity(dctx, a.AbortReport, run, kind).Get(dctx, nil)
 		return err
 	}
+	// The report is already saved; a failed push must not fail the task.
+	_ = workflow.ExecuteActivity(ctx, a.NotifyReport, plan).Get(ctx, nil)
 	return nil
+}
+
+// NotifyReport tells the user a report is ready; reports take minutes and users leave.
+func (a *Activities) NotifyReport(ctx context.Context, plan ReportPlan) error {
+	r, err := a.Q.GetReport(ctx, db.GetReportParams{ID: plan.ReportID, UserID: plan.UserID})
+	if err != nil {
+		return err
+	}
+	return a.Push.Notify(ctx, plan.UserID, push.Notification{
+		Title: "报告已完成", Body: r.Title, DeepLink: "zeus://report/" + plan.ReportID.String(),
+	})
 }
 
 var reportPrompts = texttemplate.Must(texttemplate.New("report").Funcs(texttemplate.FuncMap{"join": strings.Join}).

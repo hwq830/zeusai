@@ -357,7 +357,7 @@ func TestBriefingEndToEnd(t *testing.T) {
 	if len(it.Sources) == 0 || !strings.HasPrefix(it.Sources[0].URL, "https://") || !it.DeepDivable {
 		t.Fatalf("item: %+v", it)
 	}
-	if len(h.pushes.Sent) != 0 {
+	if len(h.pushes.Notifications()) != 0 {
 		t.Fatal("manual preview must not push")
 	}
 
@@ -494,6 +494,14 @@ func TestReportEndToEnd(t *testing.T) {
 	}
 	if len(plan) != 4 || plan[3].Title != "撰写报告" || summary.Len() == 0 {
 		t.Fatalf("plan %+v summary %q", plan, summary.String())
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if ns := h.pushes.Notifications(); len(ns) == 1 && ns[0].DeepLink == "zeus://report/"+tk.ReportID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("report push: %+v", h.pushes.Notifications())
+		}
 	}
 
 	var rep struct {
