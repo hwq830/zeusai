@@ -1435,9 +1435,16 @@ components:
         kind: { $ref: '#/components/schemas/TaskKind' }
         status: { $ref: '#/components/schemas/TaskStatus' }
         title: { type: string }
+        subtitle:
+          type: string
+          description: 进度页副标题，如「标准报告 · 侧重市场规模、竞品对比」
         reportId: { type: string }
         briefingId: { type: string }
         subscriptionId: { type: string }
+        plan:
+          type: array
+          description: 计划确定后的全部步骤（与 plan 事件一致），计划未定时为空
+          items: { $ref: '#/components/schemas/StepInfo' }
         currentStep: { $ref: '#/components/schemas/StepInfo' }
         pendingConfirm: { $ref: '#/components/schemas/ConfirmRequest' }
         lastEventId:
@@ -1484,7 +1491,8 @@ components:
       type: string
       description: |
         客户端必须忽略未知类型。
-        - `status` 任务状态变化（data: status）
+        - `status` 任务状态变化（status）
+        - `plan` 计划确定或调整，带全部步骤（steps），之后的 step_started 按 index 对应
         - `step_started` / `step_done` 一个步骤开始 / 完成（step）
         - `source_reading` 正在阅读的网页（source）
         - `text_delta` 流式文本片段（delta），追问答案、报告摘要
@@ -1493,7 +1501,7 @@ components:
         - `completed` 任务完成（reportId / briefingId）
         - `failed` 任务失败（error）
         - `cancelled` 任务已中止
-      enum: [status, step_started, step_done, source_reading, text_delta, confirm_required, confirm_resolved, completed, failed, cancelled]
+      enum: [status, plan, step_started, step_done, source_reading, text_delta, confirm_required, confirm_resolved, completed, failed, cancelled]
     TaskEvent:
       type: object
       required: [seq, type, taskId, at]
@@ -1508,6 +1516,9 @@ components:
         at: { type: string, format: date-time }
         status: { $ref: '#/components/schemas/TaskStatus' }
         step: { $ref: '#/components/schemas/StepInfo' }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/StepInfo' }
         source: { $ref: '#/components/schemas/Source' }
         delta: { type: string }
         confirm: { $ref: '#/components/schemas/ConfirmRequest' }
