@@ -1,0 +1,41 @@
+slug: tech-morning
+name: 科技早报
+description: 每天早上一份科技圈要闻，外加你关注的公司和话题
+category: 行业资讯
+icon: newspaper
+sort_order: 10
+fields:
+  - key: topics
+    label: 关注的话题
+    type: tags
+    required: false
+    placeholder: 如 大模型、芯片、新能源车
+    max: 8
+  - key: companies
+    label: 关注的公司
+    type: tags
+    required: false
+    placeholder: 如 苹果、比亚迪
+    max: 8
+sections:
+  - key: headlines
+    title: 今日要闻
+    instruction: 科技行业当天最重要的 3–5 件事
+    max_items: 5
+  - key: topics
+    title: 你关注的话题
+    instruction: 围绕 {{topics}} 的最新进展
+    max_items: 5
+  - key: companies
+    title: 公司动态
+    instruction: '{{companies}} 的新闻、财报、产品发布'
+    max_items: 5
+sources:
+  - type: search
+    value: 科技 新闻 今日
+  - type: search
+    value: '{{topics}} 最新进展'
+  - type: search
+    value: '{{companies}} 最新消息'
+default_schedule: { freq: daily, time: '08:00', tz: Asia/Shanghai }
+default_length: standard

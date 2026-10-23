@@ -1,0 +1,52 @@
+name: server
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'api/**'
+      - 'server/**'
+      - 'sandbox/**'
+      - 'prompts/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/server.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: zeus
+          POSTGRES_PASSWORD: zeus
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U zeus" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+    env:
+      ZEUS_TEST_DATABASE_URL: postgres://zeus:zeus@localhost:5432/postgres?sslmode=disable
+      ZEUS_TEST_REDIS_URL: redis://localhost:6379/0
+      ZEUS_TEST_TEMPORAL_HOST: localhost:7233
+      ZEUS_TEST_CHROMIUM: /usr/bin/google-chrome # preinstalled on GitHub ubuntu runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Start Temporal dev server
+        run: |
+          curl -sSL https://github.com/temporalio/cli/releases/download/v1.1.2/temporal_cli_1.1.2_linux_amd64.tar.gz | sudo tar xz -C /usr/local/bin temporal
+          temporal server start-dev --headless --log-level error &
+          for i in $(seq 1 30); do temporal operator cluster health 2>/dev/null | grep -q SERVING && break; sleep 1; done
+      - name: Generated code is up to date
+        run: |
+          go generate ./server/...
+          git diff --exit-code
+      - run: go vet ./...
+      - run: go test -race ./...

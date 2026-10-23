@@ -1,0 +1,30 @@
+slug: paper-digest
+name: 论文速递
+description: 按研究方向追踪新论文，附一句话贡献总结
+category: 学术科研
+icon: doc.text.magnifyingglass
+sort_order: 40
+fields:
+  - key: fields
+    label: 研究方向
+    type: tags
+    required: true
+    placeholder: 如 多模态大模型、蛋白质结构预测
+    max: 5
+  - key: venues
+    label: 关注的会议或期刊
+    type: tags
+    required: false
+    max: 5
+sections:
+  - key: papers
+    title: 新论文
+    instruction: '{{fields}} 方向的新论文；每条说明解决了什么问题、核心方法和结果'
+    max_items: 8
+sources:
+  - type: site
+    value: arxiv.org
+  - type: search
+    value: '{{fields}} 论文 {{venues}}'
+default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '09:00', tz: Asia/Shanghai }
+default_length: standard

@@ -1,0 +1,34 @@
+slug: company-watch
+name: 公司追踪
+description: 盯住几家公司：新闻、公告、产品和高管动向
+category: 商业财经
+icon: building.2
+sort_order: 20
+fields:
+  - key: companies
+    label: 要追踪的公司
+    type: tags
+    required: true
+    placeholder: 如 宁德时代、英伟达
+    max: 5
+  - key: aspects
+    label: 侧重
+    type: multiselect
+    required: false
+    options: [财报与业绩, 产品发布, 融资并购, 高管变动, 监管与诉讼]
+sections:
+  - key: news
+    title: 重要新闻
+    instruction: '{{companies}} 的重大新闻，侧重 {{aspects}}'
+    max_items: 6
+  - key: filings
+    title: 公告与财报
+    instruction: 上市公司公告、财报数据，给出关键数字
+    max_items: 4
+sources:
+  - type: search
+    value: '{{companies}} 新闻'
+  - type: search
+    value: '{{companies}} 公告 财报'
+default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '08:30', tz: Asia/Shanghai }
+default_length: standard

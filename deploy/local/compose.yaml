@@ -1,0 +1,18 @@
+# Local dependencies for development: PostgreSQL 16 + pgvector, Redis, Temporal dev server.
+# If the Temporal image is unavailable, run `temporal server start-dev` with the temporal CLI instead.
+#   docker compose -f deploy/local/compose.yaml up -d
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: zeus
+      POSTGRES_PASSWORD: zeus
+      POSTGRES_DB: zeus
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+  temporal:
+    image: temporalio/temporal:1.1.2
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--headless"]
+    ports: ["7233:7233"]

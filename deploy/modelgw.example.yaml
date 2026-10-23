@@ -1,0 +1,28 @@
+# Model gateway routing (ZEUS_LLM_PROVIDER=gateway, ZEUS_MODELGW_CONFIG=<this file>).
+# Keys come from the environment variables named in api_key_env; never put keys here.
+# Model names and prices are examples: check each vendor's current price list before use.
+breaker_failures: 3
+breaker_cooldown: 30s
+routes:
+  strong: [qwen, deepseek]
+  fast: [qwen, deepseek]
+providers:
+  - name: qwen
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: ZEUS_QWEN_API_KEY
+    timeout: 120s
+    models:
+      strong: qwen-max
+      fast: qwen-turbo
+    prices: # CNY per million tokens
+      qwen-max: { input: 2.4, output: 9.6, cached: 0.96 }
+      qwen-turbo: { input: 0.3, output: 0.6, cached: 0.12 }
+  - name: deepseek
+    base_url: https://api.deepseek.com/v1
+    api_key_env: ZEUS_DEEPSEEK_API_KEY
+    timeout: 180s
+    models:
+      strong: deepseek-chat
+      fast: deepseek-chat
+    prices:
+      deepseek-chat: { input: 2, output: 8, cached: 0.5 }

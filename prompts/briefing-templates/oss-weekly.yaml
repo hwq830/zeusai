@@ -1,0 +1,30 @@
+slug: oss-weekly
+name: 开源项目周报
+description: 追踪开源项目的版本发布、重要 PR 和社区讨论
+category: 技术开发
+icon: chevron.left.forwardslash.chevron.right
+sort_order: 50
+fields:
+  - key: repos
+    label: 项目
+    type: tags
+    required: true
+    placeholder: 如 kubernetes/kubernetes、pytorch
+    max: 8
+sections:
+  - key: releases
+    title: 版本发布
+    instruction: '{{repos}} 本周发布的版本和重要变更'
+    max_items: 6
+  - key: discussions
+    title: 社区讨论
+    instruction: 值得关注的 issue、RFC 和讨论
+    max_items: 4
+sources:
+  - type: connector
+    value: github
+  - type: search
+    value: '{{repos}} release'
+default_schedule: { freq: weekly, weekdays: [5], time: '18:00', tz: Asia/Shanghai }
+default_length: standard
+required_connectors: [github]
