@@ -12,6 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const bumpTaskLastEvent = `-- name: BumpTaskLastEvent :exec
+UPDATE tasks SET last_event_id = greatest(last_event_id, $3) WHERE id = $1 AND user_id = $2
+`
+
+type BumpTaskLastEventParams struct {
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	LastEventID int64
+}
+
+func (q *Queries) BumpTaskLastEvent(ctx context.Context, arg BumpTaskLastEventParams) error {
+	_, err := q.db.Exec(ctx, bumpTaskLastEvent, arg.ID, arg.UserID, arg.LastEventID)
+	return err
+}
+
 const countActiveTasks = `-- name: CountActiveTasks :one
 SELECT count(*)::int FROM tasks WHERE user_id = $1 AND status IN ('queued', 'running', 'waiting_confirm')
 `

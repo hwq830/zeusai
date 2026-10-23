@@ -1,0 +1,39 @@
+slug: competitor-weekly
+name: 竞品动态周报
+description: 每周汇总竞品的产品更新、定价、融资和口碑
+category: 商业财经
+icon: chart.line.uptrend.xyaxis
+sort_order: 30
+fields:
+  - key: my_product
+    label: 我的产品
+    type: text
+    required: false
+    placeholder: 一句话描述你的产品，用来判断相关性
+    max: 100
+  - key: competitors
+    label: 竞品
+    type: tags
+    required: true
+    max: 6
+sections:
+  - key: product
+    title: 产品与功能更新
+    instruction: '{{competitors}} 本周的新功能、版本发布；说明和 {{my_product}} 的关系'
+    max_items: 6
+  - key: business
+    title: 定价、融资与合作
+    max_items: 4
+  - key: voice
+    title: 用户口碑
+    instruction: 社交媒体和应用商店里的集中反馈
+    max_items: 3
+sources:
+  - type: search
+    value: '{{competitors}} 更新 发布'
+  - type: search
+    value: '{{competitors}} 融资 定价 合作'
+  - type: search
+    value: '{{competitors}} 用户 评价'
+default_schedule: { freq: weekly, weekdays: [1], time: '09:00', tz: Asia/Shanghai }
+default_length: long

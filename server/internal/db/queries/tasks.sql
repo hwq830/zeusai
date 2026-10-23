@@ -31,3 +31,6 @@ UPDATE tasks SET
     started_at = CASE WHEN started_at IS NULL AND $3 <> 'queued' THEN now() ELSE started_at END,
     finished_at = CASE WHEN $3 IN ('done', 'failed', 'cancelled') THEN coalesce(finished_at, now()) ELSE finished_at END
 WHERE id = $1 AND user_id = $2;
+
+-- name: BumpTaskLastEvent :exec
+UPDATE tasks SET last_event_id = greatest(last_event_id, $3) WHERE id = $1 AND user_id = $2;

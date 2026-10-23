@@ -1,0 +1,48 @@
+# Built-in tools and the MCP whitelist shown to users. stdio MCP servers are pinned in
+# sandbox/mcp-lock.yaml and run inside the user's sandbox; write tools always need confirmation.
+- id: web_search
+  name: 网页搜索
+  description: 搜索最新的网页和新闻
+  kind: builtin
+  category: 搜索与浏览
+  default_on: true
+  tools:
+    - { name: search, description: 搜索网页, write: false }
+- id: web_browse
+  name: 网页阅读
+  description: 打开网页读取正文，必要时用浏览器渲染
+  kind: builtin
+  category: 搜索与浏览
+  default_on: true
+  tools:
+    - { name: fetch, description: 读取网页正文, write: false }
+- id: github
+  name: GitHub
+  description: 读取仓库、issue、PR 和版本发布
+  kind: mcp
+  category: 开发
+  requires_auth: true
+  transport: stdio
+  tools:
+    - { name: search_repositories, write: false }
+    - { name: list_releases, write: false }
+    - { name: list_issues, write: false }
+    - { name: create_issue, description: 创建 issue, write: true }
+- id: arxiv
+  name: arXiv 论文
+  description: 检索和读取 arXiv 论文
+  kind: mcp
+  category: 学术
+  transport: stdio
+  tools:
+    - { name: search_papers, write: false }
+    - { name: read_paper, write: false }
+- id: amap
+  name: 高德地图
+  description: 地点搜索、路线和周边信息
+  kind: mcp
+  category: 生活
+  transport: http
+  tools:
+    - { name: place_search, write: false }
+    - { name: route_planning, write: false }
