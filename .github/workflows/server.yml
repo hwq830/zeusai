@@ -33,6 +33,7 @@ jobs:
       ZEUS_TEST_DATABASE_URL: postgres://zeus:zeus@localhost:5432/postgres?sslmode=disable
       ZEUS_TEST_REDIS_URL: redis://localhost:6379/0
       ZEUS_TEST_TEMPORAL_HOST: localhost:7233
+      ZEUS_TEST_CHROMIUM: /usr/bin/google-chrome # preinstalled on GitHub ubuntu runners
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

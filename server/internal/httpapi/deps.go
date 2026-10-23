@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/hwq830/zeusai/server/internal/auth"
+	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/briefing"
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
@@ -29,6 +31,7 @@ type Deps struct {
 	Orch   orch.Client
 	LLM    llm.Provider
 	Mod    moderation.Checker // nil allows everything (dev)
+	Blob   blob.Store         // nil: PDF export unavailable
 	Config config.Config
 	Now    func() time.Time
 }
@@ -50,7 +53,15 @@ func New(d Deps) *Server {
 		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Now: d.Now},
 		Tasks:      &task.Service{Q: q, Orch: d.Orch},
 		Connectors: &connector.Service{Q: q},
-		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, PublicBaseURL: d.Config.PublicBaseURL},
+		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, PublicBaseURL: d.Config.PublicBaseURL},
 		Bus:        &events.Bus{R: d.Redis},
+		Files:      files(d.Blob),
 	}
+}
+
+func files(b blob.Store) http.Handler {
+	if l, ok := b.(*blob.Local); ok {
+		return l.Handler()
+	}
+	return nil
 }

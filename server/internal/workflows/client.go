@@ -114,6 +114,13 @@ func (c *Client) StartFollowup(ctx context.Context, run orch.FollowupRun) error 
 	return c.start(ctx, run.TaskID, FollowupWorkflowName, run)
 }
 
+func (c *Client) StartReportPDF(ctx context.Context, run orch.ReportPDFRun) error {
+	_, err := c.C.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID: "pdf-" + run.ReportID.String(), TaskQueue: c.TaskQueue, WorkflowExecutionTimeout: 10 * time.Minute,
+	}, ReportPDFWorkflowName, run)
+	return err
+}
+
 func (c *Client) CancelTask(ctx context.Context, taskID uuid.UUID) error {
 	return c.C.CancelWorkflow(ctx, orch.WorkflowID(taskID), "")
 }

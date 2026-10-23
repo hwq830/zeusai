@@ -75,7 +75,8 @@ func run(log *slog.Logger) error {
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{})
 	workflows.Register(w, &workflows.Activities{
 		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
-		Search: searcher, Browse: reader, Tools: &connector.Toolbox{Q: q}, Push: &push.Log{L: log},
+		Search: searcher, Browse: reader, Tools: &connector.Toolbox{Q: q},
+		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: &push.Log{L: log},
 	})
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)
 	return w.Run(worker.InterruptCh())

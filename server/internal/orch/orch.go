@@ -33,12 +33,21 @@ type FollowupRun struct {
 	Question string
 }
 
+// ReportPDFRun prints a finished report to PDF and stores it under Key.
+type ReportPDFRun struct {
+	UserID   uuid.UUID
+	ReportID uuid.UUID
+	Key      string
+}
+
 type Client interface {
 	UpsertBriefingSchedule(ctx context.Context, userID, subscriptionID uuid.UUID, s schedule.Schedule, paused bool) error
 	DeleteBriefingSchedule(ctx context.Context, subscriptionID uuid.UUID) error
 	StartBriefing(ctx context.Context, run BriefingRun) error
 	StartReport(ctx context.Context, run ReportRun) error
 	StartFollowup(ctx context.Context, run FollowupRun) error
+	// StartReportPDF is idempotent while a print for the same report is running.
+	StartReportPDF(ctx context.Context, run ReportPDFRun) error
 	CancelTask(ctx context.Context, taskID uuid.UUID) error
 	SendTaskMessage(ctx context.Context, taskID uuid.UUID, text string) error
 	ResolveConfirm(ctx context.Context, taskID uuid.UUID, confirmID, decision string) error

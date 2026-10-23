@@ -65,7 +65,7 @@ func run(log *slog.Logger) error {
 	}
 	srv := httpapi.New(httpapi.Deps{
 		Log: log, Pool: pool, Redis: rdb, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
-		LLM: model, Mod: mod, Config: cfg,
+		LLM: model, Mod: mod, Blob: providers.Blob(cfg), Config: cfg,
 	})
 	hs := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

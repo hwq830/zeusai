@@ -5,9 +5,11 @@ package report
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/moderation"
@@ -80,6 +83,7 @@ type Service struct {
 	Quota         *quota.Service
 	Orch          orch.Client
 	Mod           moderation.Checker
+	Blob          blob.Store // nil: PDF export unavailable
 	PublicBaseURL string
 }
 
@@ -219,6 +223,9 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID, id string) error
 	if _, err := s.Q.DeleteReport(ctx, db.DeleteReportParams{ID: r.ID, UserID: userID}); err != nil {
 		return apperr.Internal(err)
 	}
+	if r.PdfKey != nil && s.Blob != nil {
+		_ = s.Blob.Delete(ctx, *r.PdfKey)
+	}
 	return nil
 }
 
@@ -236,6 +243,54 @@ func templateData(r db.Report, full bool) reporttemplate.Data {
 		}
 	}
 	return d
+}
+
+// PrintHTML renders a report for PDF printing.
+func PrintHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(templateData(r, true)) }
+
+// PDFKey names the stored PDF for the report's current content, so a follow-up (which
+// appends to the markdown) makes the old file stale.
+func PDFKey(r db.Report) string {
+	h := sha256.Sum256([]byte(r.Title + "\x00" + r.Markdown))
+	return fmt.Sprintf("reports/%s/%s-%x.pdf", r.UserID, r.ID, h[:6])
+}
+
+type FileLink struct {
+	Status    string     `json:"status"` // ready | generating
+	URL       string     `json:"url,omitempty"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+}
+
+const pdfLinkTTL = 15 * time.Minute
+
+// PDF returns a download link, or starts printing and returns status=generating.
+func (s *Service) PDF(ctx context.Context, userID uuid.UUID, id string) (FileLink, error) {
+	if s.Blob == nil {
+		return FileLink{}, apperr.Unavailable("PDF 导出即将开放")
+	}
+	r, err := s.getRow(ctx, userID, id)
+	if err != nil {
+		return FileLink{}, err
+	}
+	if r.Status != "done" {
+		return FileLink{}, apperr.Conflict("报告还没有生成完")
+	}
+	key := PDFKey(r)
+	if r.PdfStatus == "ready" && r.PdfKey != nil && *r.PdfKey == key {
+		u, exp, err := s.Blob.SignedURL(ctx, key, pdfLinkTTL)
+		if err != nil {
+			return FileLink{}, apperr.Internal(err)
+		}
+		return FileLink{Status: "ready", URL: u, ExpiresAt: &exp}, nil
+	}
+	if err := s.Q.SetReportPDF(ctx, db.SetReportPDFParams{ID: r.ID, UserID: userID, PdfStatus: "generating", PdfKey: r.PdfKey}); err != nil {
+		return FileLink{}, apperr.Internal(err)
+	}
+	// Idempotent while a print is running; after a failure or a follow-up it starts anew.
+	if err := s.Orch.StartReportPDF(ctx, orch.ReportPDFRun{UserID: userID, ReportID: r.ID, Key: key}); err != nil {
+		return FileLink{}, apperr.Internal(err)
+	}
+	return FileLink{Status: "generating"}, nil
 }
 
 // HTML renders a finished report for the App's WebView.

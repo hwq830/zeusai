@@ -44,6 +44,8 @@ type Server struct {
 	Bus        *events.Bus
 	// SSEPing is the keep-alive interval for event streams.
 	SSEPing time.Duration
+	// Files serves signed download links for locally stored files (dev); nil with OSS.
+	Files http.Handler
 }
 
 var _ gen.StrictServerInterface = (*Server)(nil)
@@ -54,6 +56,9 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/s/{token}", s.sharePage)
+	if s.Files != nil {
+		r.Handle("/files/*", http.StripPrefix("/files", s.Files))
+	}
 
 	strict := gen.NewStrictHandlerWithOptions(s, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {

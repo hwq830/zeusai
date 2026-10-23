@@ -46,12 +46,25 @@ go run ./server/cmd/orchestrator &
 
 `config.Load` 在非 dev 环境拒绝这些开发设置。配置项见 `server/internal/platform/config`，全部来自 `ZEUS_*` 环境变量。
 
+### 接真实服务
+
+都是可选的，不设置就用 mock 或返回“即将开放”：
+
+| 能力 | 环境变量 |
+| --- | --- |
+| 模型网关 | `ZEUS_LLM_PROVIDER=gateway`、`ZEUS_MODELGW_CONFIG=deploy/modelgw.example.yaml`，以及该文件里 `api_key_env` 指定的 key（如 `ZEUS_QWEN_API_KEY`） |
+| 内容审核词表 | `ZEUS_MODERATION_KEYWORDS_FILE`（每行一个词；非 dev 环境必填） |
+| 博查搜索 | `ZEUS_SEARCH_PROVIDER=bocha`、`ZEUS_BOCHA_API_KEY`；网页读取走 `ZEUS_EGRESS_PROXY`（可选） |
+| 高德 MCP | `ZEUS_MCP_AMAP_URL`（含 key 的完整 Streamable HTTP 地址） |
+| PDF 导出 | api 和 orchestrator 都设 `ZEUS_BLOB_DIR`（同一目录）；orchestrator 设 `ZEUS_CHROMIUM_PATH`，容器里以 root 运行时加 `ZEUS_CHROMIUM_NO_SANDBOX=true` |
+
 ## 测试
 
 ```sh
 export ZEUS_TEST_DATABASE_URL=postgres://zeus:zeus@localhost:5432/postgres?sslmode=disable
 export ZEUS_TEST_REDIS_URL=redis://localhost:6379/0
 export ZEUS_TEST_TEMPORAL_HOST=localhost:7233
+export ZEUS_TEST_CHROMIUM=/path/to/chrome   # 可选：用真 Chromium 测 PDF，不设则用假打印
 go test -race ./...
 ```
 

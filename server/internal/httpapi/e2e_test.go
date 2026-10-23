@@ -6,10 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/hwq830/zeusai/server/internal/blob"
+	"github.com/hwq830/zeusai/server/internal/pdf"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -71,7 +74,13 @@ func setup(t *testing.T) *harness {
 		}
 		return ""
 	}}
-	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: pushes, Tools: tools})
+	files := &blob.Local{Dir: t.TempDir(), Secret: []byte("files")}
+	var printer pdf.Renderer = fakePDF{}
+	if p := os.Getenv("ZEUS_TEST_CHROMIUM"); p != "" {
+		printer = pdf.Chromium{Path: p, NoSandbox: true}
+	}
+	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: pushes, Tools: tools,
+		PDF: printer, Blob: files})
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +92,11 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httpapi.New(httpapi.Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Pool: pool, Redis: rdb, Orch: oc, LLM: llm.Mock{}, Mod: mod, Config: cfg})
+	srv := httpapi.New(httpapi.Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Pool: pool, Redis: rdb, Orch: oc, LLM: llm.Mock{}, Mod: mod, Blob: files, Config: cfg})
 	srv.SSEPing = 200 * time.Millisecond
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
+	files.BaseURL = hs.URL
 	spec, err := gen.GetSwagger()
 	if err != nil {
 		t.Fatal(err)
@@ -570,7 +580,6 @@ func TestReportEndToEnd(t *testing.T) {
 		t.Fatalf("revoked share: %d", code)
 	}
 
-	h.do("GET", "/v1/reports/"+rep.ID+"/pdf", nil, 503, &e)
 	h.do("DELETE", "/v1/reports/"+rep.ID, nil, 204, nil)
 	h.do("GET", "/v1/reports/"+rep.ID, nil, 404, nil)
 }
@@ -694,4 +703,67 @@ func TestReportUsesConnectorTool(t *testing.T) {
 	if n := mcpSources(run()); n != 3 { // one call per sub-question of a quick report
 		t.Fatalf("tool sources: %d", n)
 	}
+}
+
+type fakePDF struct{}
+
+func (fakePDF) Render(_ context.Context, html []byte) ([]byte, error) {
+	return append([]byte("%PDF-fake\n"), html...), nil
+}
+
+func TestReportPDF(t *testing.T) {
+	h := setup(t)
+	h.login(randomPhone())
+	var tk struct{ ID, ReportID string }
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "PDF 导出测试", "depth": "quick"}, 202, &tk)
+	var link struct {
+		Status    string     `json:"status"`
+		URL       string     `json:"url"`
+		ExpiresAt *time.Time `json:"expiresAt"`
+	}
+	var e apiError
+	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 409, &e) // still running
+	h.streamEvents(tk.ID, 0)
+
+	waitReady := func() string {
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+			h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
+			if link.Status == "ready" {
+				return link.URL
+			}
+		}
+		t.Fatalf("PDF never ready: %+v", link)
+		return ""
+	}
+	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
+	if link.Status != "generating" {
+		t.Fatalf("first request: %+v", link)
+	}
+	first := waitReady()
+	if link.ExpiresAt == nil || time.Until(*link.ExpiresAt) > 16*time.Minute {
+		t.Fatalf("expiry: %+v", link)
+	}
+	code, body := h.raw(strings.TrimPrefix(first, h.url), false)
+	if code != 200 || !strings.HasPrefix(body, "%PDF") {
+		t.Fatalf("download: %d %.40q", code, body)
+	}
+	if code, _ := h.raw(strings.TrimPrefix(first, h.url)+"x", false); code != 403 {
+		t.Fatalf("tampered link: %d", code)
+	}
+
+	// A follow-up changes the report, so the next request prints a new file.
+	var fu struct{ ID string }
+	h.do("POST", "/v1/reports/"+tk.ReportID+"/followups", map[string]string{"question": "补充一点？"}, 202, &fu)
+	h.streamEvents(fu.ID, 0)
+	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
+	if link.Status != "generating" {
+		t.Fatalf("after follow-up: %+v", link)
+	}
+	if second := waitReady(); second == first {
+		t.Fatal("stale PDF link returned after follow-up")
+	}
+
+	// Other users cannot reach the report.
+	h.login(randomPhone())
+	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 404, &e)
 }

@@ -149,12 +149,12 @@ func (s *Server) GetReportHtml(ctx context.Context, req gen.GetReportHtmlRequest
 	return gen.GetReportHtml200TexthtmlResponse{Body: bytes.NewReader(b), ContentLength: int64(len(b))}, nil
 }
 
-// GetReportPdf: PDF is printed by Chromium in the sandbox, which lands in stage 4.
 func (s *Server) GetReportPdf(ctx context.Context, req gen.GetReportPdfRequestObject) (gen.GetReportPdfResponseObject, error) {
-	if _, err := s.Reports.Get(ctx, userID(ctx), req.ReportId); err != nil {
+	link, err := s.Reports.PDF(ctx, userID(ctx), req.ReportId)
+	if err != nil {
 		return nil, err
 	}
-	return nil, apperr.Unavailable("PDF 导出即将开放")
+	return gen.GetReportPdf200JSONResponse(recode[gen.FileLink](link)), nil
 }
 
 func (s *Server) CreateReportFollowup(ctx context.Context, req gen.CreateReportFollowupRequestObject) (gen.CreateReportFollowupResponseObject, error) {

@@ -32,6 +32,13 @@ type Config struct {
 	BochaAPIKey            string `koanf:"bocha_api_key"`
 	// EgressProxy is the outbound proxy for page reads (http://host:port); empty = direct.
 	EgressProxy string `koanf:"egress_proxy"`
+	// BlobDir stores generated files on local disk (dev, single host); empty disables PDF.
+	// Shared by api (serves signed links) and orchestrator (writes). OSS replaces it in prod.
+	BlobDir     string `koanf:"blob_dir"`
+	FilesSecret string `koanf:"files_secret"` // signs /files links; defaults to one derived from JWT_SECRET
+	// ChromiumPath enables PDF printing in the orchestrator.
+	ChromiumPath      string `koanf:"chromium_path"`
+	ChromiumNoSandbox bool   `koanf:"chromium_no_sandbox"`
 }
 
 func defaults() Config {

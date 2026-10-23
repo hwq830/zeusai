@@ -17,6 +17,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/hwq830/zeusai/prompts"
+	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/briefing"
 	"github.com/hwq830/zeusai/server/internal/browse"
 	"github.com/hwq830/zeusai/server/internal/connector"
@@ -24,6 +25,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/orch"
+	"github.com/hwq830/zeusai/server/internal/pdf"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 	"github.com/hwq830/zeusai/server/internal/search"
@@ -45,6 +47,8 @@ type Activities struct {
 	Search search.Searcher
 	Browse browse.Reader // nil: research uses search snippets only
 	Tools  Tools         // nil: no connector tools
+	PDF    pdf.Renderer  // nil: PDF export fails with a clear error
+	Blob   blob.Store
 	Push   push.Notifier
 	Now    func() time.Time
 }
