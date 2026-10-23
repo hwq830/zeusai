@@ -8,7 +8,7 @@ import (
 func TestRender(t *testing.T) {
 	out, err := Render(Data{
 		Title: "标题 <x>", Summary: "摘要", Markdown: "## 一\n\n事实 [1]，无效引用 [9]。\n\n<script>alert(1)</script>\n",
-		Sources: []Source{{Index: 1, URL: "https://a.example/1", Title: "来源一"}},
+		Sources: []Source{{Index: 1, URL: "https://a.example/1", Title: "来源一"}, {Index: 2, URL: "mcp://amap/place_search", Title: "高德地图：place_search"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -18,6 +18,9 @@ func TestRender(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
+	}
+	if !strings.Contains(html, `<li id="src-2">高德地图：place_search`) || strings.Contains(html, "ZgotmplZ") {
+		t.Error("connector sources must be listed without a link")
 	}
 	if strings.Contains(html, "<script>alert") {
 		t.Error("raw HTML from markdown must not be rendered")

@@ -60,7 +60,7 @@ pre code { display: block; padding: 12px; overflow-x: auto; }
     <h2>来源</h2>
     <ol>
     {{- range .Sources}}
-      <li id="src-{{.Index}}"><a href="{{.URL}}" rel="noopener nofollow" target="_blank">{{.Title}}</a>{{if .SiteName}} · {{.SiteName}}{{end}}</li>
+      <li id="src-{{.Index}}">{{if isWeb .URL}}<a href="{{.URL}}" rel="noopener nofollow" target="_blank">{{.Title}}</a>{{else}}{{.Title}}{{end}}{{if .SiteName}} · {{.SiteName}}{{end}}</li>
     {{- end}}
     </ol>
   </section>

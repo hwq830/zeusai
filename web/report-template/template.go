@@ -3,6 +3,7 @@
 package reporttemplate
 
 import (
+	"strings"
 	"bytes"
 	_ "embed"
 	"html/template"
@@ -16,7 +17,10 @@ import (
 //go:embed report.html.tmpl
 var src string
 
-var page = template.Must(template.New("report").Parse(src))
+// Connector results (mcp://…) are listed as sources but cannot be opened.
+var page = template.Must(template.New("report").Funcs(template.FuncMap{
+	"isWeb": func(u string) bool { return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") },
+}).Parse(src))
 
 var md = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
 
