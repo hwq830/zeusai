@@ -49,6 +49,7 @@ type harness struct {
 	token  string
 	orch   *workflows.Client
 	pushes *push.Log
+	q      *db.Queries
 }
 
 func setup(t *testing.T) *harness {
@@ -106,7 +107,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, router: router, url: hs.URL, orch: oc, pushes: pushes}
+	return &harness{t: t, router: router, url: hs.URL, orch: oc, pushes: pushes, q: q}
 }
 
 // do sends a JSON request and decodes the JSON response into out (if non-nil).

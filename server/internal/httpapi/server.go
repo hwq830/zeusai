@@ -23,6 +23,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/feedback"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -42,6 +43,7 @@ type Server struct {
 	Tasks      *task.Service
 	Connectors *connector.Service
 	Reports    *report.Service
+	Feedback   *feedback.Service
 	Bus        *events.Bus
 	// SSEPing is the keep-alive interval for event streams.
 	SSEPing time.Duration

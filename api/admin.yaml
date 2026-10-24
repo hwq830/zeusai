@@ -9,8 +9,8 @@ info:
     约定：
     - 接口挂在 `/admin/v1` 下，由独立进程 `server/cmd/admin` 提供，只在内网 / VPN 暴露，不与 App 的 api 进程共用端口。
     - 鉴权：`Authorization: Bearer <token>`，令牌由 `POST /admin/v1/auth/login` 签发，12 小时有效，与 App 令牌密钥不同。
-    - 角色：`owner` 全部权限（含管理员账号）；`operator` 用户、额度、模板、连接器、任务；
-      `moderator` 内容审核、停用用户；`viewer` 只读。越权返回 403 `forbidden`。
+    - 角色：`owner` 全部权限（含管理员账号）；`operator` 用户、额度、模板、连接器、任务、用户反馈；
+      `moderator` 内容审核、停用用户、用户反馈；`viewer` 只读。越权返回 403 `forbidden`。
     - 所有写操作记入审计日志（`GET /admin/v1/audit-log`）。
     - 金额单位为人民币元（`costCny`），由模型网关按每百万 token 单价计算。
     - 列表统一 `cursor` + `limit` 分页，响应带 `nextCursor`，为空表示没有更多。错误格式与 App 契约相同。
@@ -30,6 +30,7 @@ tags:
   - name: costs
   - name: modelgw
   - name: admins
+  - name: feedback
 
 paths:
   # ---------------------------------------------------------------- auth
@@ -617,6 +618,105 @@ paths:
               schema: { $ref: '#/components/schemas/AuditPage' }
         default: { $ref: '#/components/responses/Error' }
 
+  # ---------------------------------------------------------------- feedback
+  /admin/v1/feedback:
+    get:
+      tags: [feedback]
+      operationId: listFeedback
+      summary: 用户意见反馈
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/FeedbackStatus' }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/FeedbackType' }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          description: 按内容搜索
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/feedback/{feedbackId}:
+    parameters:
+      - $ref: '#/components/parameters/FeedbackId'
+    get:
+      tags: [feedback]
+      operationId: getFeedback
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackDetail' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [feedback]
+      operationId: updateFeedback
+      summary: 改状态、写内部备注（用户看不到备注）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/feedback/{feedbackId}/replies:
+    parameters:
+      - $ref: '#/components/parameters/FeedbackId'
+    post:
+      tags: [feedback]
+      operationId: replyFeedback
+      summary: 回复用户。用户在「我的反馈」里看到并收到推送（zeus://feedback/{id}）；待处理的反馈自动转为处理中
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackReplyRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/report-feedback:
+    get:
+      tags: [feedback]
+      operationId: listReportFeedback
+      summary: 报告满意度评分，按最近评分排序
+      parameters:
+        - name: rating
+          in: query
+          schema: { type: string, enum: [satisfied, unsatisfied] }
+        - name: reason
+          in: query
+          schema: { $ref: '#/components/schemas/ReportFeedbackReason' }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportFeedbackPage' }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -649,6 +749,11 @@ components:
       schema: { type: string }
     AdminId:
       name: adminId
+      in: path
+      required: true
+      schema: { type: string }
+    FeedbackId:
+      name: feedbackId
       in: path
       required: true
       schema: { type: string }
@@ -757,7 +862,7 @@ components:
     # ------------------------------------------------------------ dashboard
     Dashboard:
       type: object
-      required: [users, activeUsers, tasksToday, reportsThisMonth, cost, daily]
+      required: [users, activeUsers, tasksToday, reportsThisMonth, cost, daily, satisfaction]
       properties:
         users:
           type: object
@@ -795,6 +900,7 @@ components:
           type: array
           description: 近 14 天
           items: { $ref: '#/components/schemas/DailyPoint' }
+        satisfaction: { $ref: '#/components/schemas/Satisfaction' }
     TaskCount:
       type: object
       required: [kind, status, count]
@@ -1280,3 +1386,152 @@ components:
               calls: { type: integer }
               costCny: { type: number, format: double }
               lastCallAt: { type: string, format: date-time, nullable: true }
+
+    # ------------------------------------------------------------ feedback
+    Satisfaction:
+      type: object
+      description: |
+        报告满意度 = satisfied ÷ (satisfied + unsatisfied)，按报告创建日落窗口；评分率 = 已评 ÷ completed。
+        门槛 B 要求满意度 ≥ 70%，评分率低于 25% 时结论无效。
+      required: [reports7d, reports30d, briefings30d, openFeedback, unsatisfiedReasons30d]
+      properties:
+        reports7d: { $ref: '#/components/schemas/ReportRatingCounts' }
+        reports30d: { $ref: '#/components/schemas/ReportRatingCounts' }
+        briefings30d:
+          type: object
+          description: 简报整期评分（不含单条）
+          required: [useful, meh]
+          properties:
+            useful: { type: integer }
+            meh: { type: integer }
+        openFeedback:
+          type: integer
+          description: 待处理 + 处理中的意见反馈
+        unsatisfiedReasons30d:
+          type: array
+          items:
+            type: object
+            required: [reason, count]
+            properties:
+              reason: { $ref: '#/components/schemas/ReportFeedbackReason' }
+              count: { type: integer }
+    ReportRatingCounts:
+      type: object
+      required: [completed, satisfied, unsatisfied]
+      properties:
+        completed: { type: integer, description: 窗口内创建且已完成的报告数 }
+        satisfied: { type: integer }
+        unsatisfied: { type: integer }
+    FeedbackType:
+      type: string
+      enum: [bug, suggestion, other]
+    FeedbackStatus:
+      type: string
+      enum: [new, in_progress, resolved, closed]
+    ReportFeedbackReason:
+      type: string
+      description: 内容不准确 / 不够深入 / 来源不可靠 / 没回答我的问题 / 生成太慢 / 其他
+      enum: [inaccurate, shallow, bad_sources, off_topic, slow, other]
+    FeedbackSummary:
+      type: object
+      required: [id, userId, nickname, phoneMasked, type, content, status, flagged, attachmentCount, replyCount, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        type: { $ref: '#/components/schemas/FeedbackType' }
+        content: { type: string }
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        flagged:
+          type: boolean
+          description: 命中审核关键词（仅标记，不拦截）
+        appVersion: { type: string }
+        attachmentCount: { type: integer }
+        replyCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FeedbackPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FeedbackSummary' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    FeedbackDetail:
+      allOf:
+        - $ref: '#/components/schemas/FeedbackSummary'
+        - type: object
+          required: [contact, client, flaggedReason, adminNote, attachments, replies]
+          properties:
+            contact: { type: string }
+            client:
+              type: object
+              description: App 版本、系统、机型等，原样保存
+              additionalProperties: true
+            reportId: { type: string, nullable: true }
+            taskId: { type: string, nullable: true }
+            flaggedReason: { type: string }
+            adminNote: { type: string }
+            handledBy: { type: string, nullable: true, description: 最后处理人邮箱 }
+            lastReplyAt: { type: string, format: date-time, nullable: true }
+            userReadAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: 用户最后一次打开这条反馈的时间
+            attachments:
+              type: array
+              items:
+                type: object
+                required: [id, url]
+                properties:
+                  id: { type: string }
+                  url: { type: string, description: 短时签名链接 }
+            replies:
+              type: array
+              items:
+                type: object
+                required: [id, content, createdAt]
+                properties:
+                  id: { type: string }
+                  content: { type: string }
+                  adminName: { type: string }
+                  createdAt: { type: string, format: date-time }
+    FeedbackPatch:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        adminNote: { type: string, maxLength: 2000 }
+    FeedbackReplyRequest:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 1000 }
+    ReportFeedbackItem:
+      type: object
+      required: [reportId, reportTitle, reportDepth, userId, nickname, phoneMasked, rating, reasons, comment, reportCreatedAt, updatedAt]
+      properties:
+        reportId: { type: string }
+        reportTitle: { type: string }
+        reportDepth: { type: string }
+        taskId: { type: string, nullable: true }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        rating: { type: string, enum: [satisfied, unsatisfied] }
+        reasons:
+          type: array
+          items: { $ref: '#/components/schemas/ReportFeedbackReason' }
+        comment: { type: string }
+        reportCreatedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ReportFeedbackPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ReportFeedbackItem' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
