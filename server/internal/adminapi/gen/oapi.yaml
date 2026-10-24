@@ -1,0 +1,9 @@
+package: gen
+output: zz_generated.go
+generate:
+  chi-server: true
+  strict-server: true
+  models: true
+  embedded-spec: true
+output-options:
+  skip-prune: true

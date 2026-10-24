@@ -24,17 +24,24 @@ import (
 	"github.com/hwq830/zeusai/server/internal/search"
 )
 
-// Moderation returns the input/output checker, or nil (allow all) in dev without a list.
-func Moderation(cfg config.Config) (moderation.Checker, error) {
-	if cfg.ModerationKeywordsFile == "" {
-		return nil, nil
+// Moderation returns the input/output checker: the keyword file (if any) plus the terms
+// operators add in the admin console, with every block logged for review.
+func Moderation(cfg config.Config, q *db.Queries, log *slog.Logger) (moderation.Checker, error) {
+	chain := moderation.Chain{}
+	if cfg.ModerationKeywordsFile != "" {
+		f, err := os.Open(cfg.ModerationKeywordsFile)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		kw, err := moderation.NewKeywords(f)
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, kw)
 	}
-	f, err := os.Open(cfg.ModerationKeywordsFile)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return moderation.NewKeywords(f)
+	chain = append(chain, &moderation.Terms{Q: q, Log: log})
+	return moderation.Recorder{Checker: chain, Q: q, Log: log}, nil
 }
 
 // LLM returns the metered model provider.

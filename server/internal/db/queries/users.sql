@@ -50,3 +50,15 @@ DELETE FROM devices WHERE push_token = $1 AND user_id = $2;
 
 -- name: ListDevices :many
 SELECT * FROM devices WHERE user_id = $1;
+
+-- name: RevokeAllRefreshTokens :exec
+UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL;
+
+-- name: GetQuotaOverride :one
+SELECT * FROM user_quota_overrides WHERE user_id = $1;
+
+-- name: InsertModerationEvent :exec
+INSERT INTO moderation_events (user_id, kind, reason, excerpt) VALUES ($1, $2, $3, $4);
+
+-- name: ListModerationTerms :many
+SELECT term FROM moderation_terms ORDER BY id;

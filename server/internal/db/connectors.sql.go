@@ -28,7 +28,7 @@ func (q *Queries) DeleteCredential(ctx context.Context, arg DeleteCredentialPara
 }
 
 const getConnectorForUser = `-- name: GetConnectorForUser :one
-SELECT c.id, c.name, c.description, c.icon_url, c.kind, c.category, c.requires_auth, c.default_on, c.tools, c.transport, c.mcp_version, c.available, c.sort_order,
+SELECT c.id, c.name, c.description, c.icon_url, c.kind, c.category, c.requires_auth, c.default_on, c.tools, c.transport, c.mcp_version, c.available, c.sort_order, c.admin_managed,
        coalesce(uc.enabled, c.default_on)::bool AS enabled,
        (cc.user_id IS NOT NULL)::bool          AS authorized
 FROM connectors c
@@ -56,6 +56,7 @@ type GetConnectorForUserRow struct {
 	McpVersion   string
 	Available    bool
 	SortOrder    int32
+	AdminManaged bool
 	Enabled      bool
 	Authorized   bool
 }
@@ -77,6 +78,7 @@ func (q *Queries) GetConnectorForUser(ctx context.Context, arg GetConnectorForUs
 		&i.McpVersion,
 		&i.Available,
 		&i.SortOrder,
+		&i.AdminManaged,
 		&i.Enabled,
 		&i.Authorized,
 	)
@@ -84,7 +86,7 @@ func (q *Queries) GetConnectorForUser(ctx context.Context, arg GetConnectorForUs
 }
 
 const listConnectorsForUser = `-- name: ListConnectorsForUser :many
-SELECT c.id, c.name, c.description, c.icon_url, c.kind, c.category, c.requires_auth, c.default_on, c.tools, c.transport, c.mcp_version, c.available, c.sort_order,
+SELECT c.id, c.name, c.description, c.icon_url, c.kind, c.category, c.requires_auth, c.default_on, c.tools, c.transport, c.mcp_version, c.available, c.sort_order, c.admin_managed,
        coalesce(uc.enabled, c.default_on)::bool AS enabled,
        (cc.user_id IS NOT NULL)::bool          AS authorized
 FROM connectors c
@@ -108,6 +110,7 @@ type ListConnectorsForUserRow struct {
 	McpVersion   string
 	Available    bool
 	SortOrder    int32
+	AdminManaged bool
 	Enabled      bool
 	Authorized   bool
 }
@@ -135,6 +138,7 @@ func (q *Queries) ListConnectorsForUser(ctx context.Context, userID uuid.UUID) (
 			&i.McpVersion,
 			&i.Available,
 			&i.SortOrder,
+			&i.AdminManaged,
 			&i.Enabled,
 			&i.Authorized,
 		); err != nil {
@@ -169,10 +173,16 @@ INSERT INTO connectors (id, name, description, icon_url, kind, category, require
                         transport, mcp_version, available, sort_order)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (id) DO UPDATE SET
-    name = excluded.name, description = excluded.description, icon_url = excluded.icon_url,
-    kind = excluded.kind, category = excluded.category, requires_auth = excluded.requires_auth,
-    default_on = excluded.default_on, tools = excluded.tools, transport = excluded.transport,
-    mcp_version = excluded.mcp_version, available = excluded.available, sort_order = excluded.sort_order
+    kind = excluded.kind, requires_auth = excluded.requires_auth, tools = excluded.tools,
+    transport = excluded.transport, mcp_version = excluded.mcp_version,
+    -- Fields editable in the admin console keep their edits once a row is admin-managed.
+    name = CASE WHEN connectors.admin_managed THEN connectors.name ELSE excluded.name END,
+    description = CASE WHEN connectors.admin_managed THEN connectors.description ELSE excluded.description END,
+    icon_url = CASE WHEN connectors.admin_managed THEN connectors.icon_url ELSE excluded.icon_url END,
+    category = CASE WHEN connectors.admin_managed THEN connectors.category ELSE excluded.category END,
+    default_on = CASE WHEN connectors.admin_managed THEN connectors.default_on ELSE excluded.default_on END,
+    available = CASE WHEN connectors.admin_managed THEN connectors.available ELSE excluded.available END,
+    sort_order = CASE WHEN connectors.admin_managed THEN connectors.sort_order ELSE excluded.sort_order END
 `
 
 type UpsertConnectorParams struct {

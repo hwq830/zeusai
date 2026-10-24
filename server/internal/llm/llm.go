@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 )
 
 type Tier string
@@ -83,6 +84,9 @@ type Metered struct {
 }
 
 func (m Metered) Complete(ctx context.Context, req Request) (Response, error) {
+	if req.UserID != nil {
+		ctx = moderation.WithUser(ctx, *req.UserID) // attributes output blocks in the moderation log
+	}
 	resp, err := m.Provider.Complete(ctx, req)
 	if err != nil {
 		return resp, err

@@ -6,7 +6,8 @@
 | --- | --- | --- |
 | `api` | `server/cmd/api` | 登录、额度、模板、定时简报、今日简报、任务与 SSE、连接器、记忆 |
 | `orchestrator` | `server/cmd/orchestrator` | Temporal worker：每日简报工作流 |
-| `zeusctl` | `server/cmd/zeusctl` | `migrate` 迁移数据库，`seed` 导入官方模板和连接器目录 |
+| `admin` | `server/cmd/admin` | 管理员控制台接口 `/admin/v1`（契约 `api/admin.yaml`，前端在 hwq830/zeusai-admin），只在内网暴露 |
+| `zeusctl` | `server/cmd/zeusctl` | `migrate` 迁移数据库，`seed` 导入官方模板和连接器目录，`admin-create` 创建控制台账号 |
 | `modelgw` / `sandboxmgr` / `egress` / `sandboxd` | 待写 | 第 3–4 阶段 |
 
 ## 目录
@@ -17,6 +18,7 @@ server/
 ├── migrations/              # goose SQL 迁移（嵌入二进制）
 └── internal/
     ├── httpapi/             # 实现 api/openapi.yaml 生成的 strict server；gen/ 为生成代码
+    ├── adminapi/            # 实现 api/admin.yaml：控制台接口、角色权限、审计日志
     ├── db/                  # sqlc：queries/*.sql → Go；所有用户数据查询都带 user_id
     ├── auth/  quota/  schedule/  template/  briefing/  task/  connector/
     ├── events/              # 任务事件：Redis Stream，每任务一条，序号即 SSE id
@@ -37,6 +39,22 @@ go run ./server/cmd/zeusctl seed
 ZEUS_DEV_SMS_CODE=246810 go run ./server/cmd/api &
 go run ./server/cmd/orchestrator &
 ```
+
+管理员控制台：
+
+```sh
+ZEUS_ADMIN_PASSWORD=至少10位的密码 go run ./server/cmd/zeusctl admin-create you@example.com owner
+go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
+```
+
+| 设置 | 说明 |
+| --- | --- |
+| `ZEUS_ADMIN_JWT_SECRET` | 控制台令牌密钥，与 `ZEUS_JWT_SECRET` 分开；非 dev 必填 |
+| `ZEUS_ADMIN_TOKEN_TTL` | 登录有效期，默认 `12h` |
+| `ZEUS_ADMIN_STATIC_DIR` | 可选：zeusai-admin 构建出的 `dist/`，由 admin 进程一起提供 |
+| `ZEUS_MODELGW_CONFIG`、`ZEUS_LLM_PROVIDER` | 与 api 相同，控制台“模型网关”页只读展示 |
+
+角色：`owner` 全部权限；`operator` 用户、额度、模板、连接器、任务；`moderator` 内容审核和停用用户；`viewer` 只读。所有写操作进 `admin_audit_log`。在控制台改过的官方模板和连接器标记为 `admin_managed`，之后 `zeusctl seed` 不再覆盖它们的运营字段。控制台添加的屏蔽词与 `ZEUS_MODERATION_KEYWORDS_FILE` 合并，各进程约 1 分钟内生效，拦截记录写入 `moderation_events`。
 
 开发环境下（`ZEUS_ENV=dev`，默认）：
 

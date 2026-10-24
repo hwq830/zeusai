@@ -51,6 +51,17 @@ func NewKeywords(r io.Reader) (*Keywords, error) {
 	return k, sc.Err()
 }
 
+// KeywordList builds a Keywords checker from terms already in memory.
+func KeywordList(terms []string) *Keywords {
+	k := &Keywords{}
+	for _, t := range terms {
+		if n := normalize(t); n != "" {
+			k.terms = append(k.terms, n)
+		}
+	}
+	return k
+}
+
 func (k *Keywords) Check(_ context.Context, _ Kind, text string) (Verdict, error) {
 	n := normalize(text)
 	for _, t := range k.terms {

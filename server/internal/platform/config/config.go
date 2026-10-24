@@ -54,6 +54,13 @@ type Config struct {
 	APNsKeyID             string `koanf:"apns_key_id"`
 	APNsTeamID            string `koanf:"apns_team_id"`
 	APNsTopic             string `koanf:"apns_topic"` // bundle id
+
+	// Admin console process (server/cmd/admin). Keep it on an internal address.
+	AdminHTTPAddr  string        `koanf:"admin_http_addr"`
+	AdminJWTSecret string        `koanf:"admin_jwt_secret"` // separate from JWT_SECRET; required outside dev
+	AdminTokenTTL  time.Duration `koanf:"admin_token_ttl"`
+	// AdminStaticDir serves the built console (zeusai-admin dist/) next to /admin/v1; optional.
+	AdminStaticDir string `koanf:"admin_static_dir"`
 }
 
 func defaults() Config {
@@ -70,6 +77,8 @@ func defaults() Config {
 		RefreshTTL:        30 * 24 * time.Hour,
 		LLMProvider:       "mock",
 		SearchProvider:    "mock",
+		AdminHTTPAddr:     ":8081",
+		AdminTokenTTL:     12 * time.Hour,
 	}
 }
 
@@ -90,6 +99,9 @@ func Load() (Config, error) {
 			return Config{}, errors.New("ZEUS_JWT_SECRET is required outside dev")
 		}
 		cfg.JWTSecret = "dev-only-insecure-secret"
+	}
+	if cfg.AdminJWTSecret == "" && cfg.IsDev() {
+		cfg.AdminJWTSecret = "dev-only-insecure-admin-secret"
 	}
 	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.LLMProvider == "mock" || cfg.SearchProvider == "mock") {
 		return Config{}, errors.New("dev-only settings (DEV_SMS_CODE, mock LLM or search) are not allowed outside dev")
