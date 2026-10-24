@@ -126,7 +126,7 @@ func (a *Activities) NotifyReport(ctx context.Context, plan ReportPlan) error {
 		return err
 	}
 	return a.Push.Notify(ctx, plan.UserID, push.Notification{
-		Title: "报告已完成", Body: r.Title, DeepLink: "zeus://report/" + plan.ReportID.String(),
+		Category: push.CategoryReport, Title: "报告已完成", Body: r.Title, DeepLink: "zeus://report/" + plan.ReportID.String(),
 	})
 }
 

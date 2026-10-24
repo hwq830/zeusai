@@ -54,7 +54,7 @@ func run(log *slog.Logger) error {
 	defer tc.Close()
 
 	q := db.New(pool)
-	notifier, err := providers.Push(cfg, q, log)
+	notifier, err := providers.Notifier(cfg, q, log)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func run(log *slog.Logger) error {
 		Log: log, Q: q, Tokens: adminapi.NewTokens(cfg.AdminJWTSecret, cfg.AdminTokenTTL),
 		Quota: &quota.Service{Q: q}, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
 		LLMProvider: cfg.LLMProvider, ModelGWConfig: cfg.ModelGWConfig, PublicBaseURL: cfg.PublicBaseURL,
-		StaticDir: cfg.AdminStaticDir, Blob: providers.Blob(cfg), Push: notifier,
+		StaticDir: cfg.AdminStaticDir, Blob: providers.Blob(cfg), Push: notifier, Notify: notifier,
 	}
 	hs := &http.Server{Addr: cfg.AdminHTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

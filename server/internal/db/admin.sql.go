@@ -523,7 +523,7 @@ func (q *Queries) AdminListTemplates(ctx context.Context, arg AdminListTemplates
 
 const adminListUsers = `-- name: AdminListUsers :many
 
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users
 WHERE ($3::text IS NULL
        OR id::text = $3 OR phone LIKE '%' || $3 || '%' OR nickname ILIKE '%' || $3 || '%')
   AND ($4::text IS NULL OR plan_code = $4)
@@ -573,6 +573,7 @@ func (q *Queries) AdminListUsers(ctx context.Context, arg AdminListUsersParams) 
 			&i.UpdatedAt,
 			&i.DisabledAt,
 			&i.DisabledReason,
+			&i.LastSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -602,7 +603,7 @@ UPDATE users SET
     disabled_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at
 `
 
 type AdminSetUserDisabledParams struct {
@@ -629,13 +630,14 @@ func (q *Queries) AdminSetUserDisabled(ctx context.Context, arg AdminSetUserDisa
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
 
 const adminSetUserPlan = `-- name: AdminSetUserPlan :one
 UPDATE users SET plan_code = $2, plan_expires_at = $3, updated_at = now() WHERE id = $1
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at
 `
 
 type AdminSetUserPlanParams struct {
@@ -662,6 +664,7 @@ func (q *Queries) AdminSetUserPlan(ctx context.Context, arg AdminSetUserPlanPara
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }

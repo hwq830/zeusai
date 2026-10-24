@@ -94,6 +94,7 @@ func (a *APNs) Notify(ctx context.Context, userID uuid.UUID, n Notification) err
 	}
 	body, _ := json.Marshal(APNsPayload(n))
 	var errs []error
+	reached := 0
 	for _, d := range devices {
 		if d.Platform != "ios" {
 			continue
@@ -105,11 +106,16 @@ func (a *APNs) Notify(ctx context.Context, userID uuid.UUID, n Notification) err
 		}
 		if err != nil {
 			errs = append(errs, err)
+			continue
 		}
+		reached++
 	}
 	// One failing device must not hide success on the others; report only if all failed.
-	if len(errs) > 0 && len(errs) == len(devices) {
-		return errors.Join(errs...)
+	if reached == 0 {
+		if len(errs) > 0 {
+			return errors.Join(errs...)
+		}
+		return ErrNoDevice
 	}
 	for _, e := range errs {
 		if a.Log != nil {

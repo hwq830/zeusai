@@ -9,7 +9,7 @@ info:
     约定：
     - 接口挂在 `/admin/v1` 下，由独立进程 `server/cmd/admin` 提供，只在内网 / VPN 暴露，不与 App 的 api 进程共用端口。
     - 鉴权：`Authorization: Bearer <token>`，令牌由 `POST /admin/v1/auth/login` 签发，12 小时有效，与 App 令牌密钥不同。
-    - 角色：`owner` 全部权限（含管理员账号）；`operator` 用户、额度、模板、连接器、任务、用户反馈；
+    - 角色：`owner` 全部权限（含管理员账号、推送活动审批）；`operator` 用户、额度、模板、连接器、任务、用户反馈、推送活动（编辑和提交）；
       `moderator` 内容审核、停用用户、用户反馈；`viewer` 只读。越权返回 403 `forbidden`。
     - 所有写操作记入审计日志（`GET /admin/v1/audit-log`）。
     - 金额单位为人民币元（`costCny`），由模型网关按每百万 token 单价计算。
@@ -31,6 +31,7 @@ tags:
   - name: modelgw
   - name: admins
   - name: feedback
+  - name: campaigns
 
 paths:
   # ---------------------------------------------------------------- auth
@@ -717,6 +718,190 @@ paths:
               schema: { $ref: '#/components/schemas/ReportFeedbackPage' }
         default: { $ref: '#/components/responses/Error' }
 
+  # ---------------------------------------------------------------- campaigns
+  /admin/v1/campaigns:
+    get:
+      tags: [campaigns]
+      operationId: listCampaigns
+      summary: 运营推送活动，按创建时间倒序
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CampaignStatus' }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignPage' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [campaigns]
+      operationId: createCampaign
+      summary: 新建草稿
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/audience-estimate:
+    post:
+      tags: [campaigns]
+      operationId: estimateCampaignAudience
+      summary: 估算目标人数
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignAudience' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AudienceEstimate' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    get:
+      tags: [campaigns]
+      operationId: getCampaign
+      summary: 详情和送达统计
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [campaigns]
+      operationId: updateCampaign
+      summary: 修改草稿（被驳回的活动回到草稿）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [campaigns]
+      operationId: deleteCampaign
+      summary: 删除草稿
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}/submit:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    post:
+      tags: [campaigns]
+      operationId: submitCampaign
+      summary: 提交审批（草稿 → 待审批）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    post:
+      tags: [campaigns]
+      operationId: approveCampaign
+      summary: 审批通过（仅 owner）。没有定时则立即开始发送
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    post:
+      tags: [campaigns]
+      operationId: rejectCampaign
+      summary: 驳回，回到草稿（仅 owner）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignRejectRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    post:
+      tags: [campaigns]
+      operationId: cancelCampaign
+      summary: 取消待审批、已排期或发送中的活动；已写入的消息保留，可再撤回
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}/recall:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    post:
+      tags: [campaigns]
+      operationId: recallCampaign
+      summary: 撤回：从所有用户的消息中心移除（已送达的推送无法撤回）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Campaign' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/campaigns/{campaignId}/test-send:
+    parameters:
+      - $ref: '#/components/parameters/CampaignId'
+    post:
+      tags: [campaigns]
+      operationId: testSendCampaign
+      summary: 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignTestRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignTestResult' }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -754,6 +939,11 @@ components:
       schema: { type: string }
     FeedbackId:
       name: feedbackId
+      in: path
+      required: true
+      schema: { type: string }
+    CampaignId:
+      name: campaignId
       in: path
       required: true
       schema: { type: string }
@@ -1535,3 +1725,118 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ReportFeedbackItem' }
         nextCursor: { $ref: '#/components/schemas/NextCursor' }
+
+    # ------------------------------------------------------------ campaigns
+    CampaignStatus:
+      type: string
+      description: draft 草稿 → pending_approval 待审批 → scheduled 已排期 → sending 发送中 → sent 已发送；cancelled 已取消、recalled 已撤回
+      enum: [draft, pending_approval, scheduled, sending, sent, cancelled, recalled]
+    CampaignCategory:
+      type: string
+      description: marketing 运营活动（只推给开启了运营推送的用户，受频控）；service 服务通知（如停机公告）
+      enum: [marketing, service]
+    CampaignAudience:
+      type: object
+      required: [type]
+      description: |
+        all 全部用户；users 指定 userIds（最多 10000）；filter 按条件，所有已填条件同时满足。停用的用户始终排除。
+      properties:
+        type: { type: string, enum: [all, users, filter] }
+        userIds:
+          type: array
+          items: { type: string }
+        registeredAfter: { type: string, format: date-time }
+        registeredBefore: { type: string, format: date-time }
+        activeWithinDays: { type: integer, minimum: 0, maximum: 365, description: 最近 N 天打开过 App }
+        inactiveForDays: { type: integer, minimum: 0, maximum: 365, description: 超过 N 天没打开 App }
+        minAppVersion: { type: string, example: '1.2.0' }
+        templateId: { type: string, description: 有用该模板创建的进行中简报订阅 }
+    CampaignInput:
+      type: object
+      required: [name, category, title, body, audience]
+      properties:
+        name: { type: string, description: 内部名称，用户看不到 }
+        category: { $ref: '#/components/schemas/CampaignCategory' }
+        title: { type: string, maxLength: 40 }
+        body: { type: string, maxLength: 200 }
+        imageUrl: { type: string, description: https 图片，推送大图和消息中心都会显示 }
+        deeplink: { type: string, description: 'zeus:// 页面或 https 链接，空表示只打开 App' }
+        audience: { $ref: '#/components/schemas/CampaignAudience' }
+        sendAt: { type: string, format: date-time, nullable: true, description: 定时发送；为空表示审批通过后立即发送 }
+    CampaignStats:
+      type: object
+      required: [messages, pushed, pushFailed, pushSkipped, pushPending, read, opened]
+      properties:
+        messages: { type: integer, description: 写入消息中心的人数 }
+        pushed: { type: integer, description: APNs 推送成功 }
+        pushFailed: { type: integer }
+        pushSkipped: { type: integer, description: 用户关闭、频控或没有设备 }
+        pushPending: { type: integer, description: 免打扰延后中 }
+        read: { type: integer, description: 在消息中心或通过推送看过 }
+        opened: { type: integer, description: 点推送打开 App }
+    Campaign:
+      type: object
+      required: [id, name, category, title, body, imageUrl, deeplink, audience, status, audienceEstimate, rejectReason, stats, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        category: { $ref: '#/components/schemas/CampaignCategory' }
+        title: { type: string }
+        body: { type: string }
+        imageUrl: { type: string }
+        deeplink: { type: string }
+        audience: { $ref: '#/components/schemas/CampaignAudience' }
+        sendAt: { type: string, format: date-time, nullable: true }
+        status: { $ref: '#/components/schemas/CampaignStatus' }
+        audienceEstimate: { type: integer, description: 提交时估算的目标人数 }
+        rejectReason: { type: string }
+        createdBy: { type: string, description: 创建人邮箱 }
+        approvedBy: { type: string, description: 审批人邮箱 }
+        submittedAt: { type: string, format: date-time }
+        approvedAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        cancelledAt: { type: string, format: date-time }
+        recalledAt: { type: string, format: date-time }
+        stats: { $ref: '#/components/schemas/CampaignStats' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CampaignPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Campaign' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    AudienceEstimate:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer }
+    CampaignRejectRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, maxLength: 200 }
+    CampaignTestRequest:
+      type: object
+      required: [userIds]
+      properties:
+        userIds:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { type: string }
+    CampaignTestResult:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [userId, status]
+            properties:
+              userId: { type: string }
+              status: { type: string, enum: [sent, no_device, failed, not_found] }

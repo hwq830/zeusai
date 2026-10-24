@@ -89,6 +89,31 @@ type BriefingSubscription struct {
 	UpdatedAt       time.Time
 }
 
+type Campaign struct {
+	ID               uuid.UUID
+	Name             string
+	Category         string
+	Title            string
+	Body             string
+	ImageUrl         string
+	Deeplink         string
+	Audience         json.RawMessage
+	Status           string
+	SendAt           *time.Time
+	AudienceEstimate int32
+	RejectReason     string
+	CreatedBy        *uuid.UUID
+	SubmittedAt      *time.Time
+	ApprovedBy       *uuid.UUID
+	ApprovedAt       *time.Time
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	CancelledAt      *time.Time
+	RecalledAt       *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type Connector struct {
 	ID           string
 	Name         string
@@ -173,6 +198,25 @@ type Memory struct {
 	UpdatedAt    time.Time
 }
 
+type Message struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	Category   string
+	Title      string
+	Body       string
+	ImageUrl   string
+	Deeplink   string
+	CampaignID *uuid.UUID
+	PushStatus string
+	PushAfter  *time.Time
+	PushedAt   *time.Time
+	ReadAt     *time.Time
+	OpenedAt   *time.Time
+	DeletedAt  *time.Time
+	RecalledAt *time.Time
+	CreatedAt  time.Time
+}
+
 type ModelUsage struct {
 	ID           int64
 	UserID       *uuid.UUID
@@ -202,6 +246,18 @@ type ModerationTerm struct {
 	Note      string
 	CreatedBy *uuid.UUID
 	CreatedAt time.Time
+}
+
+type NotificationPref struct {
+	UserID           uuid.UUID
+	Briefing         bool
+	Report           bool
+	Marketing        bool
+	MarketingOptInAt *time.Time
+	QuietEnabled     bool
+	QuietStart       int32
+	QuietEnd         int32
+	UpdatedAt        time.Time
 }
 
 type RefreshToken struct {
@@ -314,6 +370,7 @@ type User struct {
 	UpdatedAt      time.Time
 	DisabledAt     *time.Time
 	DisabledReason string
+	LastSeenAt     *time.Time
 }
 
 type UserConnector struct {

@@ -17,6 +17,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/feedback"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -72,8 +73,10 @@ func New(d Deps) *Server {
 		Connectors: &connector.Service{Q: q},
 		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, PublicBaseURL: d.Config.PublicBaseURL},
 		Feedback:   &feedback.Service{Pool: d.Pool, Q: q, Blob: d.Blob, Mod: d.Mod, Now: d.Now},
-		Bus:        &events.Bus{R: d.Redis},
-		Files:      files(d.Blob),
+		// The api process only reads the message center; pushes are sent by the orchestrator and admin.
+		Notify: &notify.Service{Q: q, Now: d.Now},
+		Bus:    &events.Bus{R: d.Redis},
+		Files:  files(d.Blob),
 	}
 }
 
