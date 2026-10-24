@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"go.temporal.io/sdk/client"
 
 	"github.com/hwq830/zeusai/server/internal/adminapi"
@@ -19,6 +20,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
 
@@ -52,10 +54,27 @@ func run(log *slog.Logger) error {
 	}
 	defer tc.Close()
 
+	ropt, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return err
+	}
+	rdb := redis.NewClient(ropt)
+	defer rdb.Close()
+
 	q := db.New(pool)
+	if _, err := remoteconfig.SeedBuiltins(ctx, q); err != nil {
+		return err
+	}
+	rc := &remoteconfig.Cache{Q: q, Redis: rdb, Log: log, Region: cfg.Region}
+	if err := rc.Load(ctx); err != nil {
+		log.Warn("remote config not loaded yet", "err", err)
+	}
+	go rc.Run(ctx)
 	srv := &adminapi.Server{
 		Log: log, Q: q, Tokens: adminapi.NewTokens(cfg.AdminJWTSecret, cfg.AdminTokenTTL),
-		Quota: &quota.Service{Q: q}, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
+		Quota: &quota.Service{Q: q, Config: rc}, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
+		Releases:    &remoteconfig.Releases{Pool: pool, Redis: rdb, Log: log, RequireApproval: cfg.Env == "prod"},
+		Region:      cfg.Region,
 		LLMProvider: cfg.LLMProvider, ModelGWConfig: cfg.ModelGWConfig, PublicBaseURL: cfg.PublicBaseURL,
 		StaticDir: cfg.AdminStaticDir,
 	}

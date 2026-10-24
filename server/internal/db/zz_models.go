@@ -89,6 +89,40 @@ type BriefingSubscription struct {
 	UpdatedAt       time.Time
 }
 
+type ConfigKey struct {
+	Key           string
+	Namespace     string
+	Type          string
+	Description   string
+	Owner         string
+	DefaultValue  json.RawMessage
+	ValueSchema   json.RawMessage
+	Rules         json.RawMessage
+	ApplyMode     string
+	ClientVisible bool
+	Expose        bool
+	ArchivedAt    *time.Time
+	CreatedBy     *uuid.UUID
+	UpdatedBy     *uuid.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type ConfigRelease struct {
+	ID             int64
+	Version        *int64
+	Status         string
+	Snapshot       json.RawMessage
+	Note           string
+	RolledBackFrom *int64
+	CreatedBy      *uuid.UUID
+	DecidedBy      *uuid.UUID
+	DecisionNote   string
+	CreatedAt      time.Time
+	DecidedAt      *time.Time
+	PublishedAt    *time.Time
+}
+
 type Connector struct {
 	ID           string
 	Name         string

@@ -10,7 +10,6 @@ import (
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
-	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 )
 
@@ -80,7 +79,7 @@ func (s *Server) userDetail(ctx context.Context, u db.User) (gen.UserDetail, err
 	if err != nil {
 		return d, err
 	}
-	plan := quota.LimitsFor(u.PlanCode)
+	plan := s.Quota.PlanLimits(u)
 	d.Quota.Subscriptions = gen.QuotaItem{Used: usage.Subscriptions.Used, Limit: usage.Subscriptions.Limit, PlanLimit: plan.Subscriptions}
 	d.Quota.Reports = gen.QuotaItem{Used: usage.Reports.Used, Limit: usage.Reports.Limit, PlanLimit: plan.ReportsPerMonth, ResetsAt: usage.Reports.ResetsAt}
 	if o != nil {
@@ -144,7 +143,7 @@ func (s *Server) UpdateUserPlan(ctx context.Context, req gen.UpdateUserPlanReque
 		return nil, err
 	}
 	known := false
-	for _, p := range quota.Plans() {
+	for _, p := range s.Quota.Plans() {
 		known = known || p.Code == req.Body.PlanCode
 	}
 	if !known {
@@ -296,7 +295,7 @@ func (s *Server) syncSchedules(ctx context.Context, userID uuid.UUID, subs []db.
 
 func (s *Server) ListPlans(ctx context.Context, _ gen.ListPlansRequestObject) (gen.ListPlansResponseObject, error) {
 	out := gen.ListPlans200JSONResponse{}
-	for _, p := range quota.Plans() {
+	for _, p := range s.Quota.Plans() {
 		out = append(out, gen.Plan{Code: p.Code, Subscriptions: p.Subscriptions, ReportsPerMonth: p.ReportsPerMonth})
 	}
 	return out, nil

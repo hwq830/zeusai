@@ -28,6 +28,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
@@ -61,6 +62,7 @@ type harness struct {
 	url    string
 	token  string
 	router routers.Router
+	config *remoteconfig.Cache
 }
 
 func setup(t *testing.T) *harness {
@@ -74,9 +76,11 @@ func setup(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	fo := &fakeOrch{schedules: map[uuid.UUID]bool{}}
+	rc := &remoteconfig.Cache{Q: q, Region: "china"}
 	srv := &adminapi.Server{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Q: q, Tokens: adminapi.NewTokens("test", time.Hour),
-		Quota: &quota.Service{Q: q}, Orch: fo, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
+		Quota: &quota.Service{Q: q, Config: rc}, Orch: fo, Region: "china",
+		Releases: &remoteconfig.Releases{Pool: pool, RequireApproval: true}, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
 		PublicBaseURL: "https://zeus.test",
 	}
 	hs := httptest.NewServer(srv.Handler())
@@ -90,7 +94,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, q: q, orch: fo, url: hs.URL, router: router}
+	return &harness{t: t, q: q, orch: fo, url: hs.URL, router: router, config: rc}
 }
 
 func (h *harness) do(method, path string, body any, wantStatus int, out any) {
@@ -163,7 +167,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 6 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 9 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

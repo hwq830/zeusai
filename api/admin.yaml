@@ -11,6 +11,9 @@ info:
     - 鉴权：`Authorization: Bearer <token>`，令牌由 `POST /admin/v1/auth/login` 签发，12 小时有效，与 App 令牌密钥不同。
     - 角色：`owner` 全部权限（含管理员账号）；`operator` 用户、额度、模板、连接器、任务；
       `moderator` 内容审核、停用用户；`viewer` 只读。越权返回 403 `forbidden`。
+    - 配置中心：`operator` 编辑配置项规则、提交发布、回滚；`owner` 另可新建 / 归档配置项、改命名空间、审批发布。
+      生产环境（ZEUS_ENV=prod）提交后需 owner 审批，以下情况直接上线：只改动 killswitch 命名空间里已有的配置项；
+      提交人是唯一的 owner。其他环境提交即上线。
     - 所有写操作记入审计日志（`GET /admin/v1/audit-log`）。
     - 金额单位为人民币元（`costCny`），由模型网关按每百万 token 单价计算。
     - 列表统一 `cursor` + `limit` 分页，响应带 `nextCursor`，为空表示没有更多。错误格式与 App 契约相同。
@@ -30,6 +33,7 @@ tags:
   - name: costs
   - name: modelgw
   - name: admins
+  - name: config
 
 paths:
   # ---------------------------------------------------------------- auth
@@ -617,6 +621,199 @@ paths:
               schema: { $ref: '#/components/schemas/AuditPage' }
         default: { $ref: '#/components/responses/Error' }
 
+  # ---------------------------------------------------------------- config
+  /admin/v1/config/keys:
+    get:
+      tags: [config]
+      operationId: listConfigKeys
+      summary: 配置项（工作副本），附线上版本的值
+      parameters:
+        - name: archived
+          in: query
+          description: true 时包含已归档的配置项
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigKeyList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [config]
+      operationId: createConfigKey
+      summary: 新建配置项（owner）。新建后要发布才会下发
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigKeyCreate' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigKey' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/keys/{key}:
+    parameters:
+      - $ref: '#/components/parameters/ConfigKeyName'
+    get:
+      tags: [config]
+      operationId: getConfigKey
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigKey' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [config]
+      operationId: updateConfigKey
+      summary: 修改工作副本。改命名空间、归档需要 owner；类型不能改
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigKeyPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigKey' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/changes:
+    get:
+      tags: [config]
+      operationId: listConfigChanges
+      summary: 工作副本相对线上版本的改动（发布前的 diff）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigChanges' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/releases:
+    get:
+      tags: [config]
+      operationId: listConfigReleases
+      summary: 发布记录，最新在前
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigReleasePage' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [config]
+      operationId: submitConfigRelease
+      summary: 提交发布。按审批规则直接上线（status=published）或等待审批（status=pending）
+      description: 同一时间只有一个待审批的发布，新提交会把旧的待审批发布标为 superseded。没有改动时返回 409。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigReleaseRequest' }
+      responses:
+        '201':
+          description: 已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigReleaseDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/releases/{releaseId}:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    get:
+      tags: [config]
+      operationId: getConfigRelease
+      summary: 发布详情。已发布的与上一个发布版本比较，待审批的与当前线上版本比较
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigReleaseDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/releases/{releaseId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      tags: [config]
+      operationId: approveConfigRelease
+      summary: 审批并上线（owner；不能审批自己提交的，除非只有一个 owner）
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigReleaseRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigReleaseDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/releases/{releaseId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      tags: [config]
+      operationId: rejectConfigRelease
+      summary: 驳回待审批的发布（owner）
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigReleaseRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigReleaseDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/releases/{releaseId}/rollback:
+    parameters:
+      - $ref: '#/components/parameters/ReleaseId'
+    post:
+      tags: [config]
+      operationId: rollbackConfigRelease
+      summary: 把这个已发布版本的内容作为新版本重新发布，同时把工作副本恢复成它（审批规则同提交）
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigReleaseRequest' }
+      responses:
+        '201':
+          description: 已提交
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigReleaseDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/config/preview:
+    post:
+      tags: [config]
+      operationId: previewConfig
+      summary: 某个用户 / 设备会拿到什么值、命中哪条规则
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfigPreviewRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfigPreview' }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -652,6 +849,16 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ConfigKeyName:
+      name: key
+      in: path
+      required: true
+      schema: { type: string, example: report.create_enabled }
+    ReleaseId:
+      name: releaseId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
   responses:
     Error:
       description: 错误
@@ -1280,3 +1487,247 @@ components:
               calls: { type: integer }
               costCny: { type: number, format: double }
               lastCallAt: { type: string, format: date-time, nullable: true }
+
+    # ------------------------------------------------------------ config
+    ConfigNamespace:
+      type: string
+      enum: [feature, ui, quota, endpoint, killswitch, app]
+    ConfigValueType:
+      type: string
+      enum: [bool, int, float, string, json]
+    ConfigApplyMode:
+      type: string
+      enum: [immediate, next_launch]
+    ConfigCondition:
+      type: object
+      required: [attr, op, values]
+      properties:
+        attr:
+          type: string
+          enum: [user_id, app_version, platform, os_version, plan, region, locale, channel, registered_at]
+        op:
+          type: string
+          enum: [eq, neq, in, not_in, semver_gte, semver_lt, before, after]
+          description: semver_* 只用于 app_version / os_version；before / after 只用于 registered_at（日期 2026-10-24）
+        values:
+          type: array
+          items: { type: string }
+    ConfigRollout:
+      type: object
+      required: [percent, value]
+      properties:
+        percent:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: 命中条件的用户中按 sha256(salt:user_id) 分桶放量的比例，精度 0.01
+        value:
+          nullable: true
+          description: 放量部分拿到的值
+        salt:
+          type: string
+          description: 默认等于 key；改了会重新洗牌
+    ConfigRule:
+      type: object
+      required: [id, when]
+      description: 自上而下匹配，第一条命中的生效。value 与 rollout 二选一；rollout 没抽中的继续往下匹配
+      properties:
+        id: { type: string, example: r1 }
+        note: { type: string }
+        when:
+          type: array
+          description: 全部满足才命中；空数组表示所有人
+          items: { $ref: '#/components/schemas/ConfigCondition' }
+        value:
+          nullable: true
+        rollout: { $ref: '#/components/schemas/ConfigRollout' }
+    ConfigKeyState:
+      type: object
+      description: 一个配置项在某个版本里的内容
+      required: [namespace, type, defaultValue, rules, applyMode, clientVisible, expose]
+      properties:
+        namespace: { $ref: '#/components/schemas/ConfigNamespace' }
+        type: { $ref: '#/components/schemas/ConfigValueType' }
+        defaultValue:
+          nullable: true
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigRule' }
+        applyMode: { $ref: '#/components/schemas/ConfigApplyMode' }
+        clientVisible: { type: boolean }
+        expose: { type: boolean }
+    ConfigKey:
+      type: object
+      required: [key, namespace, type, description, owner, defaultValue, rules, applyMode, clientVisible, expose, archived, unpublished, createdAt, updatedAt]
+      properties:
+        key: { type: string }
+        namespace: { $ref: '#/components/schemas/ConfigNamespace' }
+        type: { $ref: '#/components/schemas/ConfigValueType' }
+        description: { type: string }
+        owner: { type: string, description: 负责人 }
+        defaultValue:
+          nullable: true
+        valueSchema:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: json 类型的 JSON Schema
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigRule' }
+        applyMode: { $ref: '#/components/schemas/ConfigApplyMode' }
+        clientVisible: { type: boolean, description: false 表示只给服务端读，不下发到 App }
+        expose: { type: boolean, description: App 读取时上报 config_exposure }
+        archived: { type: boolean }
+        unpublished: { type: boolean, description: 工作副本和线上版本不同 }
+        published:
+          $ref: '#/components/schemas/ConfigKeyState'
+        updatedByEmail: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ConfigKeyList:
+      type: object
+      required: [items, publishedVersion]
+      properties:
+        publishedVersion: { type: integer, format: int64, description: 线上版本号，0 表示还没有发布过 }
+        pendingReleaseId: { type: integer, format: int64, description: 待审批的发布 }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigKey' }
+    ConfigKeyCreate:
+      type: object
+      required: [key, namespace, type, defaultValue]
+      properties:
+        key: { type: string, example: briefing.new_card_layout }
+        namespace: { $ref: '#/components/schemas/ConfigNamespace' }
+        type: { $ref: '#/components/schemas/ConfigValueType' }
+        description: { type: string }
+        owner: { type: string }
+        defaultValue:
+          nullable: true
+        valueSchema:
+          type: object
+          nullable: true
+          additionalProperties: true
+        applyMode: { $ref: '#/components/schemas/ConfigApplyMode' }
+        clientVisible: { type: boolean, default: true }
+        expose: { type: boolean, default: false }
+    ConfigKeyPatch:
+      type: object
+      properties:
+        namespace: { $ref: '#/components/schemas/ConfigNamespace' }
+        description: { type: string }
+        owner: { type: string }
+        defaultValue:
+          nullable: true
+          description: 不传表示不改；json 类型要改成 null 时传 defaultValueNull=true
+        defaultValueNull: { type: boolean }
+        valueSchema:
+          type: object
+          additionalProperties: true
+        clearValueSchema: { type: boolean }
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigRule' }
+        applyMode: { $ref: '#/components/schemas/ConfigApplyMode' }
+        clientVisible: { type: boolean }
+        expose: { type: boolean }
+        archived: { type: boolean }
+    ConfigChange:
+      type: object
+      required: [key, kind]
+      properties:
+        key: { type: string }
+        kind:
+          type: string
+          enum: [added, removed, changed]
+        before: { $ref: '#/components/schemas/ConfigKeyState' }
+        after: { $ref: '#/components/schemas/ConfigKeyState' }
+    ConfigChanges:
+      type: object
+      required: [publishedVersion, changes, publishesDirectly]
+      properties:
+        publishedVersion: { type: integer, format: int64 }
+        publishesDirectly:
+          type: boolean
+          description: 当前管理员提交这些改动会不会直接上线（不需要审批）
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigChange' }
+    ConfigReleaseStatus:
+      type: string
+      enum: [pending, published, rejected, superseded]
+    ConfigRelease:
+      type: object
+      required: [id, status, note, createdByEmail, decidedByEmail, decisionNote, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        version: { type: integer, format: int64, description: 只有已发布的有 }
+        status: { $ref: '#/components/schemas/ConfigReleaseStatus' }
+        note: { type: string }
+        rolledBackFrom: { type: integer, format: int64, description: 回滚来源的发布 id }
+        createdByEmail: { type: string }
+        decidedByEmail: { type: string }
+        decisionNote: { type: string }
+        createdAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time }
+        current: { type: boolean, description: 是当前线上版本 }
+    ConfigReleasePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigRelease' }
+        nextCursor: { type: string }
+    ConfigReleaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/ConfigRelease'
+        - type: object
+          required: [changes, baseVersion]
+          properties:
+            baseVersion: { type: integer, format: int64, description: changes 的比较基准版本，0 表示空 }
+            changes:
+              type: array
+              items: { $ref: '#/components/schemas/ConfigChange' }
+    ConfigReleaseRequest:
+      type: object
+      properties:
+        note: { type: string, maxLength: 500 }
+    ConfigPreviewRequest:
+      type: object
+      properties:
+        source:
+          type: string
+          enum: [published, working]
+          default: published
+          description: working 用工作副本预览尚未发布的规则
+        userId: { type: string }
+        phone: { type: string, description: 与 userId 二选一 }
+        installId: { type: string }
+        appVersion: { type: string }
+        platform: { type: string, default: ios }
+        osVersion: { type: string }
+        channel: { type: string }
+        locale: { type: string }
+    ConfigPreviewValue:
+      type: object
+      required: [key, value, isDefault, clientVisible]
+      properties:
+        key: { type: string }
+        value:
+          nullable: true
+        ruleId: { type: string }
+        isDefault: { type: boolean }
+        clientVisible: { type: boolean }
+    ConfigPreview:
+      type: object
+      required: [version, values]
+      properties:
+        version: { type: integer, format: int64, description: 预览所用的版本，working 时为 0 }
+        userId: { type: string }
+        plan: { type: string }
+        values:
+          type: array
+          items: { $ref: '#/components/schemas/ConfigPreviewValue' }

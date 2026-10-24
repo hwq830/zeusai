@@ -14,6 +14,9 @@ info:
     - 错误统一返回 `Error`：`{code, message, retryable}`。App 按 `code` 展示提示，`message` 可直接给用户看。
     - 任务进度走 SSE：`GET /v1/tasks/{taskId}/events`，事件格式见 `TaskEvent`。
     - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`。
+    - 远程配置：App 启动和回到前台时调 `GET /v1/config`。每个 `/v1` 响应都带 `X-Zeus-Config-Version`
+      （当前发布版本号），比本地缓存新时补拉一次。App 每个请求都带 `X-Zeus-App-Version`、`X-Zeus-Platform`、
+      `X-Zeus-OS-Version`、`X-Zeus-Install-Id`（安装时生成的随机 ID）、`X-Zeus-Channel`，供灰度规则使用。
 servers:
   - url: https://api.zeus.example.com
     description: 生产（域名待定）
@@ -33,6 +36,7 @@ tags:
   - name: tasks
   - name: connectors
   - name: memories
+  - name: config
 
 paths:
   # ---------------------------------------------------------------- auth
@@ -807,6 +811,55 @@ paths:
       operationId: deleteMemory
       responses:
         '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- config
+  /v1/config:
+    get:
+      tags: [config]
+      operationId: getRemoteConfig
+      summary: 远程配置（按当前用户和设备算好的值）
+      description: |
+        规则在服务端计算，只返回 App 可见的配置项。未登录也可调用，此时按 `X-Zeus-Install-Id` 分桶；
+        带了有效的 `Authorization` 时按用户分桶。值没有变化时返回 304。
+      security: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+        - name: X-Zeus-App-Version
+          in: header
+          schema: { type: string, example: 1.2.0 }
+        - name: X-Zeus-Platform
+          in: header
+          schema: { type: string, example: ios }
+        - name: X-Zeus-OS-Version
+          in: header
+          schema: { type: string, example: '17.4' }
+        - name: X-Zeus-Install-Id
+          in: header
+          schema: { type: string }
+        - name: X-Zeus-Channel
+          in: header
+          description: appstore | testflight | dev
+          schema: { type: string }
+        - name: Accept-Language
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteConfig' }
+        '304':
+          description: 与 If-None-Match 相同，沿用本地缓存
+          headers:
+            ETag:
+              schema: { type: string }
         default: { $ref: '#/components/responses/Error' }
 
 components:
@@ -1601,3 +1654,38 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/Memory' }
+
+    # ------------------------------------------------------------ config
+    RemoteConfig:
+      type: object
+      required: [version, fetchedAt, ttlSeconds, values]
+      properties:
+        version:
+          type: integer
+          format: int64
+          description: 配置发布版本号，单调递增；还没有任何发布时为 0（App 全用内置默认值）
+        fetchedAt: { type: string, format: date-time }
+        ttlSeconds:
+          type: integer
+          description: 建议的最长缓存时间，超过后回到前台必拉
+        values:
+          type: object
+          description: key → 值。App 不认识的 key 忽略；缺少的 key 用 App 内置默认值。
+          additionalProperties: { $ref: '#/components/schemas/RemoteConfigValue' }
+    RemoteConfigValue:
+      type: object
+      required: [value, applyMode]
+      properties:
+        value:
+          nullable: true
+          description: 任意 JSON（可为 null），类型由 App 端的 key 定义决定；类型不符时 App 回落到默认值
+        ruleId:
+          type: string
+          description: 命中的规则；没有则为默认值
+        applyMode:
+          type: string
+          enum: [immediate, next_launch]
+          description: next_launch 的值在一次启动内保持不变
+        expose:
+          type: boolean
+          description: 为 true 时 App 第一次读取该 key 上报 config_exposure 事件

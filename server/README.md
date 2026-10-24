@@ -7,7 +7,7 @@
 | `api` | `server/cmd/api` | 登录、额度、模板、定时简报、今日简报、任务与 SSE、连接器、记忆 |
 | `orchestrator` | `server/cmd/orchestrator` | Temporal worker：每日简报工作流 |
 | `admin` | `server/cmd/admin` | 管理员控制台接口 `/admin/v1`（契约 `api/admin.yaml`，前端在 hwq830/zeusai-admin），只在内网暴露 |
-| `zeusctl` | `server/cmd/zeusctl` | `migrate` 迁移数据库，`seed` 导入官方模板和连接器目录，`admin-create` 创建控制台账号 |
+| `zeusctl` | `server/cmd/zeusctl` | `migrate` 迁移数据库，`seed` 导入官方模板、连接器目录和内置配置项，`admin-create` 创建控制台账号 |
 | `modelgw` / `sandboxmgr` / `egress` / `sandboxd` | 待写 | 第 3–4 阶段 |
 
 ## 目录
@@ -55,6 +55,17 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 | `ZEUS_MODELGW_CONFIG`、`ZEUS_LLM_PROVIDER` | 与 api 相同，控制台“模型网关”页只读展示 |
 
 角色：`owner` 全部权限；`operator` 用户、额度、模板、连接器、任务；`moderator` 内容审核和停用用户；`viewer` 只读。所有写操作进 `admin_audit_log`。在控制台改过的官方模板和连接器标记为 `admin_managed`，之后 `zeusctl seed` 不再覆盖它们的运营字段。控制台添加的屏蔽词与 `ZEUS_MODERATION_KEYWORDS_FILE` 合并，各进程约 1 分钟内生效，拦截记录写入 `moderation_events`。
+
+### 配置中心
+
+远程配置（功能开关、灰度、熔断、文案、额度、最低版本）在 `server/internal/remoteconfig`：
+
+- 控制台编辑的是工作副本（`config_keys`），提交后冻结成不可变的发布快照（`config_releases`），版本号递增；回滚 = 把旧快照作为新版本重新发布，并把工作副本恢复成它。
+- 生产（`ZEUS_ENV=prod`）提交需 owner 审批；只改动已有 killswitch 配置项、或提交人是唯一 owner 时直接上线。其他环境提交即上线。
+- api 进程在内存里持有线上快照，发布时经 Redis 频道 `zeus:config:published` 通知刷新，另每 30 秒比对版本兜底；数据库或 Redis 故障时继续用上一版。
+- App 调 `GET /v1/config`（ETag / 304），每个 `/v1` 响应带 `X-Zeus-Config-Version`。规则只在服务端计算，`clientVisible=false` 的配置项不下发。
+- 服务端也读同一份配置：`quota.free.*` 决定免费额度（用户级覆盖仍优先），`report.create_enabled` / `report.pdf_enabled` 关闭后接口返回 503。
+- 内置配置项由 admin 进程启动时和 `zeusctl seed` 补齐，已存在的不覆盖。`ZEUS_REGION`（`china` 默认 / `international`）供 region 条件使用。
 
 开发环境下（`ZEUS_ENV=dev`，默认）：
 

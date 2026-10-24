@@ -69,6 +69,12 @@ func run(log *slog.Logger) error {
 		Log: log, Pool: pool, Redis: rdb, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
 		LLM: model, Mod: mod, Blob: providers.Blob(cfg), Config: cfg,
 	})
+	// A failed first load is not fatal: the App falls back to its built-in defaults and the
+	// cache retries every 30 seconds.
+	if err := srv.RemoteConfig.Load(ctx); err != nil {
+		log.Warn("remote config not loaded yet", "err", err)
+	}
+	go srv.RemoteConfig.Run(ctx)
 	hs := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

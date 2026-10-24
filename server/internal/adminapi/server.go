@@ -26,6 +26,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 )
 
 type Server struct {
@@ -34,6 +35,9 @@ type Server struct {
 	Tokens *Tokens
 	Quota  *quota.Service
 	Orch   orch.Client
+	// Releases publishes remote config; Region fills previews like the api process does.
+	Releases *remoteconfig.Releases
+	Region   string
 	// LLMProvider and ModelGWConfig mirror the api process settings for the gateway page.
 	LLMProvider   string
 	ModelGWConfig string
@@ -152,11 +156,17 @@ const (
 	PermModeration = "moderation.write"
 	PermTasks      = "tasks.write"
 	PermAdmins     = "admins.write"
+	// Config center: edit rules, submit and roll back releases.
+	PermConfig = "config.write"
+	// Create and archive keys, change namespaces.
+	PermConfigManage = "config.manage"
+	// Approve or reject pending releases.
+	PermConfigApprove = "config.approve"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermConfig, PermConfigManage, PermConfigApprove},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermConfig},
 	"moderator": {PermModeration},
 	"viewer":    {},
 }
@@ -248,6 +258,8 @@ func idStr(u *uuid.UUID) *string {
 	s := u.String()
 	return &s
 }
+
+func idString(id int64) string { return strconv.FormatInt(id, 10) }
 
 func cny(micros int64) float64 { return float64(micros) / 1e6 }
 

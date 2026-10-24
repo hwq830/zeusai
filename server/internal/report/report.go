@@ -25,6 +25,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
@@ -79,11 +80,13 @@ type Share struct {
 }
 
 type Service struct {
-	Q             *db.Queries
-	Quota         *quota.Service
-	Orch          orch.Client
-	Mod           moderation.Checker
-	Blob          blob.Store // nil: PDF export unavailable
+	Q     *db.Queries
+	Quota *quota.Service
+	Orch  orch.Client
+	Mod   moderation.Checker
+	Blob  blob.Store // nil: PDF export unavailable
+	// Config carries the report kill switches; nil leaves reports and PDF export on.
+	Config        *remoteconfig.Cache
 	PublicBaseURL string
 }
 
@@ -128,6 +131,9 @@ func (s *Service) Create(ctx context.Context, u db.User, in Input) (db.Task, err
 	}
 	if len(in.Focuses) > 6 {
 		return db.Task{}, apperr.Invalid("侧重角度最多 6 个")
+	}
+	if !s.Config.Bool(remoteconfig.UserContext(u, ""), remoteconfig.KeyReportCreateEnabled, true) {
+		return db.Task{}, apperr.Unavailable("研究报告功能暂时不可用，请稍后再试")
 	}
 	if err := moderation.Require(ctx, s.Mod, append([]string{in.Topic}, in.Focuses...)...); err != nil {
 		return db.Task{}, err
@@ -267,6 +273,9 @@ const pdfLinkTTL = 15 * time.Minute
 func (s *Service) PDF(ctx context.Context, userID uuid.UUID, id string) (FileLink, error) {
 	if s.Blob == nil {
 		return FileLink{}, apperr.Unavailable("PDF 导出即将开放")
+	}
+	if !s.Config.Bool(remoteconfig.Context{UserID: userID.String()}, remoteconfig.KeyReportPDFEnabled, true) {
+		return FileLink{}, apperr.Unavailable("PDF 导出暂时不可用，请稍后再试")
 	}
 	r, err := s.getRow(ctx, userID, id)
 	if err != nil {
