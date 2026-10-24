@@ -4,22 +4,39 @@ package push
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 
 	"github.com/google/uuid"
 )
 
+// Message categories. Users can turn off pushes per category except service; marketing needs an opt-in.
+const (
+	CategoryBriefing  = "briefing"
+	CategoryReport    = "report"
+	CategoryService   = "service"
+	CategoryMarketing = "marketing"
+)
+
+// ErrNoDevice means the user has no device that can receive the push.
+var ErrNoDevice = errors.New("push: no device")
+
 type Notification struct {
+	// Category routes the notification through the user's preferences (notify.Service); empty is service.
+	Category string
 	Title    string
 	Body     string
 	DeepLink string // zeus://briefing/{id}, zeus://report/{id}
 	Image    string // optional https cover image, shown by the iOS notification service extension
+	// Set by notify.Service: the message-center entry this push opens, and the app icon badge.
+	MessageID string
+	Badge     *int
 }
 
 // APNsPayload is the JSON body sent to APNs. The iOS app reads the deep link from the
-// top-level "deeplink" key and the cover from "image"; mutable-content lets its service
-// extension download the image.
+// top-level "deeplink" key, the cover from "image" and the message-center entry from
+// "message_id"; mutable-content lets its service extension download the image.
 func APNsPayload(n Notification) map[string]any {
 	aps := map[string]any{
 		"alert": map[string]string{"title": n.Title, "body": n.Body},
@@ -28,7 +45,13 @@ func APNsPayload(n Notification) map[string]any {
 	if n.Image != "" {
 		aps["mutable-content"] = 1
 	}
+	if n.Badge != nil {
+		aps["badge"] = *n.Badge
+	}
 	p := map[string]any{"aps": aps}
+	if n.MessageID != "" {
+		p["message_id"] = n.MessageID
+	}
 	if n.DeepLink != "" {
 		p["deeplink"] = n.DeepLink
 	}

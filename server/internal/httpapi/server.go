@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,10 @@ import (
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/feedback"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/moderation"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/report"
 	"github.com/hwq830/zeusai/server/internal/task"
@@ -42,11 +45,15 @@ type Server struct {
 	Tasks      *task.Service
 	Connectors *connector.Service
 	Reports    *report.Service
+	Feedback   *feedback.Service
+	Notify     *notify.Service
 	Bus        *events.Bus
 	// SSEPing is the keep-alive interval for event streams.
 	SSEPing time.Duration
 	// Files serves signed download links for locally stored files (dev); nil with OSS.
 	Files http.Handler
+
+	seen seenTracker
 }
 
 var _ gen.StrictServerInterface = (*Server)(nil)
@@ -111,8 +118,35 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		ctx := moderation.WithUser(context.WithValue(r.Context(), ctxKey{}, uid), uid)
+		s.touchSeen(ctx, uid)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// seenTracker throttles users.last_seen_at writes (campaign "active within N days" targeting).
+type seenTracker struct {
+	mu   sync.Mutex
+	last map[uuid.UUID]time.Time
+}
+
+const seenEvery = 10 * time.Minute
+
+func (s *Server) touchSeen(ctx context.Context, uid uuid.UUID) {
+	now := time.Now()
+	s.seen.mu.Lock()
+	if s.seen.last == nil || len(s.seen.last) > 100_000 {
+		s.seen.last = map[uuid.UUID]time.Time{}
+	}
+	due := now.Sub(s.seen.last[uid]) >= seenEvery
+	if due {
+		s.seen.last[uid] = now
+	}
+	s.seen.mu.Unlock()
+	if due {
+		if err := s.Q.TouchUserSeen(ctx, db.TouchUserSeenParams{ID: uid, LastSeenAt: &now}); err != nil && s.Log != nil {
+			s.Log.Warn("touch last_seen_at", "user", uid, "err", err)
+		}
+	}
 }
 
 func userID(ctx context.Context) uuid.UUID {

@@ -65,6 +65,21 @@ const (
 	Useful FeedbackRating = "useful"
 )
 
+// Defines values for FeedbackStatus.
+const (
+	Closed     FeedbackStatus = "closed"
+	InProgress FeedbackStatus = "in_progress"
+	New        FeedbackStatus = "new"
+	Resolved   FeedbackStatus = "resolved"
+)
+
+// Defines values for FeedbackType.
+const (
+	FeedbackTypeBug        FeedbackType = "bug"
+	FeedbackTypeOther      FeedbackType = "other"
+	FeedbackTypeSuggestion FeedbackType = "suggestion"
+)
+
 // Defines values for FileLinkStatus.
 const (
 	FileLinkStatusGenerating FileLinkStatus = "generating"
@@ -76,6 +91,14 @@ const (
 	Fact       MemoryKind = "fact"
 	Interest   MemoryKind = "interest"
 	Preference MemoryKind = "preference"
+)
+
+// Defines values for MessageCategory.
+const (
+	MessageCategoryBriefing  MessageCategory = "briefing"
+	MessageCategoryMarketing MessageCategory = "marketing"
+	MessageCategoryReport    MessageCategory = "report"
+	MessageCategoryService   MessageCategory = "service"
 )
 
 // Defines values for RegisterDeviceRequestApnsEnv.
@@ -94,6 +117,22 @@ const (
 	ReportDepthDeep     ReportDepth = "deep"
 	ReportDepthQuick    ReportDepth = "quick"
 	ReportDepthStandard ReportDepth = "standard"
+)
+
+// Defines values for ReportFeedbackRating.
+const (
+	Satisfied   ReportFeedbackRating = "satisfied"
+	Unsatisfied ReportFeedbackRating = "unsatisfied"
+)
+
+// Defines values for ReportFeedbackReason.
+const (
+	ReportFeedbackReasonBadSources ReportFeedbackReason = "bad_sources"
+	ReportFeedbackReasonInaccurate ReportFeedbackReason = "inaccurate"
+	ReportFeedbackReasonOffTopic   ReportFeedbackReason = "off_topic"
+	ReportFeedbackReasonOther      ReportFeedbackReason = "other"
+	ReportFeedbackReasonShallow    ReportFeedbackReason = "shallow"
+	ReportFeedbackReasonSlow       ReportFeedbackReason = "slow"
 )
 
 // Defines values for ReportStatus.
@@ -291,6 +330,16 @@ type BriefingSummary struct {
 	Title          string         `json:"title"`
 }
 
+// ClientInfo App 自动附带，用户不可见
+type ClientInfo struct {
+	AppVersion *string `json:"appVersion,omitempty"`
+	Build      *string `json:"build,omitempty"`
+	Device     *string `json:"device,omitempty"`
+	Locale     *string `json:"locale,omitempty"`
+	Network    *string `json:"network,omitempty"`
+	Os         *string `json:"os,omitempty"`
+}
+
 // ConfirmRequest defines model for ConfirmRequest.
 type ConfirmRequest struct {
 	ConfirmId   string  `json:"confirmId"`
@@ -393,8 +442,85 @@ type Feedback struct {
 	Rating FeedbackRating `json:"rating"`
 }
 
+// FeedbackAttachment defines model for FeedbackAttachment.
+type FeedbackAttachment struct {
+	Id string `json:"id"`
+
+	// Url 短时签名链接，约 1 小时有效
+	Url string `json:"url"`
+}
+
+// FeedbackAttachmentUpload defines model for FeedbackAttachmentUpload.
+type FeedbackAttachmentUpload struct {
+	Id string `json:"id"`
+}
+
+// FeedbackList defines model for FeedbackList.
+type FeedbackList struct {
+	Items      []FeedbackTicket `json:"items"`
+	NextCursor *string          `json:"nextCursor"`
+}
+
 // FeedbackRating defines model for FeedbackRating.
 type FeedbackRating string
+
+// FeedbackReply defines model for FeedbackReply.
+type FeedbackReply struct {
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
+	Id        string    `json:"id"`
+}
+
+// FeedbackRequest defines model for FeedbackRequest.
+type FeedbackRequest struct {
+	AttachmentIds *[]string `json:"attachmentIds,omitempty"`
+
+	// Client App 自动附带，用户不可见
+	Client *ClientInfo `json:"client,omitempty"`
+
+	// Contact 可选的手机号、微信号或邮箱
+	Contact *string `json:"contact,omitempty"`
+	Content string  `json:"content"`
+
+	// ReportId 从报告页发起时带上
+	ReportId *string `json:"reportId,omitempty"`
+
+	// TaskId 最近一次任务，便于排查
+	TaskId *string `json:"taskId,omitempty"`
+
+	// Type 问题 / 建议 / 其他
+	Type FeedbackType `json:"type"`
+}
+
+// FeedbackStatus 待处理 / 处理中 / 已解决 / 已关闭
+type FeedbackStatus string
+
+// FeedbackTicket defines model for FeedbackTicket.
+type FeedbackTicket struct {
+	// Attachments 只在详情里返回
+	Attachments *[]FeedbackAttachment `json:"attachments,omitempty"`
+	Contact     *string               `json:"contact,omitempty"`
+	Content     string                `json:"content"`
+	CreatedAt   time.Time             `json:"createdAt"`
+	Id          string                `json:"id"`
+	LastReplyAt *time.Time            `json:"lastReplyAt,omitempty"`
+
+	// Replies 只在详情里返回，按时间正序
+	Replies *[]FeedbackReply `json:"replies,omitempty"`
+
+	// Status 待处理 / 处理中 / 已解决 / 已关闭
+	Status FeedbackStatus `json:"status"`
+
+	// Type 问题 / 建议 / 其他
+	Type FeedbackType `json:"type"`
+
+	// Unread 有用户还没看过的官方回复
+	Unread    bool      `json:"unread"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// FeedbackType 问题 / 建议 / 其他
+type FeedbackType string
 
 // FieldValues 模板字段取值，key 为 TemplateField.key；值为 string / number / string[]
 type FieldValues map[string]interface{}
@@ -440,6 +566,46 @@ type MemoryList struct {
 	NextCursor *string  `json:"nextCursor"`
 }
 
+// Message defines model for Message.
+type Message struct {
+	Body string `json:"body"`
+
+	// CampaignId 运营推送活动 id，打点用
+	CampaignId *string `json:"campaignId,omitempty"`
+
+	// Category briefing 简报、report 报告、service 服务通知（反馈回复、订阅暂停等）、marketing 运营活动
+	Category  MessageCategory `json:"category"`
+	CreatedAt time.Time       `json:"createdAt"`
+
+	// Deeplink 点击跳转；为空表示只展示
+	Deeplink *string `json:"deeplink,omitempty"`
+	Id       string  `json:"id"`
+	ImageUrl *string `json:"imageUrl,omitempty"`
+	Read     bool    `json:"read"`
+	Title    string  `json:"title"`
+}
+
+// MessageCategory briefing 简报、report 报告、service 服务通知（反馈回复、订阅暂停等）、marketing 运营活动
+type MessageCategory string
+
+// MessageList defines model for MessageList.
+type MessageList struct {
+	Items       []Message `json:"items"`
+	NextCursor  *string   `json:"nextCursor"`
+	UnreadCount int       `json:"unreadCount"`
+}
+
+// NotificationPreferences 各类别是否推送。关掉的类别仍会进消息中心；服务通知始终推送。marketing 默认关闭，
+// 需要用户主动开启（App Store 4.5.4）。单个简报订阅的推送开关仍在订阅上（pushEnabled）。
+type NotificationPreferences struct {
+	Briefing  bool `json:"briefing"`
+	Marketing bool `json:"marketing"`
+
+	// QuietHours 免打扰时段（用户时区）。时段内的推送延后到结束时发送，简报不受影响
+	QuietHours QuietHours `json:"quietHours"`
+	Report     bool       `json:"report"`
+}
+
 // Page defines model for Page.
 type Page struct {
 	NextCursor *string `json:"nextCursor"`
@@ -457,6 +623,13 @@ type Plan struct {
 	Code      string     `json:"code"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 	Name      string     `json:"name"`
+}
+
+// QuietHours 免打扰时段（用户时区）。时段内的推送延后到结束时发送，简报不受影响
+type QuietHours struct {
+	Enabled bool   `json:"enabled"`
+	End     string `json:"end"`
+	Start   string `json:"start"`
 }
 
 // Quota defines model for Quota.
@@ -499,9 +672,10 @@ type RegisterDeviceRequestPlatform string
 
 // Report defines model for Report.
 type Report struct {
-	CompletedAt *time.Time  `json:"completedAt,omitempty"`
-	CreatedAt   time.Time   `json:"createdAt"`
-	Depth       ReportDepth `json:"depth"`
+	CompletedAt *time.Time      `json:"completedAt,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	Depth       ReportDepth     `json:"depth"`
+	Feedback    *ReportFeedback `json:"feedback,omitempty"`
 
 	// HtmlUrl 相对路径 /v1/reports/{id}/html，done 时才有
 	HtmlUrl     *string      `json:"htmlUrl,omitempty"`
@@ -519,6 +693,21 @@ type Report struct {
 
 // ReportDepth defines model for ReportDepth.
 type ReportDepth string
+
+// ReportFeedback defines model for ReportFeedback.
+type ReportFeedback struct {
+	Comment *string              `json:"comment,omitempty"`
+	Rating  ReportFeedbackRating `json:"rating"`
+
+	// Reasons 只在 unsatisfied 时有意义
+	Reasons *[]ReportFeedbackReason `json:"reasons,omitempty"`
+}
+
+// ReportFeedbackRating defines model for ReportFeedbackRating.
+type ReportFeedbackRating string
+
+// ReportFeedbackReason 不满意原因：内容不准确、不够深入、来源不可靠、没回答我的问题、生成太慢、其他
+type ReportFeedbackReason string
 
 // ReportList defines model for ReportList.
 type ReportList struct {
@@ -847,6 +1036,11 @@ type TodayBriefings struct {
 	Upcoming *[]Subscription `json:"upcoming,omitempty"`
 }
 
+// UnreadCount defines model for UnreadCount.
+type UnreadCount struct {
+	Count int `json:"count"`
+}
+
 // UpdateMeRequest defines model for UpdateMeRequest.
 type UpdateMeRequest struct {
 	Nickname *string `json:"nickname,omitempty"`
@@ -911,6 +1105,13 @@ type ListBriefingsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListFeedbackParams defines parameters for ListFeedback.
+type ListFeedbackParams struct {
+	// Cursor 上一页响应里的 nextCursor
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListMemoriesParams defines parameters for ListMemories.
 type ListMemoriesParams struct {
 	Kind *MemoryKind `form:"kind,omitempty" json:"kind,omitempty"`
@@ -918,6 +1119,21 @@ type ListMemoriesParams struct {
 	// Cursor 上一页响应里的 nextCursor
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListMessagesParams defines parameters for ListMessages.
+type ListMessagesParams struct {
+	// Category 只看这些类别，可重复，例如 category=marketing
+	Category *[]MessageCategory `form:"category,omitempty" json:"category,omitempty"`
+
+	// Cursor 上一页响应里的 nextCursor
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ReadAllMessagesParams defines parameters for ReadAllMessages.
+type ReadAllMessagesParams struct {
+	Category *[]MessageCategory `form:"category,omitempty" json:"category,omitempty"`
 }
 
 // ListReportsParams defines parameters for ListReports.
@@ -1002,8 +1218,17 @@ type UpdateConnectorJSONRequestBody = ConnectorPatch
 // RegisterDeviceJSONRequestBody defines body for RegisterDevice for application/json ContentType.
 type RegisterDeviceJSONRequestBody = RegisterDeviceRequest
 
+// CreateFeedbackJSONRequestBody defines body for CreateFeedback for application/json ContentType.
+type CreateFeedbackJSONRequestBody = FeedbackRequest
+
 // UpdateMeJSONRequestBody defines body for UpdateMe for application/json ContentType.
 type UpdateMeJSONRequestBody = UpdateMeRequest
+
+// PutNotificationPreferencesJSONRequestBody defines body for PutNotificationPreferences for application/json ContentType.
+type PutNotificationPreferencesJSONRequestBody = NotificationPreferences
+
+// PutReportFeedbackJSONRequestBody defines body for PutReportFeedback for application/json ContentType.
+type PutReportFeedbackJSONRequestBody = ReportFeedback
 
 // CreateReportFollowupJSONRequestBody defines body for CreateReportFollowup for application/json ContentType.
 type CreateReportFollowupJSONRequestBody = FollowupRequest
@@ -1103,6 +1328,18 @@ type ServerInterface interface {
 
 	// (DELETE /v1/devices/{pushToken})
 	UnregisterDevice(w http.ResponseWriter, r *http.Request, pushToken string)
+	// 我的反馈
+	// (GET /v1/feedback)
+	ListFeedback(w http.ResponseWriter, r *http.Request, params ListFeedbackParams)
+	// 提交意见反馈（每人每天最多 20 条，超出返回 rate_limited）
+	// (POST /v1/feedback)
+	CreateFeedback(w http.ResponseWriter, r *http.Request)
+	// 上传一张反馈截图（JPEG，≤ 5 MB）。先上传拿 id，再随 POST /v1/feedback 提交；24 小时内未提交的会被清理
+	// (POST /v1/feedback/attachments)
+	UploadFeedbackAttachment(w http.ResponseWriter, r *http.Request)
+	// 反馈详情（含官方回复）。读取后 unread 置为 false
+	// (GET /v1/feedback/{feedbackId})
+	GetFeedback(w http.ResponseWriter, r *http.Request, feedbackId string)
 	// 注销账号（硬删除全部数据，不可恢复）
 	// (DELETE /v1/me)
 	DeleteAccount(w http.ResponseWriter, r *http.Request)
@@ -1121,6 +1358,30 @@ type ServerInterface interface {
 
 	// (DELETE /v1/memories/{memoryId})
 	DeleteMemory(w http.ResponseWriter, r *http.Request, memoryId string)
+	// 消息中心列表，按时间倒序。不传 category 返回全部
+	// (GET /v1/messages)
+	ListMessages(w http.ResponseWriter, r *http.Request, params ListMessagesParams)
+	// 全部标为已读。不传 category 表示所有类别
+	// (POST /v1/messages/read-all)
+	ReadAllMessages(w http.ResponseWriter, r *http.Request, params ReadAllMessagesParams)
+	// 未读消息数（今日页铃铛红点和 App 图标角标）
+	// (GET /v1/messages/unread-count)
+	GetUnreadMessageCount(w http.ResponseWriter, r *http.Request)
+	// 从消息中心删除
+	// (DELETE /v1/messages/{messageId})
+	DeleteMessage(w http.ResponseWriter, r *http.Request, messageId string)
+	// 用户点推送打开了 App（推送 payload 里的 message_id），同时标为已读
+	// (POST /v1/messages/{messageId}/opened)
+	OpenedMessage(w http.ResponseWriter, r *http.Request, messageId string)
+	// 在消息中心点开一条消息
+	// (POST /v1/messages/{messageId}/read)
+	ReadMessage(w http.ResponseWriter, r *http.Request, messageId string)
+	// 通知偏好。没设置过时返回默认值
+	// (GET /v1/notification-preferences)
+	GetNotificationPreferences(w http.ResponseWriter, r *http.Request)
+	// 修改通知偏好（整体替换）
+	// (PUT /v1/notification-preferences)
+	PutNotificationPreferences(w http.ResponseWriter, r *http.Request)
 
 	// (GET /v1/reports)
 	ListReports(w http.ResponseWriter, r *http.Request, params ListReportsParams)
@@ -1130,6 +1391,9 @@ type ServerInterface interface {
 
 	// (GET /v1/reports/{reportId})
 	GetReport(w http.ResponseWriter, r *http.Request, reportId ReportId)
+	// 报告满意度评分（重复提交以最后一次为准）。服务端据此计算报告满意度指标
+	// (PUT /v1/reports/{reportId}/feedback)
+	PutReportFeedback(w http.ResponseWriter, r *http.Request, reportId ReportId)
 	// 针对报告追问。返回任务，答案以 text_delta 事件流式返回，并追加到报告末尾
 	// (POST /v1/reports/{reportId}/followups)
 	CreateReportFollowup(w http.ResponseWriter, r *http.Request, reportId ReportId)
@@ -1332,6 +1596,30 @@ func (_ Unimplemented) UnregisterDevice(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// 我的反馈
+// (GET /v1/feedback)
+func (_ Unimplemented) ListFeedback(w http.ResponseWriter, r *http.Request, params ListFeedbackParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 提交意见反馈（每人每天最多 20 条，超出返回 rate_limited）
+// (POST /v1/feedback)
+func (_ Unimplemented) CreateFeedback(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 上传一张反馈截图（JPEG，≤ 5 MB）。先上传拿 id，再随 POST /v1/feedback 提交；24 小时内未提交的会被清理
+// (POST /v1/feedback/attachments)
+func (_ Unimplemented) UploadFeedbackAttachment(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 反馈详情（含官方回复）。读取后 unread 置为 false
+// (GET /v1/feedback/{feedbackId})
+func (_ Unimplemented) GetFeedback(w http.ResponseWriter, r *http.Request, feedbackId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // 注销账号（硬删除全部数据，不可恢复）
 // (DELETE /v1/me)
 func (_ Unimplemented) DeleteAccount(w http.ResponseWriter, r *http.Request) {
@@ -1365,6 +1653,54 @@ func (_ Unimplemented) DeleteMemory(w http.ResponseWriter, r *http.Request, memo
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// 消息中心列表，按时间倒序。不传 category 返回全部
+// (GET /v1/messages)
+func (_ Unimplemented) ListMessages(w http.ResponseWriter, r *http.Request, params ListMessagesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 全部标为已读。不传 category 表示所有类别
+// (POST /v1/messages/read-all)
+func (_ Unimplemented) ReadAllMessages(w http.ResponseWriter, r *http.Request, params ReadAllMessagesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 未读消息数（今日页铃铛红点和 App 图标角标）
+// (GET /v1/messages/unread-count)
+func (_ Unimplemented) GetUnreadMessageCount(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 从消息中心删除
+// (DELETE /v1/messages/{messageId})
+func (_ Unimplemented) DeleteMessage(w http.ResponseWriter, r *http.Request, messageId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 用户点推送打开了 App（推送 payload 里的 message_id），同时标为已读
+// (POST /v1/messages/{messageId}/opened)
+func (_ Unimplemented) OpenedMessage(w http.ResponseWriter, r *http.Request, messageId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 在消息中心点开一条消息
+// (POST /v1/messages/{messageId}/read)
+func (_ Unimplemented) ReadMessage(w http.ResponseWriter, r *http.Request, messageId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 通知偏好。没设置过时返回默认值
+// (GET /v1/notification-preferences)
+func (_ Unimplemented) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 修改通知偏好（整体替换）
+// (PUT /v1/notification-preferences)
+func (_ Unimplemented) PutNotificationPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // (GET /v1/reports)
 func (_ Unimplemented) ListReports(w http.ResponseWriter, r *http.Request, params ListReportsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -1377,6 +1713,12 @@ func (_ Unimplemented) DeleteReport(w http.ResponseWriter, r *http.Request, repo
 
 // (GET /v1/reports/{reportId})
 func (_ Unimplemented) GetReport(w http.ResponseWriter, r *http.Request, reportId ReportId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 报告满意度评分（重复提交以最后一次为准）。服务端据此计算报告满意度指标
+// (PUT /v1/reports/{reportId}/feedback)
+func (_ Unimplemented) PutReportFeedback(w http.ResponseWriter, r *http.Request, reportId ReportId) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2082,6 +2424,118 @@ func (siw *ServerInterfaceWrapper) UnregisterDevice(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListFeedback operation middleware
+func (siw *ServerInterfaceWrapper) ListFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListFeedbackParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFeedback(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateFeedback operation middleware
+func (siw *ServerInterfaceWrapper) CreateFeedback(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFeedback(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UploadFeedbackAttachment operation middleware
+func (siw *ServerInterfaceWrapper) UploadFeedbackAttachment(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadFeedbackAttachment(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFeedback operation middleware
+func (siw *ServerInterfaceWrapper) GetFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "feedbackId" -------------
+	var feedbackId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "feedbackId", chi.URLParam(r, "feedbackId"), &feedbackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "feedbackId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFeedback(w, r, feedbackId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteAccount operation middleware
 func (siw *ServerInterfaceWrapper) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 
@@ -2242,6 +2696,241 @@ func (siw *ServerInterfaceWrapper) DeleteMemory(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListMessages operation middleware
+func (siw *ServerInterfaceWrapper) ListMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMessagesParams
+
+	// ------------- Optional query parameter "category" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "category", r.URL.Query(), &params.Category)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "category", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMessages(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReadAllMessages operation middleware
+func (siw *ServerInterfaceWrapper) ReadAllMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReadAllMessagesParams
+
+	// ------------- Optional query parameter "category" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "category", r.URL.Query(), &params.Category)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "category", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReadAllMessages(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUnreadMessageCount operation middleware
+func (siw *ServerInterfaceWrapper) GetUnreadMessageCount(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUnreadMessageCount(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMessage operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMessage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "messageId" -------------
+	var messageId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "messageId", chi.URLParam(r, "messageId"), &messageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "messageId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMessage(w, r, messageId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OpenedMessage operation middleware
+func (siw *ServerInterfaceWrapper) OpenedMessage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "messageId" -------------
+	var messageId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "messageId", chi.URLParam(r, "messageId"), &messageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "messageId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OpenedMessage(w, r, messageId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReadMessage operation middleware
+func (siw *ServerInterfaceWrapper) ReadMessage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "messageId" -------------
+	var messageId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "messageId", chi.URLParam(r, "messageId"), &messageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "messageId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReadMessage(w, r, messageId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNotificationPreferences operation middleware
+func (siw *ServerInterfaceWrapper) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNotificationPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutNotificationPreferences operation middleware
+func (siw *ServerInterfaceWrapper) PutNotificationPreferences(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutNotificationPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListReports operation middleware
 func (siw *ServerInterfaceWrapper) ListReports(w http.ResponseWriter, r *http.Request) {
 
@@ -2352,6 +3041,37 @@ func (siw *ServerInterfaceWrapper) GetReport(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReport(w, r, reportId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutReportFeedback operation middleware
+func (siw *ServerInterfaceWrapper) PutReportFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "reportId" -------------
+	var reportId ReportId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "reportId", chi.URLParam(r, "reportId"), &reportId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reportId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutReportFeedback(w, r, reportId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3196,6 +3916,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/devices/{pushToken}", wrapper.UnregisterDevice)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/feedback", wrapper.ListFeedback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/feedback", wrapper.CreateFeedback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/feedback/attachments", wrapper.UploadFeedbackAttachment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/feedback/{feedbackId}", wrapper.GetFeedback)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/v1/me", wrapper.DeleteAccount)
 	})
 	r.Group(func(r chi.Router) {
@@ -3214,6 +3946,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/v1/memories/{memoryId}", wrapper.DeleteMemory)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/messages", wrapper.ListMessages)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/messages/read-all", wrapper.ReadAllMessages)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/messages/unread-count", wrapper.GetUnreadMessageCount)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/v1/messages/{messageId}", wrapper.DeleteMessage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/messages/{messageId}/opened", wrapper.OpenedMessage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/v1/messages/{messageId}/read", wrapper.ReadMessage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/notification-preferences", wrapper.GetNotificationPreferences)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/notification-preferences", wrapper.PutNotificationPreferences)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/reports", wrapper.ListReports)
 	})
 	r.Group(func(r chi.Router) {
@@ -3221,6 +3977,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/reports/{reportId}", wrapper.GetReport)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/v1/reports/{reportId}/feedback", wrapper.PutReportFeedback)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/reports/{reportId}/followups", wrapper.CreateReportFollowup)
@@ -3976,6 +4735,122 @@ func (response UnregisterDevicedefaultJSONResponse) VisitUnregisterDeviceRespons
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListFeedbackRequestObject struct {
+	Params ListFeedbackParams
+}
+
+type ListFeedbackResponseObject interface {
+	VisitListFeedbackResponse(w http.ResponseWriter) error
+}
+
+type ListFeedback200JSONResponse FeedbackList
+
+func (response ListFeedback200JSONResponse) VisitListFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListFeedbackdefaultJSONResponse) VisitListFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateFeedbackRequestObject struct {
+	Body *CreateFeedbackJSONRequestBody
+}
+
+type CreateFeedbackResponseObject interface {
+	VisitCreateFeedbackResponse(w http.ResponseWriter) error
+}
+
+type CreateFeedback201JSONResponse FeedbackTicket
+
+func (response CreateFeedback201JSONResponse) VisitCreateFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateFeedbackdefaultJSONResponse) VisitCreateFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UploadFeedbackAttachmentRequestObject struct {
+	Body io.Reader
+}
+
+type UploadFeedbackAttachmentResponseObject interface {
+	VisitUploadFeedbackAttachmentResponse(w http.ResponseWriter) error
+}
+
+type UploadFeedbackAttachment201JSONResponse FeedbackAttachmentUpload
+
+func (response UploadFeedbackAttachment201JSONResponse) VisitUploadFeedbackAttachmentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UploadFeedbackAttachmentdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response UploadFeedbackAttachmentdefaultJSONResponse) VisitUploadFeedbackAttachmentResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetFeedbackRequestObject struct {
+	FeedbackId string `json:"feedbackId"`
+}
+
+type GetFeedbackResponseObject interface {
+	VisitGetFeedbackResponse(w http.ResponseWriter) error
+}
+
+type GetFeedback200JSONResponse FeedbackTicket
+
+func (response GetFeedback200JSONResponse) VisitGetFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetFeedbackdefaultJSONResponse) VisitGetFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type DeleteAccountRequestObject struct {
 }
 
@@ -4144,6 +5019,232 @@ func (response DeleteMemorydefaultJSONResponse) VisitDeleteMemoryResponse(w http
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListMessagesRequestObject struct {
+	Params ListMessagesParams
+}
+
+type ListMessagesResponseObject interface {
+	VisitListMessagesResponse(w http.ResponseWriter) error
+}
+
+type ListMessages200JSONResponse MessageList
+
+func (response ListMessages200JSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListMessagesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListMessagesdefaultJSONResponse) VisitListMessagesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ReadAllMessagesRequestObject struct {
+	Params ReadAllMessagesParams
+}
+
+type ReadAllMessagesResponseObject interface {
+	VisitReadAllMessagesResponse(w http.ResponseWriter) error
+}
+
+type ReadAllMessages204Response struct {
+}
+
+func (response ReadAllMessages204Response) VisitReadAllMessagesResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReadAllMessagesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ReadAllMessagesdefaultJSONResponse) VisitReadAllMessagesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetUnreadMessageCountRequestObject struct {
+}
+
+type GetUnreadMessageCountResponseObject interface {
+	VisitGetUnreadMessageCountResponse(w http.ResponseWriter) error
+}
+
+type GetUnreadMessageCount200JSONResponse UnreadCount
+
+func (response GetUnreadMessageCount200JSONResponse) VisitGetUnreadMessageCountResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetUnreadMessageCountdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetUnreadMessageCountdefaultJSONResponse) VisitGetUnreadMessageCountResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeleteMessageRequestObject struct {
+	MessageId string `json:"messageId"`
+}
+
+type DeleteMessageResponseObject interface {
+	VisitDeleteMessageResponse(w http.ResponseWriter) error
+}
+
+type DeleteMessage204Response struct {
+}
+
+func (response DeleteMessage204Response) VisitDeleteMessageResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMessagedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteMessagedefaultJSONResponse) VisitDeleteMessageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type OpenedMessageRequestObject struct {
+	MessageId string `json:"messageId"`
+}
+
+type OpenedMessageResponseObject interface {
+	VisitOpenedMessageResponse(w http.ResponseWriter) error
+}
+
+type OpenedMessage204Response struct {
+}
+
+func (response OpenedMessage204Response) VisitOpenedMessageResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type OpenedMessagedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response OpenedMessagedefaultJSONResponse) VisitOpenedMessageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ReadMessageRequestObject struct {
+	MessageId string `json:"messageId"`
+}
+
+type ReadMessageResponseObject interface {
+	VisitReadMessageResponse(w http.ResponseWriter) error
+}
+
+type ReadMessage204Response struct {
+}
+
+func (response ReadMessage204Response) VisitReadMessageResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReadMessagedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ReadMessagedefaultJSONResponse) VisitReadMessageResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetNotificationPreferencesRequestObject struct {
+}
+
+type GetNotificationPreferencesResponseObject interface {
+	VisitGetNotificationPreferencesResponse(w http.ResponseWriter) error
+}
+
+type GetNotificationPreferences200JSONResponse NotificationPreferences
+
+func (response GetNotificationPreferences200JSONResponse) VisitGetNotificationPreferencesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetNotificationPreferencesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetNotificationPreferencesdefaultJSONResponse) VisitGetNotificationPreferencesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type PutNotificationPreferencesRequestObject struct {
+	Body *PutNotificationPreferencesJSONRequestBody
+}
+
+type PutNotificationPreferencesResponseObject interface {
+	VisitPutNotificationPreferencesResponse(w http.ResponseWriter) error
+}
+
+type PutNotificationPreferences200JSONResponse NotificationPreferences
+
+func (response PutNotificationPreferences200JSONResponse) VisitPutNotificationPreferencesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutNotificationPreferencesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PutNotificationPreferencesdefaultJSONResponse) VisitPutNotificationPreferencesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type ListReportsRequestObject struct {
 	Params ListReportsParams
 }
@@ -4224,6 +5325,35 @@ type GetReportdefaultJSONResponse struct {
 }
 
 func (response GetReportdefaultJSONResponse) VisitGetReportResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type PutReportFeedbackRequestObject struct {
+	ReportId ReportId `json:"reportId"`
+	Body     *PutReportFeedbackJSONRequestBody
+}
+
+type PutReportFeedbackResponseObject interface {
+	VisitPutReportFeedbackResponse(w http.ResponseWriter) error
+}
+
+type PutReportFeedback204Response struct {
+}
+
+func (response PutReportFeedback204Response) VisitPutReportFeedbackResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PutReportFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PutReportFeedbackdefaultJSONResponse) VisitPutReportFeedbackResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -4878,6 +6008,18 @@ type StrictServerInterface interface {
 
 	// (DELETE /v1/devices/{pushToken})
 	UnregisterDevice(ctx context.Context, request UnregisterDeviceRequestObject) (UnregisterDeviceResponseObject, error)
+	// 我的反馈
+	// (GET /v1/feedback)
+	ListFeedback(ctx context.Context, request ListFeedbackRequestObject) (ListFeedbackResponseObject, error)
+	// 提交意见反馈（每人每天最多 20 条，超出返回 rate_limited）
+	// (POST /v1/feedback)
+	CreateFeedback(ctx context.Context, request CreateFeedbackRequestObject) (CreateFeedbackResponseObject, error)
+	// 上传一张反馈截图（JPEG，≤ 5 MB）。先上传拿 id，再随 POST /v1/feedback 提交；24 小时内未提交的会被清理
+	// (POST /v1/feedback/attachments)
+	UploadFeedbackAttachment(ctx context.Context, request UploadFeedbackAttachmentRequestObject) (UploadFeedbackAttachmentResponseObject, error)
+	// 反馈详情（含官方回复）。读取后 unread 置为 false
+	// (GET /v1/feedback/{feedbackId})
+	GetFeedback(ctx context.Context, request GetFeedbackRequestObject) (GetFeedbackResponseObject, error)
 	// 注销账号（硬删除全部数据，不可恢复）
 	// (DELETE /v1/me)
 	DeleteAccount(ctx context.Context, request DeleteAccountRequestObject) (DeleteAccountResponseObject, error)
@@ -4896,6 +6038,30 @@ type StrictServerInterface interface {
 
 	// (DELETE /v1/memories/{memoryId})
 	DeleteMemory(ctx context.Context, request DeleteMemoryRequestObject) (DeleteMemoryResponseObject, error)
+	// 消息中心列表，按时间倒序。不传 category 返回全部
+	// (GET /v1/messages)
+	ListMessages(ctx context.Context, request ListMessagesRequestObject) (ListMessagesResponseObject, error)
+	// 全部标为已读。不传 category 表示所有类别
+	// (POST /v1/messages/read-all)
+	ReadAllMessages(ctx context.Context, request ReadAllMessagesRequestObject) (ReadAllMessagesResponseObject, error)
+	// 未读消息数（今日页铃铛红点和 App 图标角标）
+	// (GET /v1/messages/unread-count)
+	GetUnreadMessageCount(ctx context.Context, request GetUnreadMessageCountRequestObject) (GetUnreadMessageCountResponseObject, error)
+	// 从消息中心删除
+	// (DELETE /v1/messages/{messageId})
+	DeleteMessage(ctx context.Context, request DeleteMessageRequestObject) (DeleteMessageResponseObject, error)
+	// 用户点推送打开了 App（推送 payload 里的 message_id），同时标为已读
+	// (POST /v1/messages/{messageId}/opened)
+	OpenedMessage(ctx context.Context, request OpenedMessageRequestObject) (OpenedMessageResponseObject, error)
+	// 在消息中心点开一条消息
+	// (POST /v1/messages/{messageId}/read)
+	ReadMessage(ctx context.Context, request ReadMessageRequestObject) (ReadMessageResponseObject, error)
+	// 通知偏好。没设置过时返回默认值
+	// (GET /v1/notification-preferences)
+	GetNotificationPreferences(ctx context.Context, request GetNotificationPreferencesRequestObject) (GetNotificationPreferencesResponseObject, error)
+	// 修改通知偏好（整体替换）
+	// (PUT /v1/notification-preferences)
+	PutNotificationPreferences(ctx context.Context, request PutNotificationPreferencesRequestObject) (PutNotificationPreferencesResponseObject, error)
 
 	// (GET /v1/reports)
 	ListReports(ctx context.Context, request ListReportsRequestObject) (ListReportsResponseObject, error)
@@ -4905,6 +6071,9 @@ type StrictServerInterface interface {
 
 	// (GET /v1/reports/{reportId})
 	GetReport(ctx context.Context, request GetReportRequestObject) (GetReportResponseObject, error)
+	// 报告满意度评分（重复提交以最后一次为准）。服务端据此计算报告满意度指标
+	// (PUT /v1/reports/{reportId}/feedback)
+	PutReportFeedback(ctx context.Context, request PutReportFeedbackRequestObject) (PutReportFeedbackResponseObject, error)
 	// 针对报告追问。返回任务，答案以 text_delta 事件流式返回，并追加到报告末尾
 	// (POST /v1/reports/{reportId}/followups)
 	CreateReportFollowup(ctx context.Context, request CreateReportFollowupRequestObject) (CreateReportFollowupResponseObject, error)
@@ -5682,6 +6851,115 @@ func (sh *strictHandler) UnregisterDevice(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ListFeedback operation middleware
+func (sh *strictHandler) ListFeedback(w http.ResponseWriter, r *http.Request, params ListFeedbackParams) {
+	var request ListFeedbackRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFeedback(ctx, request.(ListFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFeedbackResponseObject); ok {
+		if err := validResponse.VisitListFeedbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateFeedback operation middleware
+func (sh *strictHandler) CreateFeedback(w http.ResponseWriter, r *http.Request) {
+	var request CreateFeedbackRequestObject
+
+	var body CreateFeedbackJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateFeedback(ctx, request.(CreateFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateFeedbackResponseObject); ok {
+		if err := validResponse.VisitCreateFeedbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UploadFeedbackAttachment operation middleware
+func (sh *strictHandler) UploadFeedbackAttachment(w http.ResponseWriter, r *http.Request) {
+	var request UploadFeedbackAttachmentRequestObject
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UploadFeedbackAttachment(ctx, request.(UploadFeedbackAttachmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UploadFeedbackAttachment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UploadFeedbackAttachmentResponseObject); ok {
+		if err := validResponse.VisitUploadFeedbackAttachmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetFeedback operation middleware
+func (sh *strictHandler) GetFeedback(w http.ResponseWriter, r *http.Request, feedbackId string) {
+	var request GetFeedbackRequestObject
+
+	request.FeedbackId = feedbackId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetFeedback(ctx, request.(GetFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetFeedbackResponseObject); ok {
+		if err := validResponse.VisitGetFeedbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // DeleteAccount operation middleware
 func (sh *strictHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	var request DeleteAccountRequestObject
@@ -5837,6 +7115,215 @@ func (sh *strictHandler) DeleteMemory(w http.ResponseWriter, r *http.Request, me
 	}
 }
 
+// ListMessages operation middleware
+func (sh *strictHandler) ListMessages(w http.ResponseWriter, r *http.Request, params ListMessagesParams) {
+	var request ListMessagesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMessages(ctx, request.(ListMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMessagesResponseObject); ok {
+		if err := validResponse.VisitListMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReadAllMessages operation middleware
+func (sh *strictHandler) ReadAllMessages(w http.ResponseWriter, r *http.Request, params ReadAllMessagesParams) {
+	var request ReadAllMessagesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReadAllMessages(ctx, request.(ReadAllMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReadAllMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReadAllMessagesResponseObject); ok {
+		if err := validResponse.VisitReadAllMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUnreadMessageCount operation middleware
+func (sh *strictHandler) GetUnreadMessageCount(w http.ResponseWriter, r *http.Request) {
+	var request GetUnreadMessageCountRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUnreadMessageCount(ctx, request.(GetUnreadMessageCountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUnreadMessageCount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUnreadMessageCountResponseObject); ok {
+		if err := validResponse.VisitGetUnreadMessageCountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMessage operation middleware
+func (sh *strictHandler) DeleteMessage(w http.ResponseWriter, r *http.Request, messageId string) {
+	var request DeleteMessageRequestObject
+
+	request.MessageId = messageId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMessage(ctx, request.(DeleteMessageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMessage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMessageResponseObject); ok {
+		if err := validResponse.VisitDeleteMessageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// OpenedMessage operation middleware
+func (sh *strictHandler) OpenedMessage(w http.ResponseWriter, r *http.Request, messageId string) {
+	var request OpenedMessageRequestObject
+
+	request.MessageId = messageId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.OpenedMessage(ctx, request.(OpenedMessageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "OpenedMessage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(OpenedMessageResponseObject); ok {
+		if err := validResponse.VisitOpenedMessageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReadMessage operation middleware
+func (sh *strictHandler) ReadMessage(w http.ResponseWriter, r *http.Request, messageId string) {
+	var request ReadMessageRequestObject
+
+	request.MessageId = messageId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReadMessage(ctx, request.(ReadMessageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReadMessage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReadMessageResponseObject); ok {
+		if err := validResponse.VisitReadMessageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetNotificationPreferences operation middleware
+func (sh *strictHandler) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
+	var request GetNotificationPreferencesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNotificationPreferences(ctx, request.(GetNotificationPreferencesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNotificationPreferences")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetNotificationPreferencesResponseObject); ok {
+		if err := validResponse.VisitGetNotificationPreferencesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutNotificationPreferences operation middleware
+func (sh *strictHandler) PutNotificationPreferences(w http.ResponseWriter, r *http.Request) {
+	var request PutNotificationPreferencesRequestObject
+
+	var body PutNotificationPreferencesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutNotificationPreferences(ctx, request.(PutNotificationPreferencesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutNotificationPreferences")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutNotificationPreferencesResponseObject); ok {
+		if err := validResponse.VisitPutNotificationPreferencesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListReports operation middleware
 func (sh *strictHandler) ListReports(w http.ResponseWriter, r *http.Request, params ListReportsParams) {
 	var request ListReportsRequestObject
@@ -5908,6 +7395,39 @@ func (sh *strictHandler) GetReport(w http.ResponseWriter, r *http.Request, repor
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReportResponseObject); ok {
 		if err := validResponse.VisitGetReportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutReportFeedback operation middleware
+func (sh *strictHandler) PutReportFeedback(w http.ResponseWriter, r *http.Request, reportId ReportId) {
+	var request PutReportFeedbackRequestObject
+
+	request.ReportId = reportId
+
+	var body PutReportFeedbackJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutReportFeedback(ctx, request.(PutReportFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutReportFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutReportFeedbackResponseObject); ok {
+		if err := validResponse.VisitPutReportFeedbackResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -6464,161 +7984,200 @@ func (sh *strictHandler) CopyTemplate(w http.ResponseWriter, r *http.Request, te
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
-	"MUeYB8wZBNd8rVS9kQsj/xMAAP//b4dfGFCoAAA=",
+	"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",
+	"mO07K+DKMc7QM4euD/2/AAAA///cVCAOG9QAAA==",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

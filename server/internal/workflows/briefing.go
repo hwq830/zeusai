@@ -24,6 +24,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/pdf"
 	"github.com/hwq830/zeusai/server/internal/push"
@@ -50,6 +51,8 @@ type Activities struct {
 	PDF    pdf.Renderer  // nil: PDF export fails with a clear error
 	Blob   blob.Store
 	Push   push.Notifier
+	// Notify sends operator campaigns; nil fails campaign activities.
+	Notify *notify.Service
 	Now    func() time.Time
 }
 
@@ -321,7 +324,7 @@ func (a *Activities) pauseInactive(ctx context.Context, row db.BriefingSubscript
 	}
 	// The Temporal schedule keeps firing; PrepareBriefing skips paused subscriptions.
 	return a.Push.Notify(ctx, row.UserID, push.Notification{
-		Title: row.Name + " 已暂停", Body: "你已经一周没看这份简报了，我们先暂停推送。想恢复可以在 App 里打开。",
+		Category: push.CategoryService, Title: row.Name + " 已暂停", Body: "你已经一周没看这份简报了，我们先暂停推送。想恢复可以在 App 里打开。",
 		DeepLink: "zeus://briefing-subscription/" + row.ID.String(),
 	})
 }
@@ -504,6 +507,6 @@ func (a *Activities) NotifyBriefing(ctx context.Context, plan BriefingPlan) erro
 		return nil
 	}
 	return a.Push.Notify(ctx, plan.UserID, push.Notification{
-		Title: plan.Title, Body: b.Headline, DeepLink: "zeus://briefing/" + plan.BriefingID.String(),
+		Category: push.CategoryBriefing, Title: plan.Title, Body: b.Headline, DeepLink: "zeus://briefing/" + plan.BriefingID.String(),
 	})
 }

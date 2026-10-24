@@ -14,8 +14,10 @@ import (
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/feedback"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -31,7 +33,7 @@ type Deps struct {
 	Orch  orch.Client
 	LLM   llm.Provider
 	Mod   moderation.Checker // nil allows everything (dev)
-	Blob  blob.Store         // nil: PDF export unavailable
+	Blob  blob.Store         // nil: PDF export and feedback screenshots unavailable
 	// Identity providers; nil fields fall back to the dev fakes (tests).
 	SMS      auth.SMSSender
 	Apple    auth.AppleVerifier
@@ -70,8 +72,11 @@ func New(d Deps) *Server {
 		Tasks:      &task.Service{Q: q, Orch: d.Orch},
 		Connectors: &connector.Service{Q: q},
 		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, PublicBaseURL: d.Config.PublicBaseURL},
-		Bus:        &events.Bus{R: d.Redis},
-		Files:      files(d.Blob),
+		Feedback:   &feedback.Service{Pool: d.Pool, Q: q, Blob: d.Blob, Mod: d.Mod, Now: d.Now},
+		// The api process only reads the message center; pushes are sent by the orchestrator and admin.
+		Notify: &notify.Service{Q: q, Now: d.Now},
+		Bus:    &events.Bus{R: d.Redis},
+		Files:  files(d.Blob),
 	}
 }
 

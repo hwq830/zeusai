@@ -25,6 +25,7 @@ server/
     ├── workflows/           # Temporal 工作流与活动；也实现 orch.Client 给 api 用
     ├── orch/                # api 与 orchestrator 之间的接口
     ├── llm/  search/  push/ # 模型、搜索、推送的接口与 mock 实现
+    ├── notify/              # 消息中心：先写站内消息，再按偏好、免打扰、频控决定是否推送；运营推送活动
     └── platform/            # 配置、数据库连接、测试工具
 ```
 
@@ -54,7 +55,7 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 | `ZEUS_ADMIN_STATIC_DIR` | 可选：zeusai-admin 构建出的 `dist/`，由 admin 进程一起提供 |
 | `ZEUS_MODELGW_CONFIG`、`ZEUS_LLM_PROVIDER` | 与 api 相同，控制台“模型网关”页只读展示 |
 
-角色：`owner` 全部权限；`operator` 用户、额度、模板、连接器、任务；`moderator` 内容审核和停用用户；`viewer` 只读。所有写操作进 `admin_audit_log`。在控制台改过的官方模板和连接器标记为 `admin_managed`，之后 `zeusctl seed` 不再覆盖它们的运营字段。控制台添加的屏蔽词与 `ZEUS_MODERATION_KEYWORDS_FILE` 合并，各进程约 1 分钟内生效，拦截记录写入 `moderation_events`。
+角色：`owner` 全部权限；`operator` 用户、额度、模板、连接器、任务、用户反馈；`moderator` 内容审核、停用用户、用户反馈；`viewer` 只读。所有写操作进 `admin_audit_log`。在控制台改过的官方模板和连接器标记为 `admin_managed`，之后 `zeusctl seed` 不再覆盖它们的运营字段。控制台添加的屏蔽词与 `ZEUS_MODERATION_KEYWORDS_FILE` 合并，各进程约 1 分钟内生效，拦截记录写入 `moderation_events`。
 
 开发环境下（`ZEUS_ENV=dev`，默认）：
 
@@ -75,6 +76,9 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 | 博查搜索 | `ZEUS_SEARCH_PROVIDER=bocha`、`ZEUS_BOCHA_API_KEY`；网页读取走 `ZEUS_EGRESS_PROXY`（可选） |
 | 高德 MCP | `ZEUS_MCP_AMAP_URL`（含 key 的完整 Streamable HTTP 地址） |
 | PDF 导出 | api 和 orchestrator 都设 `ZEUS_BLOB_DIR`（同一目录）；orchestrator 设 `ZEUS_CHROMIUM_PATH`，容器里以 root 运行时加 `ZEUS_CHROMIUM_NO_SANDBOX=true` |
+| 反馈截图 | api 设 `ZEUS_BLOB_DIR` 才能上传；admin 也设同一个 `ZEUS_BLOB_DIR`，并与 api 使用相同的 `ZEUS_FILES_SECRET`（或相同的 `ZEUS_JWT_SECRET`）和 `ZEUS_PUBLIC_BASE_URL`，控制台里的截图链接才能打开 |
+| 反馈回复推送 | admin 进程也配置上面的 APNs 变量；未配置时回复照常保存，只是不推送 |
+| 消息推送 | orchestrator 和 admin 都配置 APNs 变量。所有通知先进消息中心；免打扰期间的推送由 orchestrator 每分钟补发；运营推送活动由 owner 审批后在 orchestrator 里分批发送（每批 500 人）。运营推送频控默认每人每天 1 条、7 天 3 条（`notify.DefaultLimits`，接入配置中心后改为远程配置） |
 | 短信验证码 | `ZEUS_ALIYUN_ACCESS_KEY_ID`、`ZEUS_ALIYUN_ACCESS_KEY_SECRET`、`ZEUS_SMS_SIGN_NAME`、`ZEUS_SMS_TEMPLATE_CODE`（模板变量 `${code}`） |
 | 一键登录 | 同上 AccessKey，加 `ZEUS_ONECLICK_ENABLED=true` |
 | Apple 登录 | `ZEUS_APPLE_CLIENT_IDS`（Bundle ID，多个用逗号分隔） |

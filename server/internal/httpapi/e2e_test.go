@@ -30,6 +30,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
@@ -49,6 +50,7 @@ type harness struct {
 	token  string
 	orch   *workflows.Client
 	pushes *push.Log
+	q      *db.Queries
 }
 
 func setup(t *testing.T) *harness {
@@ -79,8 +81,13 @@ func setup(t *testing.T) *harness {
 	if p := os.Getenv("ZEUS_TEST_CHROMIUM"); p != "" {
 		printer = pdf.Chromium{Path: p, NoSandbox: true}
 	}
-	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: pushes, Tools: tools,
-		PDF: printer, Blob: files})
+	// Pushes go through the message center like in production. Its clock is pinned to noon in
+	// Beijing so quiet hours never defer a push mid-test.
+	y, m, d := time.Now().Date()
+	noon := time.Date(y, m, d, 4, 0, 0, 0, time.UTC)
+	notifier := &notify.Service{Q: q, Sender: pushes, Now: func() time.Time { return noon }}
+	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: notifier, Tools: tools,
+		PDF: printer, Blob: files, Notify: notifier})
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +113,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, router: router, url: hs.URL, orch: oc, pushes: pushes}
+	return &harness{t: t, router: router, url: hs.URL, orch: oc, pushes: pushes, q: q}
 }
 
 // do sends a JSON request and decodes the JSON response into out (if non-nil).
@@ -519,6 +526,19 @@ func TestReportEndToEnd(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("report push: %+v", h.pushes.Notifications())
 		}
+	}
+	// The push opens a message-center entry.
+	var inbox struct {
+		Items []struct {
+			ID       string `json:"id"`
+			Category string `json:"category"`
+			Deeplink string `json:"deeplink"`
+		} `json:"items"`
+		UnreadCount int `json:"unreadCount"`
+	}
+	h.do("GET", "/v1/messages", nil, 200, &inbox)
+	if len(inbox.Items) != 1 || inbox.Items[0].Category != "report" || inbox.Items[0].ID != h.pushes.Notifications()[0].MessageID || inbox.UnreadCount != 1 {
+		t.Fatalf("inbox = %+v", inbox)
 	}
 
 	var rep struct {

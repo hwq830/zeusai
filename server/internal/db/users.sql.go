@@ -43,7 +43,7 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (nickname, phone, wechat_unionid, wechat_openid, apple_sub, timezone)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at
 `
 
 type CreateUserParams struct {
@@ -80,6 +80,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
@@ -126,7 +127,7 @@ func (q *Queries) GetQuotaOverride(ctx context.Context, userID uuid.UUID) (UserQ
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE id = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -147,12 +148,13 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
 
 const getUserByAppleSub = `-- name: GetUserByAppleSub :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE apple_sub = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE apple_sub = $1
 `
 
 func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User, error) {
@@ -173,12 +175,13 @@ func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE phone = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE phone = $1
 `
 
 func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, error) {
@@ -199,12 +202,13 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
 
 const getUserByWechatUnionID = `-- name: GetUserByWechatUnionID :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE wechat_unionid = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE wechat_unionid = $1
 `
 
 func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *string) (User, error) {
@@ -225,6 +229,7 @@ func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *str
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
@@ -336,7 +341,7 @@ UPDATE users SET
     timezone = coalesce($3, timezone),
     updated_at = now()
 WHERE id = $1
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at
 `
 
 type UpdateUserProfileParams struct {
@@ -363,6 +368,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.UpdatedAt,
 		&i.DisabledAt,
 		&i.DisabledReason,
+		&i.LastSeenAt,
 	)
 	return i, err
 }

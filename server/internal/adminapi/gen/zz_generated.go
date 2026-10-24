@@ -47,10 +47,73 @@ const (
 	AdminTemplateInputDefaultLengthStandard AdminTemplateInputDefaultLength = "standard"
 )
 
+// Defines values for CampaignAudienceType.
+const (
+	All    CampaignAudienceType = "all"
+	Filter CampaignAudienceType = "filter"
+	Users  CampaignAudienceType = "users"
+)
+
+// Defines values for CampaignCategory.
+const (
+	Marketing CampaignCategory = "marketing"
+	Service   CampaignCategory = "service"
+)
+
+// Defines values for CampaignStatus.
+const (
+	CampaignStatusCancelled       CampaignStatus = "cancelled"
+	CampaignStatusDraft           CampaignStatus = "draft"
+	CampaignStatusPendingApproval CampaignStatus = "pending_approval"
+	CampaignStatusRecalled        CampaignStatus = "recalled"
+	CampaignStatusScheduled       CampaignStatus = "scheduled"
+	CampaignStatusSending         CampaignStatus = "sending"
+	CampaignStatusSent            CampaignStatus = "sent"
+)
+
+// Defines values for CampaignTestResultResultsStatus.
+const (
+	CampaignTestResultResultsStatusFailed   CampaignTestResultResultsStatus = "failed"
+	CampaignTestResultResultsStatusNoDevice CampaignTestResultResultsStatus = "no_device"
+	CampaignTestResultResultsStatusNotFound CampaignTestResultResultsStatus = "not_found"
+	CampaignTestResultResultsStatusSent     CampaignTestResultResultsStatus = "sent"
+)
+
+// Defines values for FeedbackStatus.
+const (
+	Closed     FeedbackStatus = "closed"
+	InProgress FeedbackStatus = "in_progress"
+	New        FeedbackStatus = "new"
+	Resolved   FeedbackStatus = "resolved"
+)
+
+// Defines values for FeedbackType.
+const (
+	FeedbackTypeBug        FeedbackType = "bug"
+	FeedbackTypeOther      FeedbackType = "other"
+	FeedbackTypeSuggestion FeedbackType = "suggestion"
+)
+
 // Defines values for ModerationEventKind.
 const (
 	ModerationEventKindInput  ModerationEventKind = "input"
 	ModerationEventKindOutput ModerationEventKind = "output"
+)
+
+// Defines values for ReportFeedbackItemRating.
+const (
+	ReportFeedbackItemRatingSatisfied   ReportFeedbackItemRating = "satisfied"
+	ReportFeedbackItemRatingUnsatisfied ReportFeedbackItemRating = "unsatisfied"
+)
+
+// Defines values for ReportFeedbackReason.
+const (
+	ReportFeedbackReasonBadSources ReportFeedbackReason = "bad_sources"
+	ReportFeedbackReasonInaccurate ReportFeedbackReason = "inaccurate"
+	ReportFeedbackReasonOffTopic   ReportFeedbackReason = "off_topic"
+	ReportFeedbackReasonOther      ReportFeedbackReason = "other"
+	ReportFeedbackReasonShallow    ReportFeedbackReason = "shallow"
+	ReportFeedbackReasonSlow       ReportFeedbackReason = "slow"
 )
 
 // Defines values for Role.
@@ -96,6 +159,12 @@ const (
 const (
 	ListModerationEventsParamsKindInput  ListModerationEventsParamsKind = "input"
 	ListModerationEventsParamsKindOutput ListModerationEventsParamsKind = "output"
+)
+
+// Defines values for ListReportFeedbackParamsRating.
+const (
+	ListReportFeedbackParamsRatingSatisfied   ListReportFeedbackParamsRating = "satisfied"
+	ListReportFeedbackParamsRatingUnsatisfied ListReportFeedbackParamsRating = "unsatisfied"
 )
 
 // Defines values for ListTemplatesParamsScope.
@@ -277,6 +346,11 @@ type AdminWithPassword struct {
 	Password string `json:"password"`
 }
 
+// AudienceEstimate defines model for AudienceEstimate.
+type AudienceEstimate struct {
+	Count int `json:"count"`
+}
+
 // AuditEntry defines model for AuditEntry.
 type AuditEntry struct {
 	Action     string                 `json:"action"`
@@ -293,6 +367,143 @@ type AuditPage struct {
 	Items      []AuditEntry `json:"items"`
 	NextCursor *NextCursor  `json:"nextCursor"`
 }
+
+// Campaign defines model for Campaign.
+type Campaign struct {
+	ApprovedAt *time.Time `json:"approvedAt,omitempty"`
+
+	// ApprovedBy 审批人邮箱
+	ApprovedBy *string `json:"approvedBy,omitempty"`
+
+	// Audience all 全部用户；users 指定 userIds（最多 10000）；filter 按条件，所有已填条件同时满足。停用的用户始终排除。
+	Audience CampaignAudience `json:"audience"`
+
+	// AudienceEstimate 提交时估算的目标人数
+	AudienceEstimate int        `json:"audienceEstimate"`
+	Body             string     `json:"body"`
+	CancelledAt      *time.Time `json:"cancelledAt,omitempty"`
+
+	// Category marketing 运营活动（只推给开启了运营推送的用户，受频控）；service 服务通知（如停机公告）
+	Category  CampaignCategory `json:"category"`
+	CreatedAt time.Time        `json:"createdAt"`
+
+	// CreatedBy 创建人邮箱
+	CreatedBy    *string       `json:"createdBy,omitempty"`
+	Deeplink     string        `json:"deeplink"`
+	FinishedAt   *time.Time    `json:"finishedAt,omitempty"`
+	Id           string        `json:"id"`
+	ImageUrl     string        `json:"imageUrl"`
+	Name         string        `json:"name"`
+	RecalledAt   *time.Time    `json:"recalledAt,omitempty"`
+	RejectReason string        `json:"rejectReason"`
+	SendAt       *time.Time    `json:"sendAt"`
+	StartedAt    *time.Time    `json:"startedAt,omitempty"`
+	Stats        CampaignStats `json:"stats"`
+
+	// Status draft 草稿 → pending_approval 待审批 → scheduled 已排期 → sending 发送中 → sent 已发送；cancelled 已取消、recalled 已撤回
+	Status      CampaignStatus `json:"status"`
+	SubmittedAt *time.Time     `json:"submittedAt,omitempty"`
+	Title       string         `json:"title"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+}
+
+// CampaignAudience all 全部用户；users 指定 userIds（最多 10000）；filter 按条件，所有已填条件同时满足。停用的用户始终排除。
+type CampaignAudience struct {
+	// ActiveWithinDays 最近 N 天打开过 App
+	ActiveWithinDays *int `json:"activeWithinDays,omitempty"`
+
+	// InactiveForDays 超过 N 天没打开 App
+	InactiveForDays  *int       `json:"inactiveForDays,omitempty"`
+	MinAppVersion    *string    `json:"minAppVersion,omitempty"`
+	RegisteredAfter  *time.Time `json:"registeredAfter,omitempty"`
+	RegisteredBefore *time.Time `json:"registeredBefore,omitempty"`
+
+	// TemplateId 有用该模板创建的进行中简报订阅
+	TemplateId *string              `json:"templateId,omitempty"`
+	Type       CampaignAudienceType `json:"type"`
+	UserIds    *[]string            `json:"userIds,omitempty"`
+}
+
+// CampaignAudienceType defines model for CampaignAudience.Type.
+type CampaignAudienceType string
+
+// CampaignCategory marketing 运营活动（只推给开启了运营推送的用户，受频控）；service 服务通知（如停机公告）
+type CampaignCategory string
+
+// CampaignInput defines model for CampaignInput.
+type CampaignInput struct {
+	// Audience all 全部用户；users 指定 userIds（最多 10000）；filter 按条件，所有已填条件同时满足。停用的用户始终排除。
+	Audience CampaignAudience `json:"audience"`
+	Body     string           `json:"body"`
+
+	// Category marketing 运营活动（只推给开启了运营推送的用户，受频控）；service 服务通知（如停机公告）
+	Category CampaignCategory `json:"category"`
+
+	// Deeplink zeus:// 页面或 https 链接，空表示只打开 App
+	Deeplink *string `json:"deeplink,omitempty"`
+
+	// ImageUrl https 图片，推送大图和消息中心都会显示
+	ImageUrl *string `json:"imageUrl,omitempty"`
+
+	// Name 内部名称，用户看不到
+	Name string `json:"name"`
+
+	// SendAt 定时发送；为空表示审批通过后立即发送
+	SendAt *time.Time `json:"sendAt"`
+	Title  string     `json:"title"`
+}
+
+// CampaignPage defines model for CampaignPage.
+type CampaignPage struct {
+	Items      []Campaign  `json:"items"`
+	NextCursor *NextCursor `json:"nextCursor"`
+}
+
+// CampaignRejectRequest defines model for CampaignRejectRequest.
+type CampaignRejectRequest struct {
+	Reason string `json:"reason"`
+}
+
+// CampaignStats defines model for CampaignStats.
+type CampaignStats struct {
+	// Messages 写入消息中心的人数
+	Messages int `json:"messages"`
+
+	// Opened 点推送打开 App
+	Opened     int `json:"opened"`
+	PushFailed int `json:"pushFailed"`
+
+	// PushPending 免打扰延后中
+	PushPending int `json:"pushPending"`
+
+	// PushSkipped 用户关闭、频控或没有设备
+	PushSkipped int `json:"pushSkipped"`
+
+	// Pushed APNs 推送成功
+	Pushed int `json:"pushed"`
+
+	// Read 在消息中心或通过推送看过
+	Read int `json:"read"`
+}
+
+// CampaignStatus draft 草稿 → pending_approval 待审批 → scheduled 已排期 → sending 发送中 → sent 已发送；cancelled 已取消、recalled 已撤回
+type CampaignStatus string
+
+// CampaignTestRequest defines model for CampaignTestRequest.
+type CampaignTestRequest struct {
+	UserIds []string `json:"userIds"`
+}
+
+// CampaignTestResult defines model for CampaignTestResult.
+type CampaignTestResult struct {
+	Results []struct {
+		Status CampaignTestResultResultsStatus `json:"status"`
+		UserId string                          `json:"userId"`
+	} `json:"results"`
+}
+
+// CampaignTestResultResultsStatus defines model for CampaignTestResult.Results.Status.
+type CampaignTestResultResultsStatus string
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
@@ -388,8 +599,12 @@ type Dashboard struct {
 	// Daily 近 14 天
 	Daily            []DailyPoint `json:"daily"`
 	ReportsThisMonth int          `json:"reportsThisMonth"`
-	TasksToday       []TaskCount  `json:"tasksToday"`
-	Users            struct {
+
+	// Satisfaction 报告满意度 = satisfied ÷ (satisfied + unsatisfied)，按报告创建日落窗口；评分率 = 已评 ÷ completed。
+	// 门槛 B 要求满意度 ≥ 70%，评分率低于 25% 时结论无效。
+	Satisfaction Satisfaction `json:"satisfaction"`
+	TasksToday   []TaskCount  `json:"tasksToday"`
+	Users        struct {
 		Disabled int `json:"disabled"`
 		New7d    int `json:"new7d"`
 		NewToday int `json:"newToday"`
@@ -409,6 +624,94 @@ type Error struct {
 	Message   string                  `json:"message"`
 	Retryable bool                    `json:"retryable"`
 }
+
+// FeedbackDetail defines model for FeedbackDetail.
+type FeedbackDetail struct {
+	AdminNote       string  `json:"adminNote"`
+	AppVersion      *string `json:"appVersion,omitempty"`
+	AttachmentCount int     `json:"attachmentCount"`
+	Attachments     []struct {
+		Id string `json:"id"`
+
+		// Url 短时签名链接
+		Url string `json:"url"`
+	} `json:"attachments"`
+
+	// Client App 版本、系统、机型等，原样保存
+	Client    map[string]interface{} `json:"client"`
+	Contact   string                 `json:"contact"`
+	Content   string                 `json:"content"`
+	CreatedAt time.Time              `json:"createdAt"`
+
+	// Flagged 命中审核关键词（仅标记，不拦截）
+	Flagged       bool   `json:"flagged"`
+	FlaggedReason string `json:"flaggedReason"`
+
+	// HandledBy 最后处理人邮箱
+	HandledBy   *string    `json:"handledBy"`
+	Id          string     `json:"id"`
+	LastReplyAt *time.Time `json:"lastReplyAt"`
+	Nickname    string     `json:"nickname"`
+	PhoneMasked string     `json:"phoneMasked"`
+	Replies     []struct {
+		AdminName *string   `json:"adminName,omitempty"`
+		Content   string    `json:"content"`
+		CreatedAt time.Time `json:"createdAt"`
+		Id        string    `json:"id"`
+	} `json:"replies"`
+	ReplyCount int            `json:"replyCount"`
+	ReportId   *string        `json:"reportId"`
+	Status     FeedbackStatus `json:"status"`
+	TaskId     *string        `json:"taskId"`
+	Type       FeedbackType   `json:"type"`
+	UpdatedAt  time.Time      `json:"updatedAt"`
+	UserId     string         `json:"userId"`
+
+	// UserReadAt 用户最后一次打开这条反馈的时间
+	UserReadAt *time.Time `json:"userReadAt"`
+}
+
+// FeedbackPage defines model for FeedbackPage.
+type FeedbackPage struct {
+	Items      []FeedbackSummary `json:"items"`
+	NextCursor *NextCursor       `json:"nextCursor"`
+}
+
+// FeedbackPatch defines model for FeedbackPatch.
+type FeedbackPatch struct {
+	AdminNote *string         `json:"adminNote,omitempty"`
+	Status    *FeedbackStatus `json:"status,omitempty"`
+}
+
+// FeedbackReplyRequest defines model for FeedbackReplyRequest.
+type FeedbackReplyRequest struct {
+	Content string `json:"content"`
+}
+
+// FeedbackStatus defines model for FeedbackStatus.
+type FeedbackStatus string
+
+// FeedbackSummary defines model for FeedbackSummary.
+type FeedbackSummary struct {
+	AppVersion      *string   `json:"appVersion,omitempty"`
+	AttachmentCount int       `json:"attachmentCount"`
+	Content         string    `json:"content"`
+	CreatedAt       time.Time `json:"createdAt"`
+
+	// Flagged 命中审核关键词（仅标记，不拦截）
+	Flagged     bool           `json:"flagged"`
+	Id          string         `json:"id"`
+	Nickname    string         `json:"nickname"`
+	PhoneMasked string         `json:"phoneMasked"`
+	ReplyCount  int            `json:"replyCount"`
+	Status      FeedbackStatus `json:"status"`
+	Type        FeedbackType   `json:"type"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+	UserId      string         `json:"userId"`
+}
+
+// FeedbackType defines model for FeedbackType.
+type FeedbackType string
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -551,8 +854,65 @@ type QuotaOverrideInput struct {
 	Subscriptions   *int   `json:"subscriptions"`
 }
 
+// ReportFeedbackItem defines model for ReportFeedbackItem.
+type ReportFeedbackItem struct {
+	Comment         string                   `json:"comment"`
+	Nickname        string                   `json:"nickname"`
+	PhoneMasked     string                   `json:"phoneMasked"`
+	Rating          ReportFeedbackItemRating `json:"rating"`
+	Reasons         []ReportFeedbackReason   `json:"reasons"`
+	ReportCreatedAt time.Time                `json:"reportCreatedAt"`
+	ReportDepth     string                   `json:"reportDepth"`
+	ReportId        string                   `json:"reportId"`
+	ReportTitle     string                   `json:"reportTitle"`
+	TaskId          *string                  `json:"taskId"`
+	UpdatedAt       time.Time                `json:"updatedAt"`
+	UserId          string                   `json:"userId"`
+}
+
+// ReportFeedbackItemRating defines model for ReportFeedbackItem.Rating.
+type ReportFeedbackItemRating string
+
+// ReportFeedbackPage defines model for ReportFeedbackPage.
+type ReportFeedbackPage struct {
+	Items      []ReportFeedbackItem `json:"items"`
+	NextCursor *NextCursor          `json:"nextCursor"`
+}
+
+// ReportFeedbackReason 内容不准确 / 不够深入 / 来源不可靠 / 没回答我的问题 / 生成太慢 / 其他
+type ReportFeedbackReason string
+
+// ReportRatingCounts defines model for ReportRatingCounts.
+type ReportRatingCounts struct {
+	// Completed 窗口内创建且已完成的报告数
+	Completed   int `json:"completed"`
+	Satisfied   int `json:"satisfied"`
+	Unsatisfied int `json:"unsatisfied"`
+}
+
 // Role defines model for Role.
 type Role string
+
+// Satisfaction 报告满意度 = satisfied ÷ (satisfied + unsatisfied)，按报告创建日落窗口；评分率 = 已评 ÷ completed。
+// 门槛 B 要求满意度 ≥ 70%，评分率低于 25% 时结论无效。
+type Satisfaction struct {
+	// Briefings30d 简报整期评分（不含单条）
+	Briefings30d struct {
+		Meh    int `json:"meh"`
+		Useful int `json:"useful"`
+	} `json:"briefings30d"`
+
+	// OpenFeedback 待处理 + 处理中的意见反馈
+	OpenFeedback          int                `json:"openFeedback"`
+	Reports30d            ReportRatingCounts `json:"reports30d"`
+	Reports7d             ReportRatingCounts `json:"reports7d"`
+	UnsatisfiedReasons30d []struct {
+		Count int `json:"count"`
+
+		// Reason 内容不准确 / 不够深入 / 来源不可靠 / 没回答我的问题 / 生成太慢 / 其他
+		Reason ReportFeedbackReason `json:"reason"`
+	} `json:"unsatisfiedReasons30d"`
+}
 
 // Schedule defines model for Schedule.
 type Schedule struct {
@@ -693,8 +1053,14 @@ type UserSummaryLoginMethods string
 // AdminId defines model for AdminId.
 type AdminId = string
 
+// CampaignId defines model for CampaignId.
+type CampaignId = string
+
 // Cursor defines model for Cursor.
 type Cursor = string
+
+// FeedbackId defines model for FeedbackId.
+type FeedbackId = string
 
 // Limit defines model for Limit.
 type Limit = int
@@ -716,9 +1082,28 @@ type ListAuditLogParams struct {
 	Limit      *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListCampaignsParams defines parameters for ListCampaigns.
+type ListCampaignsParams struct {
+	Status *CampaignStatus `form:"status,omitempty" json:"status,omitempty"`
+	Cursor *Cursor         `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetCostsParams defines parameters for GetCosts.
 type GetCostsParams struct {
 	Days *int `form:"days,omitempty" json:"days,omitempty"`
+}
+
+// ListFeedbackParams defines parameters for ListFeedback.
+type ListFeedbackParams struct {
+	Status *FeedbackStatus `form:"status,omitempty" json:"status,omitempty"`
+	Type   *FeedbackType   `form:"type,omitempty" json:"type,omitempty"`
+	UserId *string         `form:"userId,omitempty" json:"userId,omitempty"`
+
+	// Q 按内容搜索
+	Q      *string `form:"q,omitempty" json:"q,omitempty"`
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListModerationEventsParams defines parameters for ListModerationEvents.
@@ -731,6 +1116,17 @@ type ListModerationEventsParams struct {
 
 // ListModerationEventsParamsKind defines parameters for ListModerationEvents.
 type ListModerationEventsParamsKind string
+
+// ListReportFeedbackParams defines parameters for ListReportFeedback.
+type ListReportFeedbackParams struct {
+	Rating *ListReportFeedbackParamsRating `form:"rating,omitempty" json:"rating,omitempty"`
+	Reason *ReportFeedbackReason           `form:"reason,omitempty" json:"reason,omitempty"`
+	Cursor *Cursor                         `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit                          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListReportFeedbackParamsRating defines parameters for ListReportFeedback.
+type ListReportFeedbackParamsRating string
 
 // ListSharesParams defines parameters for ListShares.
 type ListSharesParams struct {
@@ -782,8 +1178,29 @@ type UpdateAdminJSONRequestBody = AdminPatch
 // AdminLoginJSONRequestBody defines body for AdminLogin for application/json ContentType.
 type AdminLoginJSONRequestBody = LoginRequest
 
+// CreateCampaignJSONRequestBody defines body for CreateCampaign for application/json ContentType.
+type CreateCampaignJSONRequestBody = CampaignInput
+
+// EstimateCampaignAudienceJSONRequestBody defines body for EstimateCampaignAudience for application/json ContentType.
+type EstimateCampaignAudienceJSONRequestBody = CampaignAudience
+
+// UpdateCampaignJSONRequestBody defines body for UpdateCampaign for application/json ContentType.
+type UpdateCampaignJSONRequestBody = CampaignInput
+
+// RejectCampaignJSONRequestBody defines body for RejectCampaign for application/json ContentType.
+type RejectCampaignJSONRequestBody = CampaignRejectRequest
+
+// TestSendCampaignJSONRequestBody defines body for TestSendCampaign for application/json ContentType.
+type TestSendCampaignJSONRequestBody = CampaignTestRequest
+
 // UpdateConnectorJSONRequestBody defines body for UpdateConnector for application/json ContentType.
 type UpdateConnectorJSONRequestBody = ConnectorPatch
+
+// UpdateFeedbackJSONRequestBody defines body for UpdateFeedback for application/json ContentType.
+type UpdateFeedbackJSONRequestBody = FeedbackPatch
+
+// ReplyFeedbackJSONRequestBody defines body for ReplyFeedback for application/json ContentType.
+type ReplyFeedbackJSONRequestBody = FeedbackReplyRequest
 
 // ChangeAdminPasswordJSONRequestBody defines body for ChangeAdminPassword for application/json ContentType.
 type ChangeAdminPasswordJSONRequestBody = ChangePasswordRequest
@@ -826,6 +1243,42 @@ type ServerInterface interface {
 	// 邮箱密码登录
 	// (POST /admin/v1/auth/login)
 	AdminLogin(w http.ResponseWriter, r *http.Request)
+	// 运营推送活动，按创建时间倒序
+	// (GET /admin/v1/campaigns)
+	ListCampaigns(w http.ResponseWriter, r *http.Request, params ListCampaignsParams)
+	// 新建草稿
+	// (POST /admin/v1/campaigns)
+	CreateCampaign(w http.ResponseWriter, r *http.Request)
+	// 估算目标人数
+	// (POST /admin/v1/campaigns/audience-estimate)
+	EstimateCampaignAudience(w http.ResponseWriter, r *http.Request)
+	// 删除草稿
+	// (DELETE /admin/v1/campaigns/{campaignId})
+	DeleteCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 详情和送达统计
+	// (GET /admin/v1/campaigns/{campaignId})
+	GetCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 修改草稿（被驳回的活动回到草稿）
+	// (PUT /admin/v1/campaigns/{campaignId})
+	UpdateCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 审批通过（仅 owner）。没有定时则立即开始发送
+	// (POST /admin/v1/campaigns/{campaignId}/approve)
+	ApproveCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 取消待审批、已排期或发送中的活动；已写入的消息保留，可再撤回
+	// (POST /admin/v1/campaigns/{campaignId}/cancel)
+	CancelCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 撤回：从所有用户的消息中心移除（已送达的推送无法撤回）
+	// (POST /admin/v1/campaigns/{campaignId}/recall)
+	RecallCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 驳回，回到草稿（仅 owner）
+	// (POST /admin/v1/campaigns/{campaignId}/reject)
+	RejectCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 提交审批（草稿 → 待审批）
+	// (POST /admin/v1/campaigns/{campaignId}/submit)
+	SubmitCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
+	// (POST /admin/v1/campaigns/{campaignId}/test-send)
+	TestSendCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
 	// 内置工具与 MCP 白名单（含已下架）
 	// (GET /admin/v1/connectors)
 	ListConnectors(w http.ResponseWriter, r *http.Request)
@@ -838,6 +1291,18 @@ type ServerInterface interface {
 	// 运营概览（按 Asia/Shanghai 计日）
 	// (GET /admin/v1/dashboard)
 	GetDashboard(w http.ResponseWriter, r *http.Request)
+	// 用户意见反馈
+	// (GET /admin/v1/feedback)
+	ListFeedback(w http.ResponseWriter, r *http.Request, params ListFeedbackParams)
+
+	// (GET /admin/v1/feedback/{feedbackId})
+	GetFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId)
+	// 改状态、写内部备注（用户看不到备注）
+	// (PATCH /admin/v1/feedback/{feedbackId})
+	UpdateFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId)
+	// 回复用户。用户在「我的反馈」里看到并收到推送（zeus://feedback/{id}）；待处理的反馈自动转为处理中
+	// (POST /admin/v1/feedback/{feedbackId}/replies)
+	ReplyFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId)
 	// 当前管理员
 	// (GET /admin/v1/me)
 	GetAdminMe(w http.ResponseWriter, r *http.Request)
@@ -862,6 +1327,9 @@ type ServerInterface interface {
 	// 方案与额度（代码内配置，只读）
 	// (GET /admin/v1/plans)
 	ListPlans(w http.ResponseWriter, r *http.Request)
+	// 报告满意度评分，按最近评分排序
+	// (GET /admin/v1/report-feedback)
+	ListReportFeedback(w http.ResponseWriter, r *http.Request, params ListReportFeedbackParams)
 	// 查看报告正文（审核用）
 	// (GET /admin/v1/reports/{reportId})
 	GetReport(w http.ResponseWriter, r *http.Request, reportId string)
@@ -956,6 +1424,78 @@ func (_ Unimplemented) AdminLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// 运营推送活动，按创建时间倒序
+// (GET /admin/v1/campaigns)
+func (_ Unimplemented) ListCampaigns(w http.ResponseWriter, r *http.Request, params ListCampaignsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 新建草稿
+// (POST /admin/v1/campaigns)
+func (_ Unimplemented) CreateCampaign(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 估算目标人数
+// (POST /admin/v1/campaigns/audience-estimate)
+func (_ Unimplemented) EstimateCampaignAudience(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 删除草稿
+// (DELETE /admin/v1/campaigns/{campaignId})
+func (_ Unimplemented) DeleteCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 详情和送达统计
+// (GET /admin/v1/campaigns/{campaignId})
+func (_ Unimplemented) GetCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 修改草稿（被驳回的活动回到草稿）
+// (PUT /admin/v1/campaigns/{campaignId})
+func (_ Unimplemented) UpdateCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 审批通过（仅 owner）。没有定时则立即开始发送
+// (POST /admin/v1/campaigns/{campaignId}/approve)
+func (_ Unimplemented) ApproveCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 取消待审批、已排期或发送中的活动；已写入的消息保留，可再撤回
+// (POST /admin/v1/campaigns/{campaignId}/cancel)
+func (_ Unimplemented) CancelCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 撤回：从所有用户的消息中心移除（已送达的推送无法撤回）
+// (POST /admin/v1/campaigns/{campaignId}/recall)
+func (_ Unimplemented) RecallCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 驳回，回到草稿（仅 owner）
+// (POST /admin/v1/campaigns/{campaignId}/reject)
+func (_ Unimplemented) RejectCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 提交审批（草稿 → 待审批）
+// (POST /admin/v1/campaigns/{campaignId}/submit)
+func (_ Unimplemented) SubmitCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
+// (POST /admin/v1/campaigns/{campaignId}/test-send)
+func (_ Unimplemented) TestSendCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // 内置工具与 MCP 白名单（含已下架）
 // (GET /admin/v1/connectors)
 func (_ Unimplemented) ListConnectors(w http.ResponseWriter, r *http.Request) {
@@ -977,6 +1517,29 @@ func (_ Unimplemented) GetCosts(w http.ResponseWriter, r *http.Request, params G
 // 运营概览（按 Asia/Shanghai 计日）
 // (GET /admin/v1/dashboard)
 func (_ Unimplemented) GetDashboard(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 用户意见反馈
+// (GET /admin/v1/feedback)
+func (_ Unimplemented) ListFeedback(w http.ResponseWriter, r *http.Request, params ListFeedbackParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// (GET /admin/v1/feedback/{feedbackId})
+func (_ Unimplemented) GetFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 改状态、写内部备注（用户看不到备注）
+// (PATCH /admin/v1/feedback/{feedbackId})
+func (_ Unimplemented) UpdateFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 回复用户。用户在「我的反馈」里看到并收到推送（zeus://feedback/{id}）；待处理的反馈自动转为处理中
+// (POST /admin/v1/feedback/{feedbackId}/replies)
+func (_ Unimplemented) ReplyFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1023,6 +1586,12 @@ func (_ Unimplemented) DeleteModerationTerm(w http.ResponseWriter, r *http.Reque
 // 方案与额度（代码内配置，只读）
 // (GET /admin/v1/plans)
 func (_ Unimplemented) ListPlans(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 报告满意度评分，按最近评分排序
+// (GET /admin/v1/report-feedback)
+func (_ Unimplemented) ListReportFeedback(w http.ResponseWriter, r *http.Request, params ListReportFeedbackParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1315,6 +1884,374 @@ func (siw *ServerInterfaceWrapper) AdminLogin(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListCampaigns operation middleware
+func (siw *ServerInterfaceWrapper) ListCampaigns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCampaignsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "status", r.URL.Query(), &params.Status)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCampaigns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCampaign operation middleware
+func (siw *ServerInterfaceWrapper) CreateCampaign(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCampaign(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EstimateCampaignAudience operation middleware
+func (siw *ServerInterfaceWrapper) EstimateCampaignAudience(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EstimateCampaignAudience(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCampaign operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCampaign operation middleware
+func (siw *ServerInterfaceWrapper) GetCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCampaign operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveCampaign operation middleware
+func (siw *ServerInterfaceWrapper) ApproveCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelCampaign operation middleware
+func (siw *ServerInterfaceWrapper) CancelCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RecallCampaign operation middleware
+func (siw *ServerInterfaceWrapper) RecallCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecallCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RejectCampaign operation middleware
+func (siw *ServerInterfaceWrapper) RejectCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RejectCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SubmitCampaign operation middleware
+func (siw *ServerInterfaceWrapper) SubmitCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SubmitCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestSendCampaign operation middleware
+func (siw *ServerInterfaceWrapper) TestSendCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignId CampaignId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestSendCampaign(w, r, campaignId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListConnectors operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectors(w http.ResponseWriter, r *http.Request) {
 
@@ -1410,6 +2347,172 @@ func (siw *ServerInterfaceWrapper) GetDashboard(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetDashboard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFeedback operation middleware
+func (siw *ServerInterfaceWrapper) ListFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListFeedbackParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "status", r.URL.Query(), &params.Status)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "type", r.URL.Query(), &params.Type)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "userId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "userId", r.URL.Query(), &params.UserId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "q", r.URL.Query(), &params.Q)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFeedback(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFeedback operation middleware
+func (siw *ServerInterfaceWrapper) GetFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "feedbackId" -------------
+	var feedbackId FeedbackId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "feedbackId", chi.URLParam(r, "feedbackId"), &feedbackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "feedbackId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFeedback(w, r, feedbackId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFeedback operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "feedbackId" -------------
+	var feedbackId FeedbackId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "feedbackId", chi.URLParam(r, "feedbackId"), &feedbackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "feedbackId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFeedback(w, r, feedbackId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReplyFeedback operation middleware
+func (siw *ServerInterfaceWrapper) ReplyFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "feedbackId" -------------
+	var feedbackId FeedbackId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "feedbackId", chi.URLParam(r, "feedbackId"), &feedbackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "feedbackId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReplyFeedback(w, r, feedbackId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1618,6 +2721,63 @@ func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPlans(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReportFeedback operation middleware
+func (siw *ServerInterfaceWrapper) ListReportFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReportFeedbackParams
+
+	// ------------- Optional query parameter "rating" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "rating", r.URL.Query(), &params.Rating)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rating", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "reason" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "reason", r.URL.Query(), &params.Reason)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reason", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReportFeedback(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2418,6 +3578,42 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/admin/v1/auth/login", wrapper.AdminLogin)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/campaigns", wrapper.ListCampaigns)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns", wrapper.CreateCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/audience-estimate", wrapper.EstimateCampaignAudience)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/admin/v1/campaigns/{campaignId}", wrapper.DeleteCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/campaigns/{campaignId}", wrapper.GetCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/admin/v1/campaigns/{campaignId}", wrapper.UpdateCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/approve", wrapper.ApproveCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/cancel", wrapper.CancelCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/recall", wrapper.RecallCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/reject", wrapper.RejectCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/submit", wrapper.SubmitCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/test-send", wrapper.TestSendCampaign)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/connectors", wrapper.ListConnectors)
 	})
 	r.Group(func(r chi.Router) {
@@ -2428,6 +3624,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/dashboard", wrapper.GetDashboard)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/feedback", wrapper.ListFeedback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/feedback/{feedbackId}", wrapper.GetFeedback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/admin/v1/feedback/{feedbackId}", wrapper.UpdateFeedback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/feedback/{feedbackId}/replies", wrapper.ReplyFeedback)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/me", wrapper.GetAdminMe)
@@ -2452,6 +3660,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/plans", wrapper.ListPlans)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/report-feedback", wrapper.ListReportFeedback)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/reports/{reportId}", wrapper.GetReport)
@@ -2687,6 +3898,356 @@ func (response AdminLogindefaultJSONResponse) VisitAdminLoginResponse(w http.Res
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListCampaignsRequestObject struct {
+	Params ListCampaignsParams
+}
+
+type ListCampaignsResponseObject interface {
+	VisitListCampaignsResponse(w http.ResponseWriter) error
+}
+
+type ListCampaigns200JSONResponse CampaignPage
+
+func (response ListCampaigns200JSONResponse) VisitListCampaignsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListCampaignsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListCampaignsdefaultJSONResponse) VisitListCampaignsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateCampaignRequestObject struct {
+	Body *CreateCampaignJSONRequestBody
+}
+
+type CreateCampaignResponseObject interface {
+	VisitCreateCampaignResponse(w http.ResponseWriter) error
+}
+
+type CreateCampaign201JSONResponse Campaign
+
+func (response CreateCampaign201JSONResponse) VisitCreateCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateCampaigndefaultJSONResponse) VisitCreateCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type EstimateCampaignAudienceRequestObject struct {
+	Body *EstimateCampaignAudienceJSONRequestBody
+}
+
+type EstimateCampaignAudienceResponseObject interface {
+	VisitEstimateCampaignAudienceResponse(w http.ResponseWriter) error
+}
+
+type EstimateCampaignAudience200JSONResponse AudienceEstimate
+
+func (response EstimateCampaignAudience200JSONResponse) VisitEstimateCampaignAudienceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type EstimateCampaignAudiencedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response EstimateCampaignAudiencedefaultJSONResponse) VisitEstimateCampaignAudienceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeleteCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+}
+
+type DeleteCampaignResponseObject interface {
+	VisitDeleteCampaignResponse(w http.ResponseWriter) error
+}
+
+type DeleteCampaign204Response struct {
+}
+
+func (response DeleteCampaign204Response) VisitDeleteCampaignResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteCampaigndefaultJSONResponse) VisitDeleteCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+}
+
+type GetCampaignResponseObject interface {
+	VisitGetCampaignResponse(w http.ResponseWriter) error
+}
+
+type GetCampaign200JSONResponse Campaign
+
+func (response GetCampaign200JSONResponse) VisitGetCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetCampaigndefaultJSONResponse) VisitGetCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+	Body       *UpdateCampaignJSONRequestBody
+}
+
+type UpdateCampaignResponseObject interface {
+	VisitUpdateCampaignResponse(w http.ResponseWriter) error
+}
+
+type UpdateCampaign200JSONResponse Campaign
+
+func (response UpdateCampaign200JSONResponse) VisitUpdateCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response UpdateCampaigndefaultJSONResponse) VisitUpdateCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ApproveCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+}
+
+type ApproveCampaignResponseObject interface {
+	VisitApproveCampaignResponse(w http.ResponseWriter) error
+}
+
+type ApproveCampaign200JSONResponse Campaign
+
+func (response ApproveCampaign200JSONResponse) VisitApproveCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApproveCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ApproveCampaigndefaultJSONResponse) VisitApproveCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CancelCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+}
+
+type CancelCampaignResponseObject interface {
+	VisitCancelCampaignResponse(w http.ResponseWriter) error
+}
+
+type CancelCampaign200JSONResponse Campaign
+
+func (response CancelCampaign200JSONResponse) VisitCancelCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CancelCampaigndefaultJSONResponse) VisitCancelCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RecallCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+}
+
+type RecallCampaignResponseObject interface {
+	VisitRecallCampaignResponse(w http.ResponseWriter) error
+}
+
+type RecallCampaign200JSONResponse Campaign
+
+func (response RecallCampaign200JSONResponse) VisitRecallCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RecallCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RecallCampaigndefaultJSONResponse) VisitRecallCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RejectCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+	Body       *RejectCampaignJSONRequestBody
+}
+
+type RejectCampaignResponseObject interface {
+	VisitRejectCampaignResponse(w http.ResponseWriter) error
+}
+
+type RejectCampaign200JSONResponse Campaign
+
+func (response RejectCampaign200JSONResponse) VisitRejectCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RejectCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RejectCampaigndefaultJSONResponse) VisitRejectCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SubmitCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+}
+
+type SubmitCampaignResponseObject interface {
+	VisitSubmitCampaignResponse(w http.ResponseWriter) error
+}
+
+type SubmitCampaign200JSONResponse Campaign
+
+func (response SubmitCampaign200JSONResponse) VisitSubmitCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SubmitCampaigndefaultJSONResponse) VisitSubmitCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type TestSendCampaignRequestObject struct {
+	CampaignId CampaignId `json:"campaignId"`
+	Body       *TestSendCampaignJSONRequestBody
+}
+
+type TestSendCampaignResponseObject interface {
+	VisitTestSendCampaignResponse(w http.ResponseWriter) error
+}
+
+type TestSendCampaign200JSONResponse CampaignTestResult
+
+func (response TestSendCampaign200JSONResponse) VisitTestSendCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestSendCampaigndefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response TestSendCampaigndefaultJSONResponse) VisitTestSendCampaignResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type ListConnectorsRequestObject struct {
 }
 
@@ -2796,6 +4357,124 @@ type GetDashboarddefaultJSONResponse struct {
 }
 
 func (response GetDashboarddefaultJSONResponse) VisitGetDashboardResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListFeedbackRequestObject struct {
+	Params ListFeedbackParams
+}
+
+type ListFeedbackResponseObject interface {
+	VisitListFeedbackResponse(w http.ResponseWriter) error
+}
+
+type ListFeedback200JSONResponse FeedbackPage
+
+func (response ListFeedback200JSONResponse) VisitListFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListFeedbackdefaultJSONResponse) VisitListFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetFeedbackRequestObject struct {
+	FeedbackId FeedbackId `json:"feedbackId"`
+}
+
+type GetFeedbackResponseObject interface {
+	VisitGetFeedbackResponse(w http.ResponseWriter) error
+}
+
+type GetFeedback200JSONResponse FeedbackDetail
+
+func (response GetFeedback200JSONResponse) VisitGetFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetFeedbackdefaultJSONResponse) VisitGetFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateFeedbackRequestObject struct {
+	FeedbackId FeedbackId `json:"feedbackId"`
+	Body       *UpdateFeedbackJSONRequestBody
+}
+
+type UpdateFeedbackResponseObject interface {
+	VisitUpdateFeedbackResponse(w http.ResponseWriter) error
+}
+
+type UpdateFeedback200JSONResponse FeedbackDetail
+
+func (response UpdateFeedback200JSONResponse) VisitUpdateFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response UpdateFeedbackdefaultJSONResponse) VisitUpdateFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ReplyFeedbackRequestObject struct {
+	FeedbackId FeedbackId `json:"feedbackId"`
+	Body       *ReplyFeedbackJSONRequestBody
+}
+
+type ReplyFeedbackResponseObject interface {
+	VisitReplyFeedbackResponse(w http.ResponseWriter) error
+}
+
+type ReplyFeedback201JSONResponse FeedbackDetail
+
+func (response ReplyFeedback201JSONResponse) VisitReplyFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReplyFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ReplyFeedbackdefaultJSONResponse) VisitReplyFeedbackResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -3022,6 +4701,35 @@ type ListPlansdefaultJSONResponse struct {
 }
 
 func (response ListPlansdefaultJSONResponse) VisitListPlansResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListReportFeedbackRequestObject struct {
+	Params ListReportFeedbackParams
+}
+
+type ListReportFeedbackResponseObject interface {
+	VisitListReportFeedbackResponse(w http.ResponseWriter) error
+}
+
+type ListReportFeedback200JSONResponse ReportFeedbackPage
+
+func (response ListReportFeedback200JSONResponse) VisitListReportFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListReportFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListReportFeedbackdefaultJSONResponse) VisitListReportFeedbackResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -3571,6 +5279,42 @@ type StrictServerInterface interface {
 	// 邮箱密码登录
 	// (POST /admin/v1/auth/login)
 	AdminLogin(ctx context.Context, request AdminLoginRequestObject) (AdminLoginResponseObject, error)
+	// 运营推送活动，按创建时间倒序
+	// (GET /admin/v1/campaigns)
+	ListCampaigns(ctx context.Context, request ListCampaignsRequestObject) (ListCampaignsResponseObject, error)
+	// 新建草稿
+	// (POST /admin/v1/campaigns)
+	CreateCampaign(ctx context.Context, request CreateCampaignRequestObject) (CreateCampaignResponseObject, error)
+	// 估算目标人数
+	// (POST /admin/v1/campaigns/audience-estimate)
+	EstimateCampaignAudience(ctx context.Context, request EstimateCampaignAudienceRequestObject) (EstimateCampaignAudienceResponseObject, error)
+	// 删除草稿
+	// (DELETE /admin/v1/campaigns/{campaignId})
+	DeleteCampaign(ctx context.Context, request DeleteCampaignRequestObject) (DeleteCampaignResponseObject, error)
+	// 详情和送达统计
+	// (GET /admin/v1/campaigns/{campaignId})
+	GetCampaign(ctx context.Context, request GetCampaignRequestObject) (GetCampaignResponseObject, error)
+	// 修改草稿（被驳回的活动回到草稿）
+	// (PUT /admin/v1/campaigns/{campaignId})
+	UpdateCampaign(ctx context.Context, request UpdateCampaignRequestObject) (UpdateCampaignResponseObject, error)
+	// 审批通过（仅 owner）。没有定时则立即开始发送
+	// (POST /admin/v1/campaigns/{campaignId}/approve)
+	ApproveCampaign(ctx context.Context, request ApproveCampaignRequestObject) (ApproveCampaignResponseObject, error)
+	// 取消待审批、已排期或发送中的活动；已写入的消息保留，可再撤回
+	// (POST /admin/v1/campaigns/{campaignId}/cancel)
+	CancelCampaign(ctx context.Context, request CancelCampaignRequestObject) (CancelCampaignResponseObject, error)
+	// 撤回：从所有用户的消息中心移除（已送达的推送无法撤回）
+	// (POST /admin/v1/campaigns/{campaignId}/recall)
+	RecallCampaign(ctx context.Context, request RecallCampaignRequestObject) (RecallCampaignResponseObject, error)
+	// 驳回，回到草稿（仅 owner）
+	// (POST /admin/v1/campaigns/{campaignId}/reject)
+	RejectCampaign(ctx context.Context, request RejectCampaignRequestObject) (RejectCampaignResponseObject, error)
+	// 提交审批（草稿 → 待审批）
+	// (POST /admin/v1/campaigns/{campaignId}/submit)
+	SubmitCampaign(ctx context.Context, request SubmitCampaignRequestObject) (SubmitCampaignResponseObject, error)
+	// 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
+	// (POST /admin/v1/campaigns/{campaignId}/test-send)
+	TestSendCampaign(ctx context.Context, request TestSendCampaignRequestObject) (TestSendCampaignResponseObject, error)
 	// 内置工具与 MCP 白名单（含已下架）
 	// (GET /admin/v1/connectors)
 	ListConnectors(ctx context.Context, request ListConnectorsRequestObject) (ListConnectorsResponseObject, error)
@@ -3583,6 +5327,18 @@ type StrictServerInterface interface {
 	// 运营概览（按 Asia/Shanghai 计日）
 	// (GET /admin/v1/dashboard)
 	GetDashboard(ctx context.Context, request GetDashboardRequestObject) (GetDashboardResponseObject, error)
+	// 用户意见反馈
+	// (GET /admin/v1/feedback)
+	ListFeedback(ctx context.Context, request ListFeedbackRequestObject) (ListFeedbackResponseObject, error)
+
+	// (GET /admin/v1/feedback/{feedbackId})
+	GetFeedback(ctx context.Context, request GetFeedbackRequestObject) (GetFeedbackResponseObject, error)
+	// 改状态、写内部备注（用户看不到备注）
+	// (PATCH /admin/v1/feedback/{feedbackId})
+	UpdateFeedback(ctx context.Context, request UpdateFeedbackRequestObject) (UpdateFeedbackResponseObject, error)
+	// 回复用户。用户在「我的反馈」里看到并收到推送（zeus://feedback/{id}）；待处理的反馈自动转为处理中
+	// (POST /admin/v1/feedback/{feedbackId}/replies)
+	ReplyFeedback(ctx context.Context, request ReplyFeedbackRequestObject) (ReplyFeedbackResponseObject, error)
 	// 当前管理员
 	// (GET /admin/v1/me)
 	GetAdminMe(ctx context.Context, request GetAdminMeRequestObject) (GetAdminMeResponseObject, error)
@@ -3607,6 +5363,9 @@ type StrictServerInterface interface {
 	// 方案与额度（代码内配置，只读）
 	// (GET /admin/v1/plans)
 	ListPlans(ctx context.Context, request ListPlansRequestObject) (ListPlansResponseObject, error)
+	// 报告满意度评分，按最近评分排序
+	// (GET /admin/v1/report-feedback)
+	ListReportFeedback(ctx context.Context, request ListReportFeedbackRequestObject) (ListReportFeedbackResponseObject, error)
 	// 查看报告正文（审核用）
 	// (GET /admin/v1/reports/{reportId})
 	GetReport(ctx context.Context, request GetReportRequestObject) (GetReportResponseObject, error)
@@ -3863,6 +5622,349 @@ func (sh *strictHandler) AdminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListCampaigns operation middleware
+func (sh *strictHandler) ListCampaigns(w http.ResponseWriter, r *http.Request, params ListCampaignsParams) {
+	var request ListCampaignsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCampaigns(ctx, request.(ListCampaignsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCampaigns")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCampaignsResponseObject); ok {
+		if err := validResponse.VisitListCampaignsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateCampaign operation middleware
+func (sh *strictHandler) CreateCampaign(w http.ResponseWriter, r *http.Request) {
+	var request CreateCampaignRequestObject
+
+	var body CreateCampaignJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateCampaign(ctx, request.(CreateCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateCampaignResponseObject); ok {
+		if err := validResponse.VisitCreateCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EstimateCampaignAudience operation middleware
+func (sh *strictHandler) EstimateCampaignAudience(w http.ResponseWriter, r *http.Request) {
+	var request EstimateCampaignAudienceRequestObject
+
+	var body EstimateCampaignAudienceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EstimateCampaignAudience(ctx, request.(EstimateCampaignAudienceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EstimateCampaignAudience")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EstimateCampaignAudienceResponseObject); ok {
+		if err := validResponse.VisitEstimateCampaignAudienceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteCampaign operation middleware
+func (sh *strictHandler) DeleteCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request DeleteCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteCampaign(ctx, request.(DeleteCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteCampaignResponseObject); ok {
+		if err := validResponse.VisitDeleteCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCampaign operation middleware
+func (sh *strictHandler) GetCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request GetCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCampaign(ctx, request.(GetCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCampaignResponseObject); ok {
+		if err := validResponse.VisitGetCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateCampaign operation middleware
+func (sh *strictHandler) UpdateCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request UpdateCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	var body UpdateCampaignJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateCampaign(ctx, request.(UpdateCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateCampaignResponseObject); ok {
+		if err := validResponse.VisitUpdateCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApproveCampaign operation middleware
+func (sh *strictHandler) ApproveCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request ApproveCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveCampaign(ctx, request.(ApproveCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveCampaignResponseObject); ok {
+		if err := validResponse.VisitApproveCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelCampaign operation middleware
+func (sh *strictHandler) CancelCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request CancelCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelCampaign(ctx, request.(CancelCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelCampaignResponseObject); ok {
+		if err := validResponse.VisitCancelCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RecallCampaign operation middleware
+func (sh *strictHandler) RecallCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request RecallCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RecallCampaign(ctx, request.(RecallCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RecallCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RecallCampaignResponseObject); ok {
+		if err := validResponse.VisitRecallCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RejectCampaign operation middleware
+func (sh *strictHandler) RejectCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request RejectCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	var body RejectCampaignJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RejectCampaign(ctx, request.(RejectCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RejectCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RejectCampaignResponseObject); ok {
+		if err := validResponse.VisitRejectCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SubmitCampaign operation middleware
+func (sh *strictHandler) SubmitCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request SubmitCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SubmitCampaign(ctx, request.(SubmitCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SubmitCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SubmitCampaignResponseObject); ok {
+		if err := validResponse.VisitSubmitCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestSendCampaign operation middleware
+func (sh *strictHandler) TestSendCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	var request TestSendCampaignRequestObject
+
+	request.CampaignId = campaignId
+
+	var body TestSendCampaignJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestSendCampaign(ctx, request.(TestSendCampaignRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestSendCampaign")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestSendCampaignResponseObject); ok {
+		if err := validResponse.VisitTestSendCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListConnectors operation middleware
 func (sh *strictHandler) ListConnectors(w http.ResponseWriter, r *http.Request) {
 	var request ListConnectorsRequestObject
@@ -3963,6 +6065,124 @@ func (sh *strictHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetDashboardResponseObject); ok {
 		if err := validResponse.VisitGetDashboardResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListFeedback operation middleware
+func (sh *strictHandler) ListFeedback(w http.ResponseWriter, r *http.Request, params ListFeedbackParams) {
+	var request ListFeedbackRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFeedback(ctx, request.(ListFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFeedbackResponseObject); ok {
+		if err := validResponse.VisitListFeedbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetFeedback operation middleware
+func (sh *strictHandler) GetFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId) {
+	var request GetFeedbackRequestObject
+
+	request.FeedbackId = feedbackId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetFeedback(ctx, request.(GetFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetFeedbackResponseObject); ok {
+		if err := validResponse.VisitGetFeedbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateFeedback operation middleware
+func (sh *strictHandler) UpdateFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId) {
+	var request UpdateFeedbackRequestObject
+
+	request.FeedbackId = feedbackId
+
+	var body UpdateFeedbackJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateFeedback(ctx, request.(UpdateFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateFeedbackResponseObject); ok {
+		if err := validResponse.VisitUpdateFeedbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReplyFeedback operation middleware
+func (sh *strictHandler) ReplyFeedback(w http.ResponseWriter, r *http.Request, feedbackId FeedbackId) {
+	var request ReplyFeedbackRequestObject
+
+	request.FeedbackId = feedbackId
+
+	var body ReplyFeedbackJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReplyFeedback(ctx, request.(ReplyFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReplyFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReplyFeedbackResponseObject); ok {
+		if err := validResponse.VisitReplyFeedbackResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4173,6 +6393,32 @@ func (sh *strictHandler) ListPlans(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListPlansResponseObject); ok {
 		if err := validResponse.VisitListPlansResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListReportFeedback operation middleware
+func (sh *strictHandler) ListReportFeedback(w http.ResponseWriter, r *http.Request, params ListReportFeedbackParams) {
+	var request ListReportFeedbackRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListReportFeedback(ctx, request.(ListReportFeedbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListReportFeedback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListReportFeedbackResponseObject); ok {
+		if err := validResponse.VisitListReportFeedbackResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4684,121 +6930,174 @@ func (sh *strictHandler) SetUserQuota(w http.ResponseWriter, r *http.Request, us
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

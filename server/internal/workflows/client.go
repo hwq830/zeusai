@@ -121,6 +121,22 @@ func (c *Client) StartReportPDF(ctx context.Context, run orch.ReportPDFRun) erro
 	return err
 }
 
+func (c *Client) StartCampaign(ctx context.Context, run orch.CampaignRun) error {
+	_, err := c.C.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID: orch.CampaignWorkflowID(run.CampaignID), TaskQueue: c.TaskQueue,
+	}, CampaignWorkflowName, run)
+	return err
+}
+
+func (c *Client) CancelCampaign(ctx context.Context, campaignID uuid.UUID) error {
+	err := c.C.CancelWorkflow(ctx, orch.CampaignWorkflowID(campaignID), "")
+	var nf *serviceerror.NotFound
+	if errors.As(err, &nf) {
+		return nil
+	}
+	return err
+}
+
 func (c *Client) CancelTask(ctx context.Context, taskID uuid.UUID) error {
 	return c.C.CancelWorkflow(ctx, orch.WorkflowID(taskID), "")
 }
