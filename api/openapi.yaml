@@ -13,7 +13,7 @@ info:
     - 列表接口统一用 `cursor` + `limit` 分页，响应带 `nextCursor`，为空表示没有更多。
     - 错误统一返回 `Error`：`{code, message, retryable}`。App 按 `code` 展示提示，`message` 可直接给用户看。
     - 任务进度走 SSE：`GET /v1/tasks/{taskId}/events`，事件格式见 `TaskEvent`。
-    - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`。
+    - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`、`zeus://feedback/{id}`（反馈有新回复）。
 servers:
   - url: https://api.zeus.example.com
     description: 生产（域名待定）
@@ -33,6 +33,7 @@ tags:
   - name: tasks
   - name: connectors
   - name: memories
+  - name: feedback
 
 paths:
   # ---------------------------------------------------------------- auth
@@ -532,6 +533,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/FileLink' }
         default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}/feedback:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    put:
+      tags: [reports]
+      operationId: putReportFeedback
+      summary: 报告满意度评分（重复提交以最后一次为准）。服务端据此计算报告满意度指标
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportFeedback' }
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
   /v1/reports/{reportId}/followups:
     parameters:
       - $ref: '#/components/parameters/ReportId'
@@ -807,6 +823,73 @@ paths:
       operationId: deleteMemory
       responses:
         '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- feedback
+  /v1/feedback/attachments:
+    post:
+      tags: [feedback]
+      operationId: uploadFeedbackAttachment
+      summary: 上传一张反馈截图（JPEG，≤ 5 MB）。先上传拿 id，再随 POST /v1/feedback 提交；24 小时内未提交的会被清理
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackAttachmentUpload' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/feedback:
+    get:
+      tags: [feedback]
+      operationId: listFeedback
+      summary: 我的反馈
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [feedback]
+      operationId: createFeedback
+      summary: 提交意见反馈（每人每天最多 20 条，超出返回 rate_limited）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FeedbackRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/feedback/{feedbackId}:
+    parameters:
+      - name: feedbackId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [feedback]
+      operationId: getFeedback
+      summary: 反馈详情（含官方回复）。读取后 unread 置为 false
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeedbackTicket' }
         default: { $ref: '#/components/responses/Error' }
 
 components:
@@ -1354,6 +1437,7 @@ components:
           description: 相对路径 /v1/reports/{id}/html，done 时才有
         createdAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time }
+        feedback: { $ref: '#/components/schemas/ReportFeedback' }
     ReportList:
       allOf:
         - $ref: '#/components/schemas/Page'
@@ -1363,6 +1447,24 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/Report' }
+    ReportFeedbackRating:
+      type: string
+      enum: [satisfied, unsatisfied]
+    ReportFeedbackReason:
+      type: string
+      description: 不满意原因：内容不准确、不够深入、来源不可靠、没回答我的问题、生成太慢、其他
+      enum: [inaccurate, shallow, bad_sources, off_topic, slow, other]
+    ReportFeedback:
+      type: object
+      required: [rating]
+      properties:
+        rating: { $ref: '#/components/schemas/ReportFeedbackRating' }
+        reasons:
+          type: array
+          maxItems: 6
+          description: 只在 unsatisfied 时有意义
+          items: { $ref: '#/components/schemas/ReportFeedbackReason' }
+        comment: { type: string, maxLength: 500 }
     FollowupRequest:
       type: object
       required: [question]
@@ -1601,3 +1703,96 @@ components:
             items:
               type: array
               items: { $ref: '#/components/schemas/Memory' }
+
+    # ------------------------------------------------------------ feedback
+    FeedbackType:
+      type: string
+      description: 问题 / 建议 / 其他
+      enum: [bug, suggestion, other]
+    FeedbackStatus:
+      type: string
+      description: 待处理 / 处理中 / 已解决 / 已关闭
+      enum: [new, in_progress, resolved, closed]
+    ClientInfo:
+      type: object
+      description: App 自动附带，用户不可见
+      properties:
+        appVersion: { type: string, example: 1.0.0 }
+        build: { type: string, example: '42' }
+        os: { type: string, example: iOS 18.1 }
+        device: { type: string, example: 'iPhone16,2' }
+        locale: { type: string, example: zh-Hans-CN }
+        network: { type: string, example: wifi }
+    FeedbackRequest:
+      type: object
+      required: [type, content]
+      properties:
+        type: { $ref: '#/components/schemas/FeedbackType' }
+        content: { type: string, minLength: 5, maxLength: 1000 }
+        attachmentIds:
+          type: array
+          maxItems: 3
+          items: { type: string }
+        contact:
+          type: string
+          maxLength: 100
+          description: 可选的手机号、微信号或邮箱
+        reportId:
+          type: string
+          description: 从报告页发起时带上
+        taskId:
+          type: string
+          description: 最近一次任务，便于排查
+        client: { $ref: '#/components/schemas/ClientInfo' }
+    FeedbackAttachmentUpload:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+    FeedbackAttachment:
+      type: object
+      required: [id, url]
+      properties:
+        id: { type: string }
+        url:
+          type: string
+          description: 短时签名链接，约 1 小时有效
+    FeedbackReply:
+      type: object
+      required: [id, content, createdAt]
+      properties:
+        id: { type: string }
+        content: { type: string }
+        createdAt: { type: string, format: date-time }
+    FeedbackTicket:
+      type: object
+      required: [id, type, content, status, unread, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        type: { $ref: '#/components/schemas/FeedbackType' }
+        content: { type: string }
+        contact: { type: string }
+        status: { $ref: '#/components/schemas/FeedbackStatus' }
+        unread:
+          type: boolean
+          description: 有用户还没看过的官方回复
+        attachments:
+          type: array
+          description: 只在详情里返回
+          items: { $ref: '#/components/schemas/FeedbackAttachment' }
+        replies:
+          type: array
+          description: 只在详情里返回，按时间正序
+          items: { $ref: '#/components/schemas/FeedbackReply' }
+        lastReplyAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    FeedbackList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/FeedbackTicket' }

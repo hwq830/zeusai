@@ -125,6 +125,43 @@ type Device struct {
 	UpdatedAt  time.Time
 }
 
+type Feedback struct {
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	Type          string
+	Content       string
+	Contact       string
+	Client        json.RawMessage
+	ReportID      *uuid.UUID
+	TaskID        *uuid.UUID
+	Status        string
+	FlaggedReason string
+	AdminNote     string
+	HandledBy     *uuid.UUID
+	LastReplyAt   *time.Time
+	UserReadAt    *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type FeedbackAttachment struct {
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	FeedbackID *uuid.UUID
+	BlobKey    string
+	SizeBytes  int32
+	Position   int32
+	CreatedAt  time.Time
+}
+
+type FeedbackReply struct {
+	ID         uuid.UUID
+	FeedbackID uuid.UUID
+	AdminID    *uuid.UUID
+	Content    string
+	CreatedAt  time.Time
+}
+
 type Memory struct {
 	ID           uuid.UUID
 	UserID       uuid.UUID
@@ -195,6 +232,16 @@ type Report struct {
 	PdfStatus            string
 	CreatedAt            time.Time
 	CompletedAt          *time.Time
+}
+
+type ReportFeedback struct {
+	ReportID  uuid.UUID
+	UserID    uuid.UUID
+	Rating    string
+	Reasons   []string
+	Comment   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Share struct {

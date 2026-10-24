@@ -23,8 +23,10 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/orch"
+	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
 )
 
@@ -34,6 +36,9 @@ type Server struct {
 	Tokens *Tokens
 	Quota  *quota.Service
 	Orch   orch.Client
+	// Blob signs feedback screenshot links (nil hides them); Push notifies users of replies (nil skips).
+	Blob blob.Store
+	Push push.Notifier
 	// LLMProvider and ModelGWConfig mirror the api process settings for the gateway page.
 	LLMProvider   string
 	ModelGWConfig string
@@ -152,12 +157,13 @@ const (
 	PermModeration = "moderation.write"
 	PermTasks      = "tasks.write"
 	PermAdmins     = "admins.write"
+	PermFeedback   = "feedback.write"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks},
-	"moderator": {PermModeration},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback},
+	"moderator": {PermModeration, PermFeedback},
 	"viewer":    {},
 }
 

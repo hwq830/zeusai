@@ -92,6 +92,10 @@ func (s *Server) GetDashboard(ctx context.Context, _ gen.GetDashboardRequestObje
 	if err != nil {
 		return nil, err
 	}
+	d.Satisfaction, err = s.satisfaction(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return gen.GetDashboard200JSONResponse(d), nil
 }
 
