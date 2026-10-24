@@ -47,7 +47,17 @@ type Report struct {
 	HTMLURL     string     `json:"htmlUrl,omitempty"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	Feedback    *Feedback  `json:"feedback,omitempty"`
 }
+
+// Feedback is the user's satisfaction rating of a report.
+type Feedback struct {
+	Rating  string   `json:"rating"`
+	Reasons []string `json:"reasons,omitempty"`
+	Comment string   `json:"comment,omitempty"`
+}
+
+var feedbackReasons = map[string]bool{"inaccurate": true, "shallow": true, "bad_sources": true, "off_topic": true, "slow": true, "other": true}
 
 func FromRow(r db.Report) Report {
 	out := Report{
@@ -191,7 +201,53 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, id string) (Report,
 	if err != nil {
 		return Report{}, err
 	}
-	return FromRow(r), nil
+	out := FromRow(r)
+	f, err := s.Q.GetReportFeedback(ctx, db.GetReportFeedbackParams{ReportID: r.ID, UserID: userID})
+	switch {
+	case err == nil:
+		out.Feedback = &Feedback{Rating: f.Rating, Reasons: f.Reasons, Comment: f.Comment}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return Report{}, apperr.Internal(err)
+	}
+	return out, nil
+}
+
+// Rate records the user's satisfaction with a finished report; the last rating wins.
+// Reasons only apply to unsatisfied ratings.
+func (s *Service) Rate(ctx context.Context, userID uuid.UUID, id string, f Feedback) error {
+	if f.Rating != "satisfied" && f.Rating != "unsatisfied" {
+		return apperr.Invalid("rating 应为 satisfied / unsatisfied")
+	}
+	f.Comment = strings.TrimSpace(f.Comment)
+	if utf8.RuneCountInString(f.Comment) > 500 {
+		return apperr.Invalid("补充说明不能超过 500 字")
+	}
+	reasons := []string{}
+	if f.Rating == "unsatisfied" {
+		seen := map[string]bool{}
+		for _, r := range f.Reasons {
+			if !feedbackReasons[r] {
+				return apperr.Invalid("未知的原因：" + r)
+			}
+			if !seen[r] {
+				seen[r] = true
+				reasons = append(reasons, r)
+			}
+		}
+	}
+	r, err := s.getRow(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if r.Status != "done" {
+		return apperr.Conflict("报告完成后才能评价")
+	}
+	if _, err := s.Q.UpsertReportFeedback(ctx, db.UpsertReportFeedbackParams{
+		ID: r.ID, UserID: userID, Rating: f.Rating, Reasons: reasons, Comment: f.Comment,
+	}); err != nil {
+		return apperr.Internal(err)
+	}
+	return nil
 }
 
 type ListParams struct {

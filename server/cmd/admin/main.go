@@ -19,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
+	"github.com/hwq830/zeusai/server/internal/platform/providers"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
@@ -62,6 +63,10 @@ func run(log *slog.Logger) error {
 	defer rdb.Close()
 
 	q := db.New(pool)
+	notifier, err := providers.Push(cfg, q, log)
+	if err != nil {
+		return err
+	}
 	if _, err := remoteconfig.SeedBuiltins(ctx, q); err != nil {
 		return err
 	}
@@ -76,7 +81,7 @@ func run(log *slog.Logger) error {
 		Releases:    &remoteconfig.Releases{Pool: pool, Redis: rdb, Log: log, RequireApproval: cfg.Env == "prod"},
 		Region:      cfg.Region,
 		LLMProvider: cfg.LLMProvider, ModelGWConfig: cfg.ModelGWConfig, PublicBaseURL: cfg.PublicBaseURL,
-		StaticDir: cfg.AdminStaticDir,
+		StaticDir: cfg.AdminStaticDir, Blob: providers.Blob(cfg), Push: notifier,
 	}
 	hs := &http.Server{Addr: cfg.AdminHTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

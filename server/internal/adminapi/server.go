@@ -23,8 +23,10 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/orch"
+	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 )
@@ -35,6 +37,9 @@ type Server struct {
 	Tokens *Tokens
 	Quota  *quota.Service
 	Orch   orch.Client
+	// Blob signs feedback screenshot links (nil hides them); Push notifies users of replies (nil skips).
+	Blob blob.Store
+	Push push.Notifier
 	// Releases publishes remote config; Region fills previews like the api process does.
 	Releases *remoteconfig.Releases
 	Region   string
@@ -156,6 +161,7 @@ const (
 	PermModeration = "moderation.write"
 	PermTasks      = "tasks.write"
 	PermAdmins     = "admins.write"
+	PermFeedback   = "feedback.write"
 	// Config center: edit rules, submit and roll back releases.
 	PermConfig = "config.write"
 	// Create and archive keys, change namespaces.
@@ -165,9 +171,9 @@ const (
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermConfig, PermConfigManage, PermConfigApprove},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermConfig},
-	"moderator": {PermModeration},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermConfig, PermConfigManage, PermConfigApprove},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermConfig},
+	"moderator": {PermModeration, PermFeedback},
 	"viewer":    {},
 }
 
