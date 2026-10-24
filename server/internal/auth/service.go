@@ -175,6 +175,9 @@ func (s *Service) Logout(ctx context.Context, userID uuid.UUID, refreshToken str
 }
 
 func (s *Service) issue(ctx context.Context, u db.User, isNew bool) (Session, error) {
+	if u.DisabledAt != nil {
+		return Session{}, AccountDisabled()
+	}
 	access, ttl, err := s.Tokens.SignAccess(u.ID)
 	if err != nil {
 		return Session{}, apperr.Internal(err)
@@ -212,4 +215,9 @@ func providerErr(err error, rejected string) error {
 	default:
 		return apperr.Unavailable("登录服务暂时不可用，请稍后再试").WithCause(err)
 	}
+}
+
+// AccountDisabled is returned to a user whose account an operator suspended.
+func AccountDisabled() *apperr.Error {
+	return apperr.Forbidden("账号已被停用，如有疑问请联系客服").WithDetails(map[string]any{"reason": "account_disabled"})
 }

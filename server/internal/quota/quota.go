@@ -1,10 +1,16 @@
 // Package quota enforces per-plan limits. MVP has only the free plan
 // (2 scheduled briefings, 5 research reports per calendar month in the user's zone).
+// Operators can override either limit per user from the admin console.
 package quota
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sort"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
@@ -24,6 +30,40 @@ func LimitsFor(plan string) Limits {
 		return l
 	}
 	return plans["free"]
+}
+
+type Plan struct {
+	Code string
+	Limits
+}
+
+// Plans lists the configured plans by code.
+func Plans() []Plan {
+	out := make([]Plan, 0, len(plans))
+	for c, l := range plans {
+		out = append(out, Plan{Code: c, Limits: l})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
+	return out
+}
+
+// Effective applies the user's override, if any, to their plan's limits.
+func (s *Service) Effective(ctx context.Context, u db.User) (Limits, *db.UserQuotaOverride, error) {
+	lim := LimitsFor(u.PlanCode)
+	o, err := s.Q.GetQuotaOverride(ctx, u.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return lim, nil, nil
+	}
+	if err != nil {
+		return lim, nil, apperr.Internal(err)
+	}
+	if o.Subscriptions != nil {
+		lim.Subscriptions = int(*o.Subscriptions)
+	}
+	if o.ReportsPerMonth != nil {
+		lim.ReportsPerMonth = int(*o.ReportsPerMonth)
+	}
+	return lim, &o, nil
 }
 
 type Item struct {
@@ -59,7 +99,10 @@ func monthWindow(now time.Time, tz string) (start, next time.Time) {
 }
 
 func (s *Service) Usage(ctx context.Context, u db.User) (Usage, error) {
-	lim := LimitsFor(u.PlanCode)
+	lim, _, err := s.Effective(ctx, u)
+	if err != nil {
+		return Usage{}, err
+	}
 	subs, err := s.Q.CountActiveSubscriptions(ctx, u.ID)
 	if err != nil {
 		return Usage{}, apperr.Internal(err)
@@ -81,7 +124,7 @@ func (s *Service) CheckSubscription(ctx context.Context, u db.User) error {
 		return err
 	}
 	if us.Subscriptions.Used >= us.Subscriptions.Limit {
-		return apperr.QuotaExceeded("免费版最多同时保留 2 个定时简报").
+		return apperr.QuotaExceeded(fmt.Sprintf("最多同时保留 %d 个定时简报", us.Subscriptions.Limit)).
 			WithDetails(map[string]any{"quota": "briefingSubscriptions", "limit": us.Subscriptions.Limit})
 	}
 	return nil

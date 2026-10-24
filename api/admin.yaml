@@ -1,0 +1,1282 @@
+openapi: 3.0.3
+info:
+  title: Zeus Admin API
+  version: 0.1.0
+  description: |
+    管理员控制台（hwq830/zeusai-admin）与服务端 admin 进程之间的接口契约。服务端用 oapi-codegen
+    生成接口层，控制台用 openapi-typescript 生成类型。
+
+    约定：
+    - 接口挂在 `/admin/v1` 下，由独立进程 `server/cmd/admin` 提供，只在内网 / VPN 暴露，不与 App 的 api 进程共用端口。
+    - 鉴权：`Authorization: Bearer <token>`，令牌由 `POST /admin/v1/auth/login` 签发，12 小时有效，与 App 令牌密钥不同。
+    - 角色：`owner` 全部权限（含管理员账号）；`operator` 用户、额度、模板、连接器、任务；
+      `moderator` 内容审核、停用用户；`viewer` 只读。越权返回 403 `forbidden`。
+    - 所有写操作记入审计日志（`GET /admin/v1/audit-log`）。
+    - 金额单位为人民币元（`costCny`），由模型网关按每百万 token 单价计算。
+    - 列表统一 `cursor` + `limit` 分页，响应带 `nextCursor`，为空表示没有更多。错误格式与 App 契约相同。
+servers:
+  - url: http://localhost:8081
+    description: 本地开发
+security:
+  - bearerAuth: []
+tags:
+  - name: auth
+  - name: dashboard
+  - name: users
+  - name: templates
+  - name: connectors
+  - name: moderation
+  - name: tasks
+  - name: costs
+  - name: modelgw
+  - name: admins
+
+paths:
+  # ---------------------------------------------------------------- auth
+  /admin/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: adminLogin
+      summary: 邮箱密码登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/me:
+    get:
+      tags: [auth]
+      operationId: getAdminMe
+      summary: 当前管理员
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/me/password:
+    post:
+      tags: [auth]
+      operationId: changeAdminPassword
+      summary: 修改自己的密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '204': { description: 已修改 }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- dashboard
+  /admin/v1/dashboard:
+    get:
+      tags: [dashboard]
+      operationId: getDashboard
+      summary: 运营概览（按 Asia/Shanghai 计日）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- users
+  /admin/v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: 用户列表
+      parameters:
+        - name: q
+          in: query
+          description: 用户 id、手机号片段或昵称
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, disabled] }
+        - name: plan
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [users]
+      operationId: getUser
+      summary: 用户详情（额度、定时简报、近 30 天成本）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [users]
+      operationId: updateUserPlan
+      summary: 修改会员方案
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserPlanPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/users/{userId}/quota:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    put:
+      tags: [users]
+      operationId: setUserQuota
+      summary: 设置额度覆盖（字段为空表示沿用方案额度）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaOverrideInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [users]
+      operationId: clearUserQuota
+      summary: 清除额度覆盖
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/users/{userId}/disable:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [users]
+      operationId: disableUser
+      summary: 停用账号（注销登录态，暂停其定时简报）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DisableUserRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/users/{userId}/enable:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [users]
+      operationId: enableUser
+      summary: 恢复账号（恢复因停用而暂停的定时简报）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/plans:
+    get:
+      tags: [users]
+      operationId: listPlans
+      summary: 方案与额度（代码内配置，只读）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Plan' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- templates
+  /admin/v1/templates:
+    get:
+      tags: [templates]
+      operationId: listTemplates
+      summary: 模板列表；official 为官方模板，custom 为用户自定义模板（用于审核）
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [official, custom], default: official }
+        - name: q
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplatePage' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [templates]
+      operationId: createTemplate
+      summary: 新建官方模板
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminTemplateInput' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminTemplate' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/templates/{templateId}:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    get:
+      tags: [templates]
+      operationId: getTemplate
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminTemplate' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [templates]
+      operationId: updateTemplate
+      summary: 修改模板。官方模板改过后不再被 `zeusctl seed` 覆盖；字段、栏目或来源变化时版本号加 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminTemplateInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminTemplate' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [templates]
+      operationId: deleteTemplate
+      summary: 删除模板（已订阅的简报保留，但与模板解除关联；官方模板建议改为下架）
+      responses:
+        '204': { description: 已删除 }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- connectors
+  /admin/v1/connectors:
+    get:
+      tags: [connectors]
+      operationId: listConnectors
+      summary: 内置工具与 MCP 白名单（含已下架）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminConnector' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/connectors/{connectorId}:
+    parameters:
+      - name: connectorId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [connectors]
+      operationId: updateConnector
+      summary: 上下架、默认开启、排序与展示文案。新增 MCP 服务需要改代码（catalog.yaml）后发布
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectorPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminConnector' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- moderation
+  /admin/v1/moderation/terms:
+    get:
+      tags: [moderation]
+      operationId: listModerationTerms
+      summary: 屏蔽词（与 ZEUS_MODERATION_KEYWORDS_FILE 合并生效，约 1 分钟内同步到各进程）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ModerationTerm' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [moderation]
+      operationId: createModerationTerm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModerationTermInput' }
+      responses:
+        '201':
+          description: 已添加
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModerationTerm' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/moderation/terms/{termId}:
+    parameters:
+      - name: termId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [moderation]
+      operationId: deleteModerationTerm
+      responses:
+        '204': { description: 已删除 }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/moderation/events:
+    get:
+      tags: [moderation]
+      operationId: listModerationEvents
+      summary: 拦截记录
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string, enum: [input, output] }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModerationEventPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/shares:
+    get:
+      tags: [moderation]
+      operationId: listShares
+      summary: 公开分享的报告
+      parameters:
+        - name: active
+          in: query
+          description: 只看未撤销的
+          schema: { type: boolean, default: true }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SharePage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/shares/{shareId}/revoke:
+    parameters:
+      - name: shareId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [moderation]
+      operationId: revokeShare
+      summary: 撤销分享链接
+      responses:
+        '204': { description: 已撤销 }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/reports/{reportId}:
+    parameters:
+      - name: reportId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [moderation]
+      operationId: getReport
+      summary: 查看报告正文（审核用）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReport' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- tasks
+  /admin/v1/tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      summary: 全部任务
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: kind
+          in: query
+          schema: { type: string }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/tasks/{taskId}:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [tasks]
+      operationId: getTask
+      summary: 任务详情与模型调用明细
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/tasks/{taskId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/TaskId'
+    post:
+      tags: [tasks]
+      operationId: cancelTask
+      summary: 取消运行中的任务
+      responses:
+        '202': { description: 已发出取消 }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- costs
+  /admin/v1/costs:
+    get:
+      tags: [costs]
+      operationId: getCosts
+      summary: 成本：按天、按模型、按任务类型、最高成本用户
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CostReport' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- model gateway
+  /admin/v1/modelgw:
+    get:
+      tags: [modelgw]
+      operationId: getModelGateway
+      summary: 模型网关路由与单价（读自 ZEUS_MODELGW_CONFIG，只读；修改需改文件并重启）及近 24 小时调用
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelGateway' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- admins
+  /admin/v1/admins:
+    get:
+      tags: [admins]
+      operationId: listAdmins
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminUser' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [admins]
+      operationId: createAdmin
+      summary: 新建管理员，返回一次性初始密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAdminRequest' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminWithPassword' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/admins/{adminId}:
+    parameters:
+      - $ref: '#/components/parameters/AdminId'
+    patch:
+      tags: [admins]
+      operationId: updateAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/admins/{adminId}/reset-password:
+    parameters:
+      - $ref: '#/components/parameters/AdminId'
+    post:
+      tags: [admins]
+      operationId: resetAdminPassword
+      summary: 重置密码，返回一次性新密码
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminWithPassword' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/audit-log:
+    get:
+      tags: [admins]
+      operationId: listAuditLog
+      summary: 审计日志
+      parameters:
+        - name: targetType
+          in: query
+          schema: { type: string }
+        - name: targetId
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditPage' }
+        default: { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string }
+    TemplateId:
+      name: templateId
+      in: path
+      required: true
+      schema: { type: string }
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: { type: string }
+    AdminId:
+      name: adminId
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: 错误
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # ------------------------------------------------------------ common
+    Error:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code: { type: string, example: forbidden }
+        message: { type: string }
+        retryable: { type: boolean }
+        details:
+          type: object
+          additionalProperties: true
+    NextCursor:
+      type: string
+      nullable: true
+    Role:
+      type: string
+      enum: [owner, operator, moderator, viewer]
+
+    # ------------------------------------------------------------ auth & admins
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      required: [token, expiresIn, admin]
+      properties:
+        token: { type: string }
+        expiresIn: { type: integer, description: 秒 }
+        admin: { $ref: '#/components/schemas/AdminUser' }
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string, minLength: 10 }
+    AdminUser:
+      type: object
+      required: [id, email, name, role, disabled, permissions, createdAt]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        disabled: { type: boolean }
+        permissions:
+          type: array
+          description: 该角色拥有的写权限，控制台据此显示按钮
+          items: { type: string, example: users.write }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    CreateAdminRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email: { type: string, format: email }
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+    AdminPatch:
+      type: object
+      properties:
+        name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        disabled: { type: boolean }
+    AdminWithPassword:
+      type: object
+      required: [admin, password]
+      properties:
+        admin: { $ref: '#/components/schemas/AdminUser' }
+        password: { type: string, description: 只显示这一次 }
+    AuditEntry:
+      type: object
+      required: [id, adminEmail, action, targetType, targetId, detail, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        adminEmail: { type: string }
+        action: { type: string, example: user.disable }
+        targetType: { type: string }
+        targetId: { type: string }
+        detail:
+          type: object
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+    AuditPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEntry' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+
+    # ------------------------------------------------------------ dashboard
+    Dashboard:
+      type: object
+      required: [users, activeUsers, tasksToday, reportsThisMonth, cost, daily]
+      properties:
+        users:
+          type: object
+          required: [total, newToday, new7d, disabled]
+          properties:
+            total: { type: integer }
+            newToday: { type: integer }
+            new7d: { type: integer }
+            disabled: { type: integer }
+        activeUsers:
+          type: object
+          required: [d1, d7, d30]
+          description: 窗口内发起过任务（含定时简报）的用户数
+          properties:
+            d1: { type: integer }
+            d7: { type: integer }
+            d30: { type: integer }
+        tasksToday:
+          type: array
+          items: { $ref: '#/components/schemas/TaskCount' }
+        reportsThisMonth: { type: integer }
+        cost:
+          type: object
+          required: [todayCny, last7dCny, last30dCny]
+          properties:
+            todayCny: { type: number, format: double }
+            last7dCny: { type: number, format: double }
+            last30dCny: { type: number, format: double }
+            avgReportCostCny:
+              type: number
+              format: double
+              nullable: true
+              description: 近 30 天已完成报告的平均成本（门槛 B 要求 ≤ ¥3）
+        daily:
+          type: array
+          description: 近 14 天
+          items: { $ref: '#/components/schemas/DailyPoint' }
+    TaskCount:
+      type: object
+      required: [kind, status, count]
+      properties:
+        kind: { type: string }
+        status: { type: string }
+        count: { type: integer }
+    DailyPoint:
+      type: object
+      required: [date, newUsers, activeUsers, tasks, costCny]
+      properties:
+        date: { type: string, format: date }
+        newUsers: { type: integer }
+        activeUsers: { type: integer }
+        tasks: { type: integer }
+        costCny: { type: number, format: double }
+
+    # ------------------------------------------------------------ users
+    UserSummary:
+      type: object
+      required: [id, nickname, phoneMasked, loginMethods, planCode, timezone, disabled, createdAt]
+      properties:
+        id: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        loginMethods:
+          type: array
+          items: { type: string, enum: [phone, apple, wechat] }
+        planCode: { type: string }
+        planExpiresAt: { type: string, format: date-time, nullable: true }
+        timezone: { type: string }
+        disabled: { type: boolean }
+        disabledReason: { type: string }
+        disabledAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    UserPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/UserSummary' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    QuotaItem:
+      type: object
+      required: [used, limit, planLimit]
+      properties:
+        used: { type: integer }
+        limit: { type: integer, description: 生效额度（含覆盖） }
+        planLimit: { type: integer, description: 方案额度 }
+        resetsAt: { type: string, format: date-time, nullable: true }
+    QuotaOverride:
+      type: object
+      required: [note, updatedAt]
+      properties:
+        subscriptions: { type: integer, nullable: true }
+        reportsPerMonth: { type: integer, nullable: true }
+        note: { type: string }
+        updatedAt: { type: string, format: date-time }
+    SubscriptionSummary:
+      type: object
+      required: [id, name, status, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        templateId: { type: string, nullable: true }
+        status: { type: string }
+        pausedReason: { type: string, nullable: true }
+        nextRunAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    UserDetail:
+      type: object
+      required: [user, quota, subscriptions, cost30dCny, tasks30d]
+      properties:
+        user: { $ref: '#/components/schemas/UserSummary' }
+        phone:
+          type: string
+          nullable: true
+          description: 完整手机号，仅对有 users.write 权限的角色返回
+        quota:
+          type: object
+          required: [subscriptions, reports]
+          properties:
+            subscriptions: { $ref: '#/components/schemas/QuotaItem' }
+            reports: { $ref: '#/components/schemas/QuotaItem' }
+            override: { $ref: '#/components/schemas/QuotaOverride' }
+        subscriptions:
+          type: array
+          items: { $ref: '#/components/schemas/SubscriptionSummary' }
+        cost30dCny: { type: number, format: double }
+        tasks30d: { type: integer }
+    UserPlanPatch:
+      type: object
+      required: [planCode]
+      properties:
+        planCode: { type: string, example: free }
+        planExpiresAt: { type: string, format: date-time, nullable: true }
+    QuotaOverrideInput:
+      type: object
+      required: [note]
+      properties:
+        subscriptions: { type: integer, nullable: true, minimum: 0, maximum: 100 }
+        reportsPerMonth: { type: integer, nullable: true, minimum: 0, maximum: 1000 }
+        note: { type: string, maxLength: 200, description: 原因，写入审计日志 }
+    DisableUserRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 200 }
+    Plan:
+      type: object
+      required: [code, subscriptions, reportsPerMonth]
+      properties:
+        code: { type: string }
+        subscriptions: { type: integer }
+        reportsPerMonth: { type: integer }
+
+    # ------------------------------------------------------------ templates
+    TemplateField:
+      type: object
+      required: [key, label, type, required]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        type: { type: string, enum: [text, tags, number, select, multiselect] }
+        required: { type: boolean }
+        placeholder: { type: string }
+        help: { type: string }
+        options:
+          type: array
+          items: { type: string }
+        max: { type: integer }
+        min: { type: integer }
+    TemplateSection:
+      type: object
+      required: [key, title]
+      properties:
+        key: { type: string }
+        title: { type: string }
+        instruction: { type: string }
+        maxItems: { type: integer }
+    TemplateSource:
+      type: object
+      required: [type, value]
+      properties:
+        type: { type: string, enum: [search, site, rss, connector] }
+        value: { type: string }
+        label: { type: string }
+    Schedule:
+      type: object
+      required: [freq, time, tz]
+      properties:
+        freq: { type: string, enum: [daily, weekly, monthly] }
+        weekdays:
+          type: array
+          items: { type: integer, minimum: 1, maximum: 7 }
+        monthDay: { type: integer, minimum: 1, maximum: 28 }
+        time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        tz: { type: string }
+    AdminTemplateInput:
+      type: object
+      required: [name, fields, sections, published, sortOrder]
+      properties:
+        name: { type: string, maxLength: 40 }
+        description: { type: string, maxLength: 200 }
+        category: { type: string }
+        icon: { type: string, description: SF Symbol 名 }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateField' }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateSection' }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/TemplateSource' }
+        defaultSchedule: { $ref: '#/components/schemas/Schedule' }
+        defaultLength: { type: string, enum: [short, standard, long] }
+        requiredConnectors:
+          type: array
+          items: { type: string }
+        published: { type: boolean, description: 官方模板是否在 App 模板库展示 }
+        sortOrder: { type: integer }
+        slug:
+          type: string
+          description: 仅新建时有效；留空则不与 prompts/briefing-templates 关联
+    AdminTemplate:
+      allOf:
+        - $ref: '#/components/schemas/AdminTemplateInput'
+        - type: object
+          required: [id, kind, version, adminManaged, subscriptionCount, createdAt, updatedAt]
+          properties:
+            id: { type: string }
+            kind: { type: string, enum: [official, custom] }
+            ownerId: { type: string, nullable: true }
+            version: { type: integer }
+            adminManaged: { type: boolean, description: 在控制台改过，seed 不再覆盖 }
+            subscriptionCount: { type: integer }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    TemplatePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminTemplate' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+
+    # ------------------------------------------------------------ connectors
+    ConnectorTool:
+      type: object
+      required: [name, write]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        write: { type: boolean }
+    AdminConnector:
+      type: object
+      required: [id, name, description, kind, category, transport, requiresAuth, defaultOn, available, sortOrder, tools, adminManaged, enabledUsers, authorizedUsers]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        iconUrl: { type: string }
+        kind: { type: string }
+        category: { type: string }
+        transport: { type: string, description: builtin / http }
+        mcpVersion: { type: string }
+        requiresAuth: { type: boolean }
+        defaultOn: { type: boolean }
+        available: { type: boolean, description: false 为下架，App 不再展示 }
+        sortOrder: { type: integer }
+        tools:
+          type: array
+          items: { $ref: '#/components/schemas/ConnectorTool' }
+        adminManaged: { type: boolean }
+        enabledUsers: { type: integer, description: 主动开启的用户数 }
+        authorizedUsers: { type: integer }
+    ConnectorPatch:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        available: { type: boolean }
+        defaultOn: { type: boolean }
+        sortOrder: { type: integer }
+
+    # ------------------------------------------------------------ moderation
+    ModerationTerm:
+      type: object
+      required: [id, term, note, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        term: { type: string }
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+    ModerationTermInput:
+      type: object
+      required: [term]
+      properties:
+        term: { type: string, minLength: 1, maxLength: 50 }
+        note: { type: string, maxLength: 200 }
+    ModerationEvent:
+      type: object
+      required: [id, kind, reason, excerpt, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: string, nullable: true }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        kind: { type: string, enum: [input, output] }
+        reason: { type: string }
+        excerpt: { type: string, description: 被拦截文本的前 200 字 }
+        createdAt: { type: string, format: date-time }
+    ModerationEventPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ModerationEvent' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    AdminShare:
+      type: object
+      required: [id, reportId, reportTitle, userId, nickname, phoneMasked, scope, viewCount, createdAt]
+      properties:
+        id: { type: string }
+        reportId: { type: string }
+        reportTitle: { type: string }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        scope: { type: string }
+        viewCount: { type: integer }
+        url: { type: string }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time, nullable: true }
+    SharePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminShare' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    AdminReport:
+      type: object
+      required: [id, userId, title, topic, status, summary, markdown, sourceCount, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        title: { type: string }
+        topic: { type: string }
+        status: { type: string }
+        summary: { type: string }
+        markdown: { type: string }
+        sourceCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+
+    # ------------------------------------------------------------ tasks
+    AdminTask:
+      type: object
+      required: [id, userId, nickname, phoneMasked, kind, status, title, costCny, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        kind: { type: string }
+        status: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        promptVersion: { type: string }
+        reportId: { type: string, nullable: true }
+        briefingId: { type: string, nullable: true }
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+        costCny: { type: number, format: double }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true }
+        finishedAt: { type: string, format: date-time, nullable: true }
+    TaskPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminTask' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    ModelCall:
+      type: object
+      required: [provider, model, tier, inputTokens, outputTokens, cachedTokens, costCny, createdAt]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        tier: { type: string }
+        inputTokens: { type: integer }
+        outputTokens: { type: integer }
+        cachedTokens: { type: integer }
+        costCny: { type: number, format: double }
+        createdAt: { type: string, format: date-time }
+    TaskDetail:
+      type: object
+      required: [task, input, calls]
+      properties:
+        task: { $ref: '#/components/schemas/AdminTask' }
+        input:
+          type: object
+          additionalProperties: true
+        plan:
+          type: object
+          nullable: true
+          additionalProperties: true
+        calls:
+          type: array
+          items: { $ref: '#/components/schemas/ModelCall' }
+
+    # ------------------------------------------------------------ costs
+    CostReport:
+      type: object
+      required: [days, totalCny, daily, byModel, byKind, topUsers]
+      properties:
+        days: { type: integer }
+        totalCny: { type: number, format: double }
+        daily:
+          type: array
+          items:
+            type: object
+            required: [date, costCny, inputTokens, outputTokens, calls]
+            properties:
+              date: { type: string, format: date }
+              costCny: { type: number, format: double }
+              inputTokens: { type: integer, format: int64 }
+              outputTokens: { type: integer, format: int64 }
+              calls: { type: integer }
+        byModel:
+          type: array
+          items:
+            type: object
+            required: [provider, model, tier, calls, inputTokens, outputTokens, costCny]
+            properties:
+              provider: { type: string }
+              model: { type: string }
+              tier: { type: string }
+              calls: { type: integer }
+              inputTokens: { type: integer, format: int64 }
+              outputTokens: { type: integer, format: int64 }
+              costCny: { type: number, format: double }
+        byKind:
+          type: array
+          description: 已完成任务按类型的总成本与平均成本
+          items:
+            type: object
+            required: [kind, tasks, costCny, avgCostCny]
+            properties:
+              kind: { type: string }
+              tasks: { type: integer }
+              costCny: { type: number, format: double }
+              avgCostCny: { type: number, format: double }
+        topUsers:
+          type: array
+          items:
+            type: object
+            required: [userId, nickname, phoneMasked, tasks, costCny]
+            properties:
+              userId: { type: string }
+              nickname: { type: string }
+              phoneMasked: { type: string }
+              tasks: { type: integer }
+              costCny: { type: number, format: double }
+
+    # ------------------------------------------------------------ model gateway
+    ModelGateway:
+      type: object
+      required: [llmProvider, configured, providers, routes, usage24h]
+      properties:
+        llmProvider: { type: string, description: 'mock 或 gateway（ZEUS_LLM_PROVIDER）' }
+        configured: { type: boolean, description: 是否读到了路由文件 }
+        configError: { type: string }
+        breakerFailures: { type: integer }
+        breakerCooldown: { type: string, example: 30s }
+        routes:
+          type: object
+          description: tier → 按顺序尝试的服务商
+          additionalProperties:
+            type: array
+            items: { type: string }
+        providers:
+          type: array
+          items:
+            type: object
+            required: [name, baseUrl, apiKeyEnv, keyPresent, models, prices]
+            properties:
+              name: { type: string }
+              baseUrl: { type: string }
+              apiKeyEnv: { type: string }
+              keyPresent: { type: boolean, description: admin 进程环境里是否有这个 key（不返回 key 本身） }
+              timeout: { type: string }
+              models:
+                type: object
+                additionalProperties: { type: string }
+              prices:
+                type: array
+                items:
+                  type: object
+                  required: [model, input, output, cached]
+                  properties:
+                    model: { type: string }
+                    input: { type: number, format: double, description: 元 / 百万 token }
+                    output: { type: number, format: double }
+                    cached: { type: number, format: double }
+        usage24h:
+          type: array
+          items:
+            type: object
+            required: [provider, calls, costCny]
+            properties:
+              provider: { type: string }
+              calls: { type: integer }
+              costCny: { type: number, format: double }
+              lastCallAt: { type: string, format: date-time, nullable: true }

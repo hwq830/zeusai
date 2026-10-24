@@ -55,7 +55,7 @@ func run(log *slog.Logger) error {
 	}
 	defer tc.Close()
 
-	mod, err := providers.Moderation(cfg)
+	mod, err := providers.Moderation(cfg, db.New(pool), log)
 	if err != nil {
 		return err
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
+	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/report"
 	"github.com/hwq830/zeusai/server/internal/task"
@@ -109,7 +110,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			s.writeError(w, r, apperr.Unauthenticated("登录已过期"))
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, uid)))
+		ctx := moderation.WithUser(context.WithValue(r.Context(), ctxKey{}, uid), uid)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -122,6 +124,9 @@ func (s *Server) currentUser(ctx context.Context) (db.User, error) {
 	u, err := s.Q.GetUser(ctx, userID(ctx))
 	if err != nil {
 		return u, apperr.Unauthenticated("账号不存在或已注销")
+	}
+	if u.DisabledAt != nil {
+		return u, auth.AccountDisabled()
 	}
 	return u, nil
 }

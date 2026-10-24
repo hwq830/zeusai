@@ -12,6 +12,28 @@ import (
 	pgvector_go "github.com/pgvector/pgvector-go"
 )
 
+type AdminAuditLog struct {
+	ID         int64
+	AdminID    *uuid.UUID
+	Action     string
+	TargetType string
+	TargetID   string
+	Detail     json.RawMessage
+	CreatedAt  time.Time
+}
+
+type AdminUser struct {
+	ID           uuid.UUID
+	Email        string
+	Name         string
+	PasswordHash string
+	Role         string
+	DisabledAt   *time.Time
+	LastLoginAt  *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type AuditLog struct {
 	ID        int64
 	UserID    *uuid.UUID
@@ -81,6 +103,7 @@ type Connector struct {
 	McpVersion   string
 	Available    bool
 	SortOrder    int32
+	AdminManaged bool
 }
 
 type ConnectorCredential struct {
@@ -125,6 +148,23 @@ type ModelUsage struct {
 	CachedTokens int32
 	CostMicros   int64
 	CreatedAt    time.Time
+}
+
+type ModerationEvent struct {
+	ID        int64
+	UserID    *uuid.UUID
+	Kind      string
+	Reason    string
+	Excerpt   string
+	CreatedAt time.Time
+}
+
+type ModerationTerm struct {
+	ID        int64
+	Term      string
+	Note      string
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
 }
 
 type RefreshToken struct {
@@ -209,21 +249,24 @@ type Template struct {
 	SortOrder          int32
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	AdminManaged       bool
 }
 
 type User struct {
-	ID            uuid.UUID
-	Nickname      string
-	AvatarUrl     string
-	Phone         *string
-	WechatUnionid *string
-	WechatOpenid  *string
-	AppleSub      *string
-	Timezone      string
-	PlanCode      string
-	PlanExpiresAt *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	ID             uuid.UUID
+	Nickname       string
+	AvatarUrl      string
+	Phone          *string
+	WechatUnionid  *string
+	WechatOpenid   *string
+	AppleSub       *string
+	Timezone       string
+	PlanCode       string
+	PlanExpiresAt  *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DisabledAt     *time.Time
+	DisabledReason string
 }
 
 type UserConnector struct {
@@ -231,4 +274,13 @@ type UserConnector struct {
 	ConnectorID string
 	Enabled     bool
 	UpdatedAt   time.Time
+}
+
+type UserQuotaOverride struct {
+	UserID          uuid.UUID
+	Subscriptions   *int32
+	ReportsPerMonth *int32
+	Note            string
+	UpdatedBy       *uuid.UUID
+	UpdatedAt       time.Time
 }

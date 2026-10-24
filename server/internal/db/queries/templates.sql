@@ -40,6 +40,7 @@ RETURNING *;
 DELETE FROM templates WHERE id = $1 AND owner_id = $2;
 
 -- name: UpsertOfficialTemplate :exec
+-- Templates edited in the admin console keep their edits.
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
                        default_schedule, default_length, required_connectors, sort_order)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -52,4 +53,5 @@ ON CONFLICT (slug) DO UPDATE SET
     version = CASE WHEN (templates.fields, templates.sections, templates.sources)
                      IS DISTINCT FROM (excluded.fields, excluded.sections, excluded.sources)
                    THEN templates.version + 1 ELSE templates.version END,
-    updated_at = now();
+    updated_at = now()
+WHERE NOT templates.admin_managed;

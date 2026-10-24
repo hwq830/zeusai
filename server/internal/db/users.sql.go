@@ -43,7 +43,7 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (nickname, phone, wechat_unionid, wechat_openid, apple_sub, timezone)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason
 `
 
 type CreateUserParams struct {
@@ -78,6 +78,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PlanExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
 	)
 	return i, err
 }
@@ -105,8 +107,26 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const getQuotaOverride = `-- name: GetQuotaOverride :one
+SELECT user_id, subscriptions, reports_per_month, note, updated_by, updated_at FROM user_quota_overrides WHERE user_id = $1
+`
+
+func (q *Queries) GetQuotaOverride(ctx context.Context, userID uuid.UUID) (UserQuotaOverride, error) {
+	row := q.db.QueryRow(ctx, getQuotaOverride, userID)
+	var i UserQuotaOverride
+	err := row.Scan(
+		&i.UserID,
+		&i.Subscriptions,
+		&i.ReportsPerMonth,
+		&i.Note,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUser = `-- name: GetUser :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at FROM users WHERE id = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -125,12 +145,14 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.PlanExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
 	)
 	return i, err
 }
 
 const getUserByAppleSub = `-- name: GetUserByAppleSub :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at FROM users WHERE apple_sub = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE apple_sub = $1
 `
 
 func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User, error) {
@@ -149,12 +171,14 @@ func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User
 		&i.PlanExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at FROM users WHERE phone = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE phone = $1
 `
 
 func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, error) {
@@ -173,12 +197,14 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 		&i.PlanExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
 	)
 	return i, err
 }
 
 const getUserByWechatUnionID = `-- name: GetUserByWechatUnionID :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at FROM users WHERE wechat_unionid = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason FROM users WHERE wechat_unionid = $1
 `
 
 func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *string) (User, error) {
@@ -197,8 +223,31 @@ func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *str
 		&i.PlanExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
 	)
 	return i, err
+}
+
+const insertModerationEvent = `-- name: InsertModerationEvent :exec
+INSERT INTO moderation_events (user_id, kind, reason, excerpt) VALUES ($1, $2, $3, $4)
+`
+
+type InsertModerationEventParams struct {
+	UserID  *uuid.UUID
+	Kind    string
+	Reason  string
+	Excerpt string
+}
+
+func (q *Queries) InsertModerationEvent(ctx context.Context, arg InsertModerationEventParams) error {
+	_, err := q.db.Exec(ctx, insertModerationEvent,
+		arg.UserID,
+		arg.Kind,
+		arg.Reason,
+		arg.Excerpt,
+	)
+	return err
 }
 
 const listDevices = `-- name: ListDevices :many
@@ -233,6 +282,39 @@ func (q *Queries) ListDevices(ctx context.Context, userID uuid.UUID) ([]Device, 
 	return items, nil
 }
 
+const listModerationTerms = `-- name: ListModerationTerms :many
+SELECT term FROM moderation_terms ORDER BY id
+`
+
+func (q *Queries) ListModerationTerms(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listModerationTerms)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var term string
+		if err := rows.Scan(&term); err != nil {
+			return nil, err
+		}
+		items = append(items, term)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const revokeAllRefreshTokens = `-- name: RevokeAllRefreshTokens :exec
+UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+func (q *Queries) RevokeAllRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeAllRefreshTokens, userID)
+	return err
+}
+
 const revokeRefreshToken = `-- name: RevokeRefreshToken :exec
 UPDATE refresh_tokens SET revoked_at = now()
 WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL
@@ -254,7 +336,7 @@ UPDATE users SET
     timezone = coalesce($3, timezone),
     updated_at = now()
 WHERE id = $1
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason
 `
 
 type UpdateUserProfileParams struct {
@@ -279,6 +361,8 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.PlanExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
 	)
 	return i, err
 }
