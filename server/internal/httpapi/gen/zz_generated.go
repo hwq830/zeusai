@@ -5360,6 +5360,35 @@ func (response PutReportFeedbackdefaultJSONResponse) VisitPutReportFeedbackRespo
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type PutReportFeedbackRequestObject struct {
+	ReportId ReportId `json:"reportId"`
+	Body     *PutReportFeedbackJSONRequestBody
+}
+
+type PutReportFeedbackResponseObject interface {
+	VisitPutReportFeedbackResponse(w http.ResponseWriter) error
+}
+
+type PutReportFeedback204Response struct {
+}
+
+func (response PutReportFeedback204Response) VisitPutReportFeedbackResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PutReportFeedbackdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PutReportFeedbackdefaultJSONResponse) VisitPutReportFeedbackResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type CreateReportFollowupRequestObject struct {
 	ReportId ReportId `json:"reportId"`
 	Body     *CreateReportFollowupJSONRequestBody
