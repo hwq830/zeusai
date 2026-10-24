@@ -25,6 +25,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -43,6 +44,8 @@ type Server struct {
 	// Releases publishes remote config; Region fills previews like the api process does.
 	Releases *remoteconfig.Releases
 	Region   string
+	// Notify estimates campaign audiences and sends test pushes.
+	Notify *notify.Service
 	// LLMProvider and ModelGWConfig mirror the api process settings for the gateway page.
 	LLMProvider   string
 	ModelGWConfig string
@@ -162,6 +165,9 @@ const (
 	PermTasks      = "tasks.write"
 	PermAdmins     = "admins.write"
 	PermFeedback   = "feedback.write"
+	PermCampaigns  = "campaigns.write"
+	// Only owners approve campaigns: a campaign can reach every user.
+	PermCampaignsApprove = "campaigns.approve"
 	// Config center: edit rules, submit and roll back releases.
 	PermConfig = "config.write"
 	// Create and archive keys, change namespaces.
@@ -171,8 +177,8 @@ const (
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermConfig, PermConfigManage, PermConfigApprove},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermConfig},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig},
 	"moderator": {PermModeration, PermFeedback},
 	"viewer":    {},
 }

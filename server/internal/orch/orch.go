@@ -4,6 +4,7 @@ package orch
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -40,6 +41,14 @@ type ReportPDFRun struct {
 	Key      string
 }
 
+// CampaignRun sends an approved operator campaign at SendAt (zero: now). After is the last user
+// already handled, carried across continue-as-new.
+type CampaignRun struct {
+	CampaignID uuid.UUID
+	SendAt     time.Time
+	After      uuid.UUID
+}
+
 type Client interface {
 	UpsertBriefingSchedule(ctx context.Context, userID, subscriptionID uuid.UUID, s schedule.Schedule, paused bool) error
 	DeleteBriefingSchedule(ctx context.Context, subscriptionID uuid.UUID) error
@@ -51,10 +60,17 @@ type Client interface {
 	CancelTask(ctx context.Context, taskID uuid.UUID) error
 	SendTaskMessage(ctx context.Context, taskID uuid.UUID, text string) error
 	ResolveConfirm(ctx context.Context, taskID uuid.UUID, confirmID, decision string) error
+	// StartCampaign is idempotent while the campaign's workflow is running.
+	StartCampaign(ctx context.Context, run CampaignRun) error
+	// CancelCampaign stops a scheduled or sending campaign; a finished one is a no-op.
+	CancelCampaign(ctx context.Context, campaignID uuid.UUID) error
 }
 
 // WorkflowID is the Temporal workflow id of a task.
 func WorkflowID(taskID uuid.UUID) string { return "task-" + taskID.String() }
+
+// CampaignWorkflowID is the Temporal workflow id of an operator campaign.
+func CampaignWorkflowID(campaignID uuid.UUID) string { return "campaign-" + campaignID.String() }
 
 // ScheduleID is the Temporal schedule id of a briefing subscription.
 func ScheduleID(subscriptionID uuid.UUID) string { return "briefing-" + subscriptionID.String() }

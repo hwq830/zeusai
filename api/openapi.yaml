@@ -13,7 +13,9 @@ info:
     - 列表接口统一用 `cursor` + `limit` 分页，响应带 `nextCursor`，为空表示没有更多。
     - 错误统一返回 `Error`：`{code, message, retryable}`。App 按 `code` 展示提示，`message` 可直接给用户看。
     - 任务进度走 SSE：`GET /v1/tasks/{taskId}/events`，事件格式见 `TaskEvent`。
-    - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`、`zeus://feedback/{id}`（反馈有新回复）。
+    - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`、`zeus://feedback/{id}`（反馈有新回复）、
+      `zeus://messages`（消息中心）、`zeus://template/{id}`，运营推送还可能是 https 链接（App 内浏览器打开）。
+    - 每条推送都先进消息中心；APNs payload 带 `message_id`，点推送打开时调用 `POST /v1/messages/{id}/opened`；`aps.badge` 为未读数。
     - 远程配置：App 启动和回到前台时调 `GET /v1/config`。每个 `/v1` 响应都带 `X-Zeus-Config-Version`
       （当前发布版本号），比本地缓存新时补拉一次。App 每个请求都带 `X-Zeus-App-Version`、`X-Zeus-Platform`、
       `X-Zeus-OS-Version`、`X-Zeus-Install-Id`（安装时生成的随机 ID）、`X-Zeus-Channel`，供灰度规则使用。
@@ -37,6 +39,7 @@ tags:
   - name: connectors
   - name: memories
   - name: feedback
+  - name: messages
   - name: config
 
 paths:
@@ -896,7 +899,126 @@ paths:
               schema: { $ref: '#/components/schemas/FeedbackTicket' }
         default: { $ref: '#/components/responses/Error' }
 
-  # ---------------------------------------------------------------- config
+  # ---------------------------------------------------------------- messages
+  /v1/messages:
+    get:
+      tags: [messages]
+      operationId: listMessages
+      summary: 消息中心列表，按时间倒序。不传 category 返回全部
+      parameters:
+        - name: category
+          in: query
+          description: 只看这些类别，可重复，例如 category=marketing
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/MessageCategory' }
+          style: form
+          explode: true
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageList' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/messages/unread-count:
+    get:
+      tags: [messages]
+      operationId: getUnreadMessageCount
+      summary: 未读消息数（今日页铃铛红点和 App 图标角标）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnreadCount' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/messages/read-all:
+    post:
+      tags: [messages]
+      operationId: readAllMessages
+      summary: 全部标为已读。不传 category 表示所有类别
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: array
+            items: { $ref: '#/components/schemas/MessageCategory' }
+          style: form
+          explode: true
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/messages/{messageId}:
+    parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [messages]
+      operationId: deleteMessage
+      summary: 从消息中心删除
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/messages/{messageId}/read:
+    parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [messages]
+      operationId: readMessage
+      summary: 在消息中心点开一条消息
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/messages/{messageId}/opened:
+    parameters:
+      - name: messageId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [messages]
+      operationId: openedMessage
+      summary: 用户点推送打开了 App（推送 payload 里的 message_id），同时标为已读
+      responses:
+        '204': { description: OK }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/notification-preferences:
+    get:
+      tags: [messages]
+      operationId: getNotificationPreferences
+      summary: 通知偏好。没设置过时返回默认值
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [messages]
+      operationId: putNotificationPreferences
+      summary: 修改通知偏好（整体替换）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferences' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        default: { $ref: '#/components/responses/Error' }
+
   /v1/config:
     get:
       tags: [config]
@@ -1850,7 +1972,62 @@ components:
               type: array
               items: { $ref: '#/components/schemas/FeedbackTicket' }
 
-    # ------------------------------------------------------------ config
+    # ---------------------------------------------------------------- messages
+    MessageCategory:
+      type: string
+      description: briefing 简报、report 报告、service 服务通知（反馈回复、订阅暂停等）、marketing 运营活动
+      enum: [briefing, report, service, marketing]
+    Message:
+      type: object
+      required: [id, category, title, body, read, createdAt]
+      properties:
+        id: { type: string }
+        category: { $ref: '#/components/schemas/MessageCategory' }
+        title: { type: string }
+        body: { type: string }
+        imageUrl: { type: string }
+        deeplink:
+          type: string
+          description: 点击跳转；为空表示只展示
+        campaignId:
+          type: string
+          description: 运营推送活动 id，打点用
+        read: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    MessageList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items, unreadCount]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Message' }
+            unreadCount: { type: integer }
+    UnreadCount:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer }
+    QuietHours:
+      type: object
+      required: [enabled, start, end]
+      description: 免打扰时段（用户时区）。时段内的推送延后到结束时发送，简报不受影响
+      properties:
+        enabled: { type: boolean }
+        start: { type: string, pattern: '^\d{2}:\d{2}$', example: '22:00' }
+        end: { type: string, pattern: '^\d{2}:\d{2}$', example: '08:00' }
+    NotificationPreferences:
+      type: object
+      required: [briefing, report, marketing, quietHours]
+      description: |
+        各类别是否推送。关掉的类别仍会进消息中心；服务通知始终推送。marketing 默认关闭，
+        需要用户主动开启（App Store 4.5.4）。单个简报订阅的推送开关仍在订阅上（pushEnabled）。
+      properties:
+        briefing: { type: boolean }
+        report: { type: boolean }
+        marketing: { type: boolean }
+        quietHours: { $ref: '#/components/schemas/QuietHours' }
     RemoteConfig:
       type: object
       required: [version, fetchedAt, ttlSeconds, values]

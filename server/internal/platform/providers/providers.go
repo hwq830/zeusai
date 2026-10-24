@@ -18,6 +18,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
 	"github.com/hwq830/zeusai/server/internal/moderation"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/pdf"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/push"
@@ -173,4 +174,14 @@ func Push(cfg config.Config, q *db.Queries, log *slog.Logger) (push.Notifier, er
 	}
 	return &push.APNs{Q: q, KeyID: cfg.APNsKeyID, TeamID: cfg.APNsTeamID, Topic: cfg.APNsTopic, Key: key, Log: log,
 		Hosts: map[string]string{"production": push.APNsProduction, "sandbox": push.APNsSandbox}}, nil
+}
+
+// Notifier wraps the push sender in the message center: every notification is saved for the
+// in-app inbox and pushed according to the user's preferences.
+func Notifier(cfg config.Config, q *db.Queries, log *slog.Logger) (*notify.Service, error) {
+	sender, err := Push(cfg, q, log)
+	if err != nil {
+		return nil, err
+	}
+	return &notify.Service{Q: q, Sender: sender, Log: log}, nil
 }

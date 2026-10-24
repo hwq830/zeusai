@@ -15,4 +15,9 @@ func TestAPNsPayload(t *testing.T) {
 	if string(b) != `{"aps":{"alert":{"body":"b","title":"t"},"sound":"default"}}` {
 		t.Fatalf("got %s", b)
 	}
+	three := 3
+	b, _ = json.Marshal(APNsPayload(Notification{Title: "t", Body: "b", MessageID: "m1", Badge: &three}))
+	if string(b) != `{"aps":{"alert":{"body":"b","title":"t"},"badge":3,"sound":"default"},"message_id":"m1"}` {
+		t.Fatalf("got %s", b)
+	}
 }

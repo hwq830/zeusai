@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.temporal.io/sdk/client"
@@ -71,7 +72,7 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	notifier, err := providers.Push(cfg, q, log)
+	notifier, err := providers.Notifier(cfg, q, log)
 	if err != nil {
 		return err
 	}
@@ -79,8 +80,10 @@ func run(log *slog.Logger) error {
 	workflows.Register(w, &workflows.Activities{
 		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
 		Search: searcher, Browse: reader, Tools: &connector.Toolbox{Q: q},
-		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: notifier,
+		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: notifier, Notify: notifier,
 	})
+	// Quiet-hours pushes are sent when the window ends.
+	go notifier.Run(ctx, time.Minute)
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)
 	return w.Run(worker.InterruptCh())
 }

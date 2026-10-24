@@ -26,6 +26,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/moderation"
+	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
 	"github.com/hwq830/zeusai/server/internal/push"
@@ -41,6 +42,22 @@ type fakeOrch struct {
 	mu        sync.Mutex
 	schedules map[uuid.UUID]bool // subscription → paused
 	cancelled []uuid.UUID
+	campaigns []orch.CampaignRun
+	stopped   []uuid.UUID
+}
+
+func (f *fakeOrch) StartCampaign(_ context.Context, run orch.CampaignRun) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.campaigns = append(f.campaigns, run)
+	return nil
+}
+
+func (f *fakeOrch) CancelCampaign(_ context.Context, id uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopped = append(f.stopped, id)
+	return nil
 }
 
 func (f *fakeOrch) UpsertBriefingSchedule(_ context.Context, _, sub uuid.UUID, _ schedule.Schedule, paused bool) error {
@@ -86,7 +103,7 @@ func setup(t *testing.T) *harness {
 	srv := &adminapi.Server{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Q: q, Tokens: adminapi.NewTokens("test", time.Hour),
 		Quota: &quota.Service{Q: q, Config: rc}, Orch: fo, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
-		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Region: "china",
+		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Notify: &notify.Service{Q: q, Sender: pushes}, Region: "china",
 		Releases: &remoteconfig.Releases{Pool: pool, RequireApproval: true},
 	}
 	hs := httptest.NewServer(srv.Handler())
@@ -173,7 +190,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 10 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 12 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

@@ -12,5 +12,6 @@ func Register(w worker.Registry, a *Activities) {
 	w.RegisterWorkflowWithOptions(ReportWorkflow, workflow.RegisterOptions{Name: ReportWorkflowName})
 	w.RegisterWorkflowWithOptions(FollowupWorkflow, workflow.RegisterOptions{Name: FollowupWorkflowName})
 	w.RegisterWorkflowWithOptions(ReportPDFWorkflow, workflow.RegisterOptions{Name: ReportPDFWorkflowName})
+	w.RegisterWorkflowWithOptions(CampaignWorkflow, workflow.RegisterOptions{Name: CampaignWorkflowName})
 	w.RegisterActivityWithOptions(a, activity.RegisterOptions{})
 }
