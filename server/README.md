@@ -33,8 +33,20 @@ server/
 
 ## 本地运行
 
+一条命令起全套（依赖、迁移、种子数据、控制台账号、api / orchestrator / admin），再跑一遍冒烟：
+
 ```sh
-docker compose -f deploy/local/compose.yaml up -d      # 或自己装 PG16+pgvector、Redis、temporal CLI
+scripts/dev-up.sh          # 依赖已在本机端口上就直接用，否则 docker compose 起 deploy/local/compose.yaml
+scripts/smoke.sh           # 登录 → 简报 → SSE → 报告 → 分享 → 消息 → 反馈；设 ZEUS_SMOKE_ADMIN_* 再查控制台
+scripts/dev-down.sh        # 停进程；--deps 连依赖一起停
+```
+
+国内拉不到 Docker Hub 时设 `ZEUS_DOCKER_MIRROR`（镜像加速域名），或按 `scripts/dev-up.sh` 开头的说明用 Homebrew 装依赖；Go 依赖可设 `GOPROXY=https://goproxy.cn,direct`。
+
+手动方式：
+
+```sh
+docker compose -f deploy/local/compose.yaml up -d --wait
 go run ./server/cmd/zeusctl migrate
 go run ./server/cmd/zeusctl seed
 ZEUS_DEV_SMS_CODE=246810 go run ./server/cmd/api &

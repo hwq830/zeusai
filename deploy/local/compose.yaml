@@ -1,18 +1,33 @@
 # Local dependencies for development: PostgreSQL 16 + pgvector, Redis, Temporal dev server.
-# If the Temporal image is unavailable, run `temporal server start-dev` with the temporal CLI instead.
-#   docker compose -f deploy/local/compose.yaml up -d
+#   docker compose -f deploy/local/compose.yaml up -d --wait
+# Docker Hub is unreachable from mainland China without a mirror: set ZEUS_DOCKER_MIRROR to a
+# registry mirror host (e.g. docker.m.daocloud.io), or skip Docker and use Homebrew (see
+# scripts/dev-up.sh).
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: zeus
       POSTGRES_PASSWORD: zeus
       POSTGRES_DB: zeus
     ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "zeus"]
+      interval: 2s
+      retries: 30
   redis:
-    image: redis:7
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/library/redis:7
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
   temporal:
-    image: temporalio/temporal:1.1.2
+    # The temporal CLI image; its entrypoint is `temporal`. Tags start at 1.4.0.
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/temporalio/temporal:1.8.3
     command: ["server", "start-dev", "--ip", "0.0.0.0", "--headless"]
     ports: ["7233:7233"]
+
+volumes:
+  pgdata:
