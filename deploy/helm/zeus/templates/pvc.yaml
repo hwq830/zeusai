@@ -1,0 +1,17 @@
+{{- if and .Values.blob.enabled (not .Values.blob.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "zeus.fullname" . }}-blob
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteMany]
+  {{- with .Values.blob.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.blob.size }}
+{{- end }}

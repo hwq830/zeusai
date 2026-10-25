@@ -1,0 +1,145 @@
+# Zeus server chart. PostgreSQL (RDS PG 16 + pgvector), Redis (Tair/Redis) and Temporal are
+# external: point at them with ZEUS_DATABASE_URL / ZEUS_REDIS_URL in the Secret and
+# config.ZEUS_TEMPORAL_HOST below. See deploy/helm/README.md.
+
+image:
+  # Registry prefix shared by all images, e.g. registry.cn-hangzhou.aliyuncs.com/zeus (ACR).
+  registry: ""
+  # Default tag for all images; per-image tag below wins. Empty = chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+  server: { repository: zeus-server, tag: "" }             # api, admin, zeusctl
+  orchestrator: { repository: zeus-orchestrator, tag: "" } # + Chromium for PDF
+  # Built from hwq830/zeusai-admin; copied into the admin pod and served by the admin process.
+  console: { enabled: true, repository: zeus-admin-console, tag: "" }
+imagePullSecrets: []
+
+# ZEUS_ENV. prod refuses mock model/search and dev logins; staging behaves like prod except
+# config releases go live without owner approval.
+env: prod
+region: china            # ZEUS_REGION: china | international
+publicBaseURL: https://api.zeus.example.com   # ZEUS_PUBLIC_BASE_URL: share links, file links
+
+# Secret holding the secret ZEUS_* variables, loaded with envFrom into every process.
+# Create it yourself (kubectl, or External Secrets from KMS); the chart never writes secrets.
+# Required: ZEUS_DATABASE_URL, ZEUS_REDIS_URL, ZEUS_JWT_SECRET, ZEUS_ADMIN_JWT_SECRET,
+# ZEUS_FILES_SECRET, model keys named in modelgw (e.g. ZEUS_QWEN_API_KEY), ZEUS_BOCHA_API_KEY.
+# Optional: ZEUS_ALIYUN_ACCESS_KEY_ID/SECRET, ZEUS_SMS_SIGN_NAME, ZEUS_SMS_TEMPLATE_CODE,
+# ZEUS_WECHAT_APP_ID/SECRET, ZEUS_APNS_KEY_ID, ZEUS_APNS_TEAM_ID, ZEUS_MCP_AMAP_URL.
+existingSecret: zeus-secrets
+
+# Secret with key `apns.p8` (APNs auth key). Empty = no push.
+apnsKeySecret: ""
+
+# Non-secret ZEUS_* variables for every process. Values set by the chart itself
+# (ZEUS_ENV, ZEUS_REGION, ZEUS_PUBLIC_BASE_URL, files and blob paths) need not be repeated.
+config:
+  ZEUS_TEMPORAL_HOST: temporal-frontend.temporal.svc.cluster.local:7233
+  ZEUS_TEMPORAL_NAMESPACE: default
+  ZEUS_LLM_PROVIDER: gateway
+  ZEUS_SEARCH_PROVIDER: bocha
+  ZEUS_APPLE_CLIENT_IDS: com.jasonhu.zeusai.app
+  ZEUS_APNS_TOPIC: com.jasonhu.zeusai.app
+
+# Model gateway routing, mounted at /etc/zeus/modelgw.yaml (ZEUS_MODELGW_CONFIG).
+# Empty = don't mount; keep it in sync with deploy/modelgw.example.yaml.
+modelgw: |
+  breaker_failures: 3
+  breaker_cooldown: 30s
+  routes:
+    strong: [qwen, deepseek]
+    fast: [qwen, deepseek]
+  providers:
+    - name: qwen
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key_env: ZEUS_QWEN_API_KEY
+      timeout: 120s
+      models: { strong: qwen-max, fast: qwen-turbo }
+      prices:
+        qwen-max: { input: 2.4, output: 9.6, cached: 0.96 }
+        qwen-turbo: { input: 0.3, output: 0.6, cached: 0.12 }
+    - name: deepseek
+      base_url: https://api.deepseek.com/v1
+      api_key_env: ZEUS_DEEPSEEK_API_KEY
+      timeout: 180s
+      models: { strong: deepseek-chat, fast: deepseek-chat }
+      prices:
+        deepseek-chat: { input: 2, output: 8, cached: 0.5 }
+
+# Blocked terms, one per line, mounted at /etc/zeus/moderation-keywords.txt
+# (ZEUS_MODERATION_KEYWORDS_FILE, required outside dev). Console-added terms live in the DB.
+moderationKeywords: |
+  示例屏蔽词
+
+# Generated files (PDFs, feedback screenshots) until the OSS blob store lands. api, orchestrator
+# and admin must share it, so it needs ReadWriteMany: on ACK use a NAS storage class.
+blob:
+  enabled: true
+  existingClaim: ""
+  storageClass: alibabacloud-cnfs-nas
+  size: 20Gi
+
+# zeusctl migrate + seed, as a Helm hook before every install/upgrade.
+migrate:
+  enabled: true
+  backoffLimit: 2
+  resources: {}
+
+api:
+  replicas: 2
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70 }
+  pdb: { enabled: true, minAvailable: 1 }
+  service: { type: ClusterIP, port: 8080 }
+  ingress:
+    enabled: true
+    className: nginx
+    host: api.zeus.example.com
+    tlsSecret: zeus-api-tls          # empty = no TLS block (terminate at the SLB instead)
+    annotations:
+      # SSE task streams stay open; don't buffer them or cut them at 60s.
+      nginx.ingress.kubernetes.io/proxy-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-body-size: 20m
+  extraEnv: {}
+
+orchestrator:
+  replicas: 2
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 2Gi }
+  pdb: { enabled: true, minAvailable: 1 }
+  # Chromium's own sandbox needs privileges pods don't get; the pod is the sandbox here.
+  chromiumNoSandbox: true
+  # In-flight activities finish (or heartbeat out) before the pod goes away.
+  terminationGracePeriodSeconds: 120
+  extraEnv: {}
+
+admin:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  service: { type: ClusterIP, port: 8081 }
+  # Internal only. Expose through an intranet SLB or an IP allowlist, never publicly open.
+  ingress:
+    enabled: false
+    className: nginx
+    host: admin.zeus.example.com
+    tlsSecret: ""
+    annotations: {}
+      # nginx.ingress.kubernetes.io/whitelist-source-range: 10.0.0.0/8,1.2.3.4/32
+  extraEnv: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}   # e.g. RRSA role for OSS/KMS later
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

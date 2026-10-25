@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zeus.fullname" . }}-files
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+data:
+  modelgw.yaml: {{ .Values.modelgw | quote }}
+  moderation-keywords.txt: {{ .Values.moderationKeywords | quote }}

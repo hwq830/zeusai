@@ -1,0 +1,91 @@
+{{- $c := dict "root" $ "component" "api" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zeus.fullname" . }}-api
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "zeus.selector" $c | nindent 6 }}
+  strategy:
+    rollingUpdate: { maxSurge: 25%, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: {{- include "zeus.selector" $c | nindent 8 }}
+      annotations: {{- include "zeus.podAnnotations" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "zeus.serviceAccountName" . }}
+      securityContext: {{- include "zeus.podSecurityContext" . | nindent 8 }}
+      {{- include "zeus.scheduling" . | nindent 6 }}
+      containers:
+        - name: api
+          image: {{ include "zeus.image" (dict "root" $ "image" .Values.image.server) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/api"]
+          env: {{- include "zeus.env" (dict "root" $ "extra" (merge (dict "ZEUS_HTTP_ADDR" ":8080") .Values.api.extraEnv)) | nindent 12 }}
+          {{- include "zeus.envFrom" . | nindent 10 }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            # Let the load balancer drop the pod before it stops accepting connections.
+            preStop: { sleep: { seconds: 5 } }
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext: {{- include "zeus.containerSecurityContext" . | nindent 12 }}
+          volumeMounts: {{- include "zeus.volumeMounts" . | nindent 12 }}
+      volumes: {{- include "zeus.volumes" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "zeus.fullname" . }}-api
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.api.service.type }}
+  selector: {{- include "zeus.selector" $c | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.api.service.port }}, targetPort: http }
+{{- if .Values.api.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "zeus.fullname" . }}-api
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ include "zeus.fullname" . }}-api }
+  minReplicas: {{ .Values.api.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.api.autoscaling.targetCPUUtilizationPercentage }} }
+{{- end }}
+{{- if .Values.api.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "zeus.fullname" . }}-api
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  selector:
+    matchLabels: {{- include "zeus.selector" $c | nindent 6 }}
+{{- end }}
+{{- if .Values.api.ingress.enabled }}
+---
+{{- include "zeus.ingress" (dict "root" $ "component" "api" "ingress" .Values.api.ingress "port" .Values.api.service.port) }}
+{{- end }}

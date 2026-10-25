@@ -1,0 +1,8 @@
+apiVersion: v2
+name: zeus
+description: Zeus server (api, orchestrator, admin) on Kubernetes (Alibaba Cloud ACK first)
+type: application
+# preStop sleep action (distroless has no shell) needs 1.30+.
+kubeVersion: ">=1.30.0-0"
+version: 0.1.0
+appVersion: "0.1.0"

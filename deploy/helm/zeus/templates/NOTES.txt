@@ -1,0 +1,11 @@
+Zeus {{ .Chart.AppVersion }} deployed to {{ .Release.Namespace }} (ZEUS_ENV={{ .Values.env }}).
+
+{{- if .Values.api.ingress.enabled }}
+App API: {{ if .Values.api.ingress.tlsSecret }}https{{ else }}http{{ end }}://{{ .Values.api.ingress.host }}
+{{- end }}
+
+Create the first console owner (password from ZEUS_ADMIN_PASSWORD, or printed):
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "zeus.fullname" . }}-admin -- \
+    env ZEUS_ADMIN_PASSWORD='<at least 10 chars>' /usr/local/bin/zeusctl admin-create you@example.com owner
+
+Console (internal): kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "zeus.fullname" . }}-admin 8081
