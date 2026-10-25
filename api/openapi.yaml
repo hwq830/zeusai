@@ -16,6 +16,9 @@ info:
     - 推送深链：`zeus://briefing/{id}`、`zeus://report/{id}`、`zeus://task/{id}`、`zeus://feedback/{id}`（反馈有新回复）、
       `zeus://messages`（消息中心）、`zeus://template/{id}`，运营推送还可能是 https 链接（App 内浏览器打开）。
     - 每条推送都先进消息中心；APNs payload 带 `message_id`，点推送打开时调用 `POST /v1/messages/{id}/opened`；`aps.badge` 为未读数。
+    - 远程配置：App 启动和回到前台时调 `GET /v1/config`。每个 `/v1` 响应都带 `X-Zeus-Config-Version`
+      （当前发布版本号），比本地缓存新时补拉一次。App 每个请求都带 `X-Zeus-App-Version`、`X-Zeus-Platform`、
+      `X-Zeus-OS-Version`、`X-Zeus-Install-Id`（安装时生成的随机 ID）、`X-Zeus-Channel`，供灰度规则使用。
 servers:
   - url: https://api.zeus.example.com
     description: 生产（域名待定）
@@ -37,6 +40,7 @@ tags:
   - name: memories
   - name: feedback
   - name: messages
+  - name: config
 
 paths:
   # ---------------------------------------------------------------- auth
@@ -1015,6 +1019,54 @@ paths:
               schema: { $ref: '#/components/schemas/NotificationPreferences' }
         default: { $ref: '#/components/responses/Error' }
 
+  /v1/config:
+    get:
+      tags: [config]
+      operationId: getRemoteConfig
+      summary: 远程配置（按当前用户和设备算好的值）
+      description: |
+        规则在服务端计算，只返回 App 可见的配置项。未登录也可调用，此时按 `X-Zeus-Install-Id` 分桶；
+        带了有效的 `Authorization` 时按用户分桶。值没有变化时返回 304。
+      security: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+        - name: X-Zeus-App-Version
+          in: header
+          schema: { type: string, example: 1.2.0 }
+        - name: X-Zeus-Platform
+          in: header
+          schema: { type: string, example: ios }
+        - name: X-Zeus-OS-Version
+          in: header
+          schema: { type: string, example: '17.4' }
+        - name: X-Zeus-Install-Id
+          in: header
+          schema: { type: string }
+        - name: X-Zeus-Channel
+          in: header
+          description: appstore | testflight | dev
+          schema: { type: string }
+        - name: Accept-Language
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteConfig' }
+        '304':
+          description: 与 If-None-Match 相同，沿用本地缓存
+          headers:
+            ETag:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1976,3 +2028,36 @@ components:
         report: { type: boolean }
         marketing: { type: boolean }
         quietHours: { $ref: '#/components/schemas/QuietHours' }
+    RemoteConfig:
+      type: object
+      required: [version, fetchedAt, ttlSeconds, values]
+      properties:
+        version:
+          type: integer
+          format: int64
+          description: 配置发布版本号，单调递增；还没有任何发布时为 0（App 全用内置默认值）
+        fetchedAt: { type: string, format: date-time }
+        ttlSeconds:
+          type: integer
+          description: 建议的最长缓存时间，超过后回到前台必拉
+        values:
+          type: object
+          description: key → 值。App 不认识的 key 忽略；缺少的 key 用 App 内置默认值。
+          additionalProperties: { $ref: '#/components/schemas/RemoteConfigValue' }
+    RemoteConfigValue:
+      type: object
+      required: [value, applyMode]
+      properties:
+        value:
+          nullable: true
+          description: 任意 JSON（可为 null），类型由 App 端的 key 定义决定；类型不符时 App 回落到默认值
+        ruleId:
+          type: string
+          description: 命中的规则；没有则为默认值
+        applyMode:
+          type: string
+          enum: [immediate, next_launch]
+          description: next_launch 的值在一次启动内保持不变
+        expose:
+          type: boolean
+          description: 为 true 时 App 第一次读取该 key 上报 config_exposure 事件

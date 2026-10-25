@@ -1,5 +1,6 @@
 // Command zeusctl runs one-off operations: `migrate` applies database migrations, `seed`
-// loads official templates and the connector catalog (both idempotent), and
+// loads official templates, the connector catalog and the built-in remote config keys (all
+// idempotent), and
 // `admin-create <email> [role]` creates an admin console account.
 package main
 
@@ -14,6 +15,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
 
@@ -52,7 +54,11 @@ func run(cmd string, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("seeded %d official templates, %d connectors\n", nt, nc)
+		nk, err := remoteconfig.SeedBuiltins(ctx, q)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("seeded %d official templates, %d connectors, %d config keys\n", nt, nc, nk)
 		return nil
 	case "admin-create":
 		return adminCreate(ctx, cfg, args)

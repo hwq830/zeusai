@@ -12,7 +12,8 @@ import (
 )
 
 type Config struct {
-	Env               string        `koanf:"env"` // dev | staging | prod
+	Env               string        `koanf:"env"`    // dev | staging | prod
+	Region            string        `koanf:"region"` // china | international; targeted by remote config rules
 	HTTPAddr          string        `koanf:"http_addr"`
 	PublicBaseURL     string        `koanf:"public_base_url"` // used for share links
 	DatabaseURL       string        `koanf:"database_url"`
@@ -66,6 +67,7 @@ type Config struct {
 func defaults() Config {
 	return Config{
 		Env:               "dev",
+		Region:            "china",
 		HTTPAddr:          ":8080",
 		PublicBaseURL:     "http://localhost:8080",
 		DatabaseURL:       "postgres://zeus:zeus@localhost:5432/zeus?sslmode=disable",

@@ -21,6 +21,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/report"
 	"github.com/hwq830/zeusai/server/internal/task"
 	"github.com/hwq830/zeusai/server/internal/template"
@@ -59,7 +60,8 @@ func New(d Deps) *Server {
 	}
 	q := db.New(d.Pool)
 	tokens := auth.NewTokens(d.Config.JWTSecret, d.Config.AccessTTL)
-	qs := &quota.Service{Q: q, Now: d.Now}
+	rc := &remoteconfig.Cache{Q: q, Redis: d.Redis, Log: d.Log, Region: d.Config.Region}
+	qs := &quota.Service{Q: q, Config: rc, Now: d.Now}
 	tpl := &template.Service{Q: q, LLM: d.LLM, Mod: d.Mod}
 	return &Server{
 		Log: d.Log, Q: q, Tokens: tokens, Quota: qs, Templates: tpl,
@@ -71,12 +73,14 @@ func New(d Deps) *Server {
 		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Now: d.Now},
 		Tasks:      &task.Service{Q: q, Orch: d.Orch},
 		Connectors: &connector.Service{Q: q},
-		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, PublicBaseURL: d.Config.PublicBaseURL},
+		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, Config: rc, PublicBaseURL: d.Config.PublicBaseURL},
 		Feedback:   &feedback.Service{Pool: d.Pool, Q: q, Blob: d.Blob, Mod: d.Mod, Now: d.Now},
 		// The api process only reads the message center; pushes are sent by the orchestrator and admin.
-		Notify: &notify.Service{Q: q, Now: d.Now},
-		Bus:    &events.Bus{R: d.Redis},
-		Files:  files(d.Blob),
+		Notify:       &notify.Service{Q: q, Now: d.Now},
+		Bus:          &events.Bus{R: d.Redis},
+		RemoteConfig: rc,
+		Region:       d.Config.Region,
+		Files:        files(d.Blob),
 	}
 }
 

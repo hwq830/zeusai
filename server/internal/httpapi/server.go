@@ -29,6 +29,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/report"
 	"github.com/hwq830/zeusai/server/internal/task"
 	"github.com/hwq830/zeusai/server/internal/template"
@@ -48,6 +49,9 @@ type Server struct {
 	Feedback   *feedback.Service
 	Notify     *notify.Service
 	Bus        *events.Bus
+	// RemoteConfig holds the newest published config; cmd/api keeps it fresh with Run.
+	RemoteConfig *remoteconfig.Cache
+	Region       string
 	// SSEPing is the keep-alive interval for event streams.
 	SSEPing time.Duration
 	// Files serves signed download links for locally stored files (dev); nil with OSS.
@@ -61,7 +65,7 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 // Handler returns the full HTTP handler: health check plus the /v1 API.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer)
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, s.configVersionHeader)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/s/{token}", s.sharePage)
 	if s.Files != nil {
@@ -100,10 +104,17 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 
 type ctxKey struct{}
 
-// authenticate enforces bearer auth on operations the contract marks as secured.
+// authenticate enforces bearer auth on operations the contract marks as secured. On open
+// operations a valid token still identifies the user (GET /v1/config targets users) and an
+// invalid one is ignored.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Value(gen.BearerAuthScopes) == nil {
+			if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+				if uid, err := s.Tokens.VerifyAccess(strings.TrimSpace(tok)); err == nil {
+					r = r.WithContext(moderation.WithUser(context.WithValue(r.Context(), ctxKey{}, uid), uid))
+				}
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

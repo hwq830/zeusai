@@ -31,6 +31,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
@@ -82,6 +83,7 @@ type harness struct {
 	router routers.Router
 	blob   *blob.Local
 	pushes *push.Log
+	config *remoteconfig.Cache
 }
 
 func setup(t *testing.T) *harness {
@@ -97,10 +99,12 @@ func setup(t *testing.T) *harness {
 	fo := &fakeOrch{schedules: map[uuid.UUID]bool{}}
 	files := &blob.Local{Dir: t.TempDir(), BaseURL: "https://api.zeus.test", Secret: []byte("files")}
 	pushes := &push.Log{}
+	rc := &remoteconfig.Cache{Q: q, Region: "china"}
 	srv := &adminapi.Server{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Q: q, Tokens: adminapi.NewTokens("test", time.Hour),
-		Quota: &quota.Service{Q: q}, Orch: fo, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
-		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Notify: &notify.Service{Q: q, Sender: pushes},
+		Quota: &quota.Service{Q: q, Config: rc}, Orch: fo, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
+		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Notify: &notify.Service{Q: q, Sender: pushes}, Region: "china",
+		Releases: &remoteconfig.Releases{Pool: pool, RequireApproval: true},
 	}
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
@@ -113,7 +117,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, q: q, orch: fo, url: hs.URL, router: router, blob: files, pushes: pushes}
+	return &harness{t: t, q: q, orch: fo, url: hs.URL, router: router, blob: files, pushes: pushes, config: rc}
 }
 
 func (h *harness) do(method, path string, body any, wantStatus int, out any) {
@@ -186,7 +190,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 9 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 12 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

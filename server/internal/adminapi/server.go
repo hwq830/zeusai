@@ -29,6 +29,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 )
 
 type Server struct {
@@ -40,6 +41,9 @@ type Server struct {
 	// Blob signs feedback screenshot links (nil hides them); Push notifies users of replies (nil skips).
 	Blob blob.Store
 	Push push.Notifier
+	// Releases publishes remote config; Region fills previews like the api process does.
+	Releases *remoteconfig.Releases
+	Region   string
 	// Notify estimates campaign audiences and sends test pushes.
 	Notify *notify.Service
 	// LLMProvider and ModelGWConfig mirror the api process settings for the gateway page.
@@ -164,11 +168,17 @@ const (
 	PermCampaigns  = "campaigns.write"
 	// Only owners approve campaigns: a campaign can reach every user.
 	PermCampaignsApprove = "campaigns.approve"
+	// Config center: edit rules, submit and roll back releases.
+	PermConfig = "config.write"
+	// Create and archive keys, change namespaces.
+	PermConfigManage = "config.manage"
+	// Approve or reject pending releases.
+	PermConfigApprove = "config.approve"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig},
 	"moderator": {PermModeration, PermFeedback},
 	"viewer":    {},
 }
@@ -260,6 +270,8 @@ func idStr(u *uuid.UUID) *string {
 	s := u.String()
 	return &s
 }
+
+func idString(id int64) string { return strconv.FormatInt(id, 10) }
 
 func cny(micros int64) float64 { return float64(micros) / 1e6 }
 

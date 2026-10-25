@@ -14,6 +14,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 )
 
 type Limits struct {
@@ -37,19 +38,32 @@ type Plan struct {
 	Limits
 }
 
-// Plans lists the configured plans by code.
-func Plans() []Plan {
+// Plans lists the configured plans by code, with the free plan's remote config defaults
+// (rules that target specific users are not reflected here).
+func (s *Service) Plans() []Plan {
 	out := make([]Plan, 0, len(plans))
-	for c, l := range plans {
-		out = append(out, Plan{Code: c, Limits: l})
+	for c := range plans {
+		out = append(out, Plan{Code: c, Limits: s.PlanLimits(db.User{PlanCode: c})})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
 	return out
 }
 
+// PlanLimits is the user's plan limits after remote config (quota.free.* keys, which may
+// target users like any other key), before the user's own override.
+func (s *Service) PlanLimits(u db.User) Limits {
+	lim := LimitsFor(u.PlanCode)
+	if _, ok := plans[u.PlanCode]; !ok || u.PlanCode == "free" {
+		rc := remoteconfig.UserContext(u, "")
+		lim.Subscriptions = s.Config.Int(rc, remoteconfig.KeyQuotaSubscriptions, lim.Subscriptions)
+		lim.ReportsPerMonth = s.Config.Int(rc, remoteconfig.KeyQuotaReportsPerMonth, lim.ReportsPerMonth)
+	}
+	return lim
+}
+
 // Effective applies the user's override, if any, to their plan's limits.
 func (s *Service) Effective(ctx context.Context, u db.User) (Limits, *db.UserQuotaOverride, error) {
-	lim := LimitsFor(u.PlanCode)
+	lim := s.PlanLimits(u)
 	o, err := s.Q.GetQuotaOverride(ctx, u.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lim, nil, nil
@@ -77,8 +91,10 @@ type Usage struct {
 }
 
 type Service struct {
-	Q   *db.Queries
-	Now func() time.Time
+	Q *db.Queries
+	// Config overrides the free plan's limits; nil keeps the built-in ones.
+	Config *remoteconfig.Cache
+	Now    func() time.Time
 }
 
 func (s *Service) now() time.Time {

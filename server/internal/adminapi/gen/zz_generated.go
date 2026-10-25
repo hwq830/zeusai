@@ -79,6 +79,77 @@ const (
 	CampaignTestResultResultsStatusSent     CampaignTestResultResultsStatus = "sent"
 )
 
+// Defines values for ConfigApplyMode.
+const (
+	Immediate  ConfigApplyMode = "immediate"
+	NextLaunch ConfigApplyMode = "next_launch"
+)
+
+// Defines values for ConfigChangeKind.
+const (
+	Added   ConfigChangeKind = "added"
+	Changed ConfigChangeKind = "changed"
+	Removed ConfigChangeKind = "removed"
+)
+
+// Defines values for ConfigConditionAttr.
+const (
+	ConfigConditionAttrAppVersion   ConfigConditionAttr = "app_version"
+	ConfigConditionAttrChannel      ConfigConditionAttr = "channel"
+	ConfigConditionAttrLocale       ConfigConditionAttr = "locale"
+	ConfigConditionAttrOsVersion    ConfigConditionAttr = "os_version"
+	ConfigConditionAttrPlan         ConfigConditionAttr = "plan"
+	ConfigConditionAttrPlatform     ConfigConditionAttr = "platform"
+	ConfigConditionAttrRegion       ConfigConditionAttr = "region"
+	ConfigConditionAttrRegisteredAt ConfigConditionAttr = "registered_at"
+	ConfigConditionAttrUserId       ConfigConditionAttr = "user_id"
+)
+
+// Defines values for ConfigConditionOp.
+const (
+	After     ConfigConditionOp = "after"
+	Before    ConfigConditionOp = "before"
+	Eq        ConfigConditionOp = "eq"
+	In        ConfigConditionOp = "in"
+	Neq       ConfigConditionOp = "neq"
+	NotIn     ConfigConditionOp = "not_in"
+	SemverGte ConfigConditionOp = "semver_gte"
+	SemverLt  ConfigConditionOp = "semver_lt"
+)
+
+// Defines values for ConfigNamespace.
+const (
+	App        ConfigNamespace = "app"
+	Endpoint   ConfigNamespace = "endpoint"
+	Feature    ConfigNamespace = "feature"
+	Killswitch ConfigNamespace = "killswitch"
+	Quota      ConfigNamespace = "quota"
+	Ui         ConfigNamespace = "ui"
+)
+
+// Defines values for ConfigPreviewRequestSource.
+const (
+	ConfigPreviewRequestSourcePublished ConfigPreviewRequestSource = "published"
+	ConfigPreviewRequestSourceWorking   ConfigPreviewRequestSource = "working"
+)
+
+// Defines values for ConfigReleaseStatus.
+const (
+	ConfigReleaseStatusPending    ConfigReleaseStatus = "pending"
+	ConfigReleaseStatusPublished  ConfigReleaseStatus = "published"
+	ConfigReleaseStatusRejected   ConfigReleaseStatus = "rejected"
+	ConfigReleaseStatusSuperseded ConfigReleaseStatus = "superseded"
+)
+
+// Defines values for ConfigValueType.
+const (
+	Bool   ConfigValueType = "bool"
+	Float  ConfigValueType = "float"
+	Int    ConfigValueType = "int"
+	Json   ConfigValueType = "json"
+	String ConfigValueType = "string"
+)
+
 // Defines values for FeedbackStatus.
 const (
 	Closed     FeedbackStatus = "closed"
@@ -510,6 +581,263 @@ type ChangePasswordRequest struct {
 	CurrentPassword string `json:"currentPassword"`
 	NewPassword     string `json:"newPassword"`
 }
+
+// ConfigApplyMode defines model for ConfigApplyMode.
+type ConfigApplyMode string
+
+// ConfigChange defines model for ConfigChange.
+type ConfigChange struct {
+	// After 一个配置项在某个版本里的内容
+	After *ConfigKeyState `json:"after,omitempty"`
+
+	// Before 一个配置项在某个版本里的内容
+	Before *ConfigKeyState  `json:"before,omitempty"`
+	Key    string           `json:"key"`
+	Kind   ConfigChangeKind `json:"kind"`
+}
+
+// ConfigChangeKind defines model for ConfigChange.Kind.
+type ConfigChangeKind string
+
+// ConfigChanges defines model for ConfigChanges.
+type ConfigChanges struct {
+	Changes          []ConfigChange `json:"changes"`
+	PublishedVersion int64          `json:"publishedVersion"`
+
+	// PublishesDirectly 当前管理员提交这些改动会不会直接上线（不需要审批）
+	PublishesDirectly bool `json:"publishesDirectly"`
+}
+
+// ConfigCondition defines model for ConfigCondition.
+type ConfigCondition struct {
+	Attr ConfigConditionAttr `json:"attr"`
+
+	// Op semver_* 只用于 app_version / os_version；before / after 只用于 registered_at（日期 2026-10-24）
+	Op     ConfigConditionOp `json:"op"`
+	Values []string          `json:"values"`
+}
+
+// ConfigConditionAttr defines model for ConfigCondition.Attr.
+type ConfigConditionAttr string
+
+// ConfigConditionOp semver_* 只用于 app_version / os_version；before / after 只用于 registered_at（日期 2026-10-24）
+type ConfigConditionOp string
+
+// ConfigKey defines model for ConfigKey.
+type ConfigKey struct {
+	ApplyMode ConfigApplyMode `json:"applyMode"`
+	Archived  bool            `json:"archived"`
+
+	// ClientVisible false 表示只给服务端读，不下发到 App
+	ClientVisible bool         `json:"clientVisible"`
+	CreatedAt     time.Time    `json:"createdAt"`
+	DefaultValue  *interface{} `json:"defaultValue"`
+	Description   string       `json:"description"`
+
+	// Expose App 读取时上报 config_exposure
+	Expose    bool            `json:"expose"`
+	Key       string          `json:"key"`
+	Namespace ConfigNamespace `json:"namespace"`
+
+	// Owner 负责人
+	Owner string `json:"owner"`
+
+	// Published 一个配置项在某个版本里的内容
+	Published *ConfigKeyState `json:"published,omitempty"`
+	Rules     []ConfigRule    `json:"rules"`
+	Type      ConfigValueType `json:"type"`
+
+	// Unpublished 工作副本和线上版本不同
+	Unpublished    bool      `json:"unpublished"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	UpdatedByEmail *string   `json:"updatedByEmail,omitempty"`
+
+	// ValueSchema json 类型的 JSON Schema
+	ValueSchema *map[string]interface{} `json:"valueSchema"`
+}
+
+// ConfigKeyCreate defines model for ConfigKeyCreate.
+type ConfigKeyCreate struct {
+	ApplyMode     *ConfigApplyMode        `json:"applyMode,omitempty"`
+	ClientVisible *bool                   `json:"clientVisible,omitempty"`
+	DefaultValue  *interface{}            `json:"defaultValue"`
+	Description   *string                 `json:"description,omitempty"`
+	Expose        *bool                   `json:"expose,omitempty"`
+	Key           string                  `json:"key"`
+	Namespace     ConfigNamespace         `json:"namespace"`
+	Owner         *string                 `json:"owner,omitempty"`
+	Type          ConfigValueType         `json:"type"`
+	ValueSchema   *map[string]interface{} `json:"valueSchema"`
+}
+
+// ConfigKeyList defines model for ConfigKeyList.
+type ConfigKeyList struct {
+	Items []ConfigKey `json:"items"`
+
+	// PendingReleaseId 待审批的发布
+	PendingReleaseId *int64 `json:"pendingReleaseId,omitempty"`
+
+	// PublishedVersion 线上版本号，0 表示还没有发布过
+	PublishedVersion int64 `json:"publishedVersion"`
+}
+
+// ConfigKeyPatch defines model for ConfigKeyPatch.
+type ConfigKeyPatch struct {
+	ApplyMode        *ConfigApplyMode `json:"applyMode,omitempty"`
+	Archived         *bool            `json:"archived,omitempty"`
+	ClearValueSchema *bool            `json:"clearValueSchema,omitempty"`
+	ClientVisible    *bool            `json:"clientVisible,omitempty"`
+
+	// DefaultValue 不传表示不改；json 类型要改成 null 时传 defaultValueNull=true
+	DefaultValue     *interface{}            `json:"defaultValue"`
+	DefaultValueNull *bool                   `json:"defaultValueNull,omitempty"`
+	Description      *string                 `json:"description,omitempty"`
+	Expose           *bool                   `json:"expose,omitempty"`
+	Namespace        *ConfigNamespace        `json:"namespace,omitempty"`
+	Owner            *string                 `json:"owner,omitempty"`
+	Rules            *[]ConfigRule           `json:"rules,omitempty"`
+	ValueSchema      *map[string]interface{} `json:"valueSchema,omitempty"`
+}
+
+// ConfigKeyState 一个配置项在某个版本里的内容
+type ConfigKeyState struct {
+	ApplyMode     ConfigApplyMode `json:"applyMode"`
+	ClientVisible bool            `json:"clientVisible"`
+	DefaultValue  *interface{}    `json:"defaultValue"`
+	Expose        bool            `json:"expose"`
+	Namespace     ConfigNamespace `json:"namespace"`
+	Rules         []ConfigRule    `json:"rules"`
+	Type          ConfigValueType `json:"type"`
+}
+
+// ConfigNamespace defines model for ConfigNamespace.
+type ConfigNamespace string
+
+// ConfigPreview defines model for ConfigPreview.
+type ConfigPreview struct {
+	Plan   *string              `json:"plan,omitempty"`
+	UserId *string              `json:"userId,omitempty"`
+	Values []ConfigPreviewValue `json:"values"`
+
+	// Version 预览所用的版本，working 时为 0
+	Version int64 `json:"version"`
+}
+
+// ConfigPreviewRequest defines model for ConfigPreviewRequest.
+type ConfigPreviewRequest struct {
+	AppVersion *string `json:"appVersion,omitempty"`
+	Channel    *string `json:"channel,omitempty"`
+	InstallId  *string `json:"installId,omitempty"`
+	Locale     *string `json:"locale,omitempty"`
+	OsVersion  *string `json:"osVersion,omitempty"`
+
+	// Phone 与 userId 二选一
+	Phone    *string `json:"phone,omitempty"`
+	Platform *string `json:"platform,omitempty"`
+
+	// Source working 用工作副本预览尚未发布的规则
+	Source *ConfigPreviewRequestSource `json:"source,omitempty"`
+	UserId *string                     `json:"userId,omitempty"`
+}
+
+// ConfigPreviewRequestSource working 用工作副本预览尚未发布的规则
+type ConfigPreviewRequestSource string
+
+// ConfigPreviewValue defines model for ConfigPreviewValue.
+type ConfigPreviewValue struct {
+	ClientVisible bool         `json:"clientVisible"`
+	IsDefault     bool         `json:"isDefault"`
+	Key           string       `json:"key"`
+	RuleId        *string      `json:"ruleId,omitempty"`
+	Value         *interface{} `json:"value"`
+}
+
+// ConfigRelease defines model for ConfigRelease.
+type ConfigRelease struct {
+	CreatedAt      time.Time `json:"createdAt"`
+	CreatedByEmail string    `json:"createdByEmail"`
+
+	// Current 是当前线上版本
+	Current        *bool      `json:"current,omitempty"`
+	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
+	DecidedByEmail string     `json:"decidedByEmail"`
+	DecisionNote   string     `json:"decisionNote"`
+	Id             int64      `json:"id"`
+	Note           string     `json:"note"`
+	PublishedAt    *time.Time `json:"publishedAt,omitempty"`
+
+	// RolledBackFrom 回滚来源的发布 id
+	RolledBackFrom *int64              `json:"rolledBackFrom,omitempty"`
+	Status         ConfigReleaseStatus `json:"status"`
+
+	// Version 只有已发布的有
+	Version *int64 `json:"version,omitempty"`
+}
+
+// ConfigReleaseDetail defines model for ConfigReleaseDetail.
+type ConfigReleaseDetail struct {
+	// BaseVersion changes 的比较基准版本，0 表示空
+	BaseVersion    int64          `json:"baseVersion"`
+	Changes        []ConfigChange `json:"changes"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	CreatedByEmail string         `json:"createdByEmail"`
+
+	// Current 是当前线上版本
+	Current        *bool      `json:"current,omitempty"`
+	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
+	DecidedByEmail string     `json:"decidedByEmail"`
+	DecisionNote   string     `json:"decisionNote"`
+	Id             int64      `json:"id"`
+	Note           string     `json:"note"`
+	PublishedAt    *time.Time `json:"publishedAt,omitempty"`
+
+	// RolledBackFrom 回滚来源的发布 id
+	RolledBackFrom *int64              `json:"rolledBackFrom,omitempty"`
+	Status         ConfigReleaseStatus `json:"status"`
+
+	// Version 只有已发布的有
+	Version *int64 `json:"version,omitempty"`
+}
+
+// ConfigReleasePage defines model for ConfigReleasePage.
+type ConfigReleasePage struct {
+	Items      []ConfigRelease `json:"items"`
+	NextCursor *string         `json:"nextCursor,omitempty"`
+}
+
+// ConfigReleaseRequest defines model for ConfigReleaseRequest.
+type ConfigReleaseRequest struct {
+	Note *string `json:"note,omitempty"`
+}
+
+// ConfigReleaseStatus defines model for ConfigReleaseStatus.
+type ConfigReleaseStatus string
+
+// ConfigRollout defines model for ConfigRollout.
+type ConfigRollout struct {
+	// Percent 命中条件的用户中按 sha256(salt:user_id) 分桶放量的比例，精度 0.01
+	Percent float32 `json:"percent"`
+
+	// Salt 默认等于 key；改了会重新洗牌
+	Salt *string `json:"salt,omitempty"`
+
+	// Value 放量部分拿到的值
+	Value *interface{} `json:"value"`
+}
+
+// ConfigRule 自上而下匹配，第一条命中的生效。value 与 rollout 二选一；rollout 没抽中的继续往下匹配
+type ConfigRule struct {
+	Id      string         `json:"id"`
+	Note    *string        `json:"note,omitempty"`
+	Rollout *ConfigRollout `json:"rollout,omitempty"`
+	Value   *interface{}   `json:"value"`
+
+	// When 全部满足才命中；空数组表示所有人
+	When []ConfigCondition `json:"when"`
+}
+
+// ConfigValueType defines model for ConfigValueType.
+type ConfigValueType string
 
 // ConnectorPatch defines model for ConnectorPatch.
 type ConnectorPatch struct {
@@ -1056,6 +1384,9 @@ type AdminId = string
 // CampaignId defines model for CampaignId.
 type CampaignId = string
 
+// ConfigKeyName defines model for ConfigKeyName.
+type ConfigKeyName = string
+
 // Cursor defines model for Cursor.
 type Cursor = string
 
@@ -1064,6 +1395,9 @@ type FeedbackId = string
 
 // Limit defines model for Limit.
 type Limit = int
+
+// ReleaseId defines model for ReleaseId.
+type ReleaseId = int64
 
 // TaskId defines model for TaskId.
 type TaskId = string
@@ -1087,6 +1421,18 @@ type ListCampaignsParams struct {
 	Status *CampaignStatus `form:"status,omitempty" json:"status,omitempty"`
 	Cursor *Cursor         `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *Limit          `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListConfigKeysParams defines parameters for ListConfigKeys.
+type ListConfigKeysParams struct {
+	// Archived true 时包含已归档的配置项
+	Archived *bool `form:"archived,omitempty" json:"archived,omitempty"`
+}
+
+// ListConfigReleasesParams defines parameters for ListConfigReleases.
+type ListConfigReleasesParams struct {
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetCostsParams defines parameters for GetCosts.
@@ -1193,6 +1539,27 @@ type RejectCampaignJSONRequestBody = CampaignRejectRequest
 // TestSendCampaignJSONRequestBody defines body for TestSendCampaign for application/json ContentType.
 type TestSendCampaignJSONRequestBody = CampaignTestRequest
 
+// CreateConfigKeyJSONRequestBody defines body for CreateConfigKey for application/json ContentType.
+type CreateConfigKeyJSONRequestBody = ConfigKeyCreate
+
+// UpdateConfigKeyJSONRequestBody defines body for UpdateConfigKey for application/json ContentType.
+type UpdateConfigKeyJSONRequestBody = ConfigKeyPatch
+
+// PreviewConfigJSONRequestBody defines body for PreviewConfig for application/json ContentType.
+type PreviewConfigJSONRequestBody = ConfigPreviewRequest
+
+// SubmitConfigReleaseJSONRequestBody defines body for SubmitConfigRelease for application/json ContentType.
+type SubmitConfigReleaseJSONRequestBody = ConfigReleaseRequest
+
+// ApproveConfigReleaseJSONRequestBody defines body for ApproveConfigRelease for application/json ContentType.
+type ApproveConfigReleaseJSONRequestBody = ConfigReleaseRequest
+
+// RejectConfigReleaseJSONRequestBody defines body for RejectConfigRelease for application/json ContentType.
+type RejectConfigReleaseJSONRequestBody = ConfigReleaseRequest
+
+// RollbackConfigReleaseJSONRequestBody defines body for RollbackConfigRelease for application/json ContentType.
+type RollbackConfigReleaseJSONRequestBody = ConfigReleaseRequest
+
 // UpdateConnectorJSONRequestBody defines body for UpdateConnector for application/json ContentType.
 type UpdateConnectorJSONRequestBody = ConnectorPatch
 
@@ -1279,6 +1646,42 @@ type ServerInterface interface {
 	// 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
 	// (POST /admin/v1/campaigns/{campaignId}/test-send)
 	TestSendCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId)
+	// 工作副本相对线上版本的改动（发布前的 diff）
+	// (GET /admin/v1/config/changes)
+	ListConfigChanges(w http.ResponseWriter, r *http.Request)
+	// 配置项（工作副本），附线上版本的值
+	// (GET /admin/v1/config/keys)
+	ListConfigKeys(w http.ResponseWriter, r *http.Request, params ListConfigKeysParams)
+	// 新建配置项（owner）。新建后要发布才会下发
+	// (POST /admin/v1/config/keys)
+	CreateConfigKey(w http.ResponseWriter, r *http.Request)
+
+	// (GET /admin/v1/config/keys/{key})
+	GetConfigKey(w http.ResponseWriter, r *http.Request, key ConfigKeyName)
+	// 修改工作副本。改命名空间、归档需要 owner；类型不能改
+	// (PATCH /admin/v1/config/keys/{key})
+	UpdateConfigKey(w http.ResponseWriter, r *http.Request, key ConfigKeyName)
+	// 某个用户 / 设备会拿到什么值、命中哪条规则
+	// (POST /admin/v1/config/preview)
+	PreviewConfig(w http.ResponseWriter, r *http.Request)
+	// 发布记录，最新在前
+	// (GET /admin/v1/config/releases)
+	ListConfigReleases(w http.ResponseWriter, r *http.Request, params ListConfigReleasesParams)
+	// 提交发布。按审批规则直接上线（status=published）或等待审批（status=pending）
+	// (POST /admin/v1/config/releases)
+	SubmitConfigRelease(w http.ResponseWriter, r *http.Request)
+	// 发布详情。已发布的与上一个发布版本比较，待审批的与当前线上版本比较
+	// (GET /admin/v1/config/releases/{releaseId})
+	GetConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId)
+	// 审批并上线（owner；不能审批自己提交的，除非只有一个 owner）
+	// (POST /admin/v1/config/releases/{releaseId}/approve)
+	ApproveConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId)
+	// 驳回待审批的发布（owner）
+	// (POST /admin/v1/config/releases/{releaseId}/reject)
+	RejectConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId)
+	// 把这个已发布版本的内容作为新版本重新发布，同时把工作副本恢复成它（审批规则同提交）
+	// (POST /admin/v1/config/releases/{releaseId}/rollback)
+	RollbackConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId)
 	// 内置工具与 MCP 白名单（含已下架）
 	// (GET /admin/v1/connectors)
 	ListConnectors(w http.ResponseWriter, r *http.Request)
@@ -1493,6 +1896,77 @@ func (_ Unimplemented) SubmitCampaign(w http.ResponseWriter, r *http.Request, ca
 // 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
 // (POST /admin/v1/campaigns/{campaignId}/test-send)
 func (_ Unimplemented) TestSendCampaign(w http.ResponseWriter, r *http.Request, campaignId CampaignId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 工作副本相对线上版本的改动（发布前的 diff）
+// (GET /admin/v1/config/changes)
+func (_ Unimplemented) ListConfigChanges(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 配置项（工作副本），附线上版本的值
+// (GET /admin/v1/config/keys)
+func (_ Unimplemented) ListConfigKeys(w http.ResponseWriter, r *http.Request, params ListConfigKeysParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 新建配置项（owner）。新建后要发布才会下发
+// (POST /admin/v1/config/keys)
+func (_ Unimplemented) CreateConfigKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// (GET /admin/v1/config/keys/{key})
+func (_ Unimplemented) GetConfigKey(w http.ResponseWriter, r *http.Request, key ConfigKeyName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 修改工作副本。改命名空间、归档需要 owner；类型不能改
+// (PATCH /admin/v1/config/keys/{key})
+func (_ Unimplemented) UpdateConfigKey(w http.ResponseWriter, r *http.Request, key ConfigKeyName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 某个用户 / 设备会拿到什么值、命中哪条规则
+// (POST /admin/v1/config/preview)
+func (_ Unimplemented) PreviewConfig(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 发布记录，最新在前
+// (GET /admin/v1/config/releases)
+func (_ Unimplemented) ListConfigReleases(w http.ResponseWriter, r *http.Request, params ListConfigReleasesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 提交发布。按审批规则直接上线（status=published）或等待审批（status=pending）
+// (POST /admin/v1/config/releases)
+func (_ Unimplemented) SubmitConfigRelease(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 发布详情。已发布的与上一个发布版本比较，待审批的与当前线上版本比较
+// (GET /admin/v1/config/releases/{releaseId})
+func (_ Unimplemented) GetConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 审批并上线（owner；不能审批自己提交的，除非只有一个 owner）
+// (POST /admin/v1/config/releases/{releaseId}/approve)
+func (_ Unimplemented) ApproveConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 驳回待审批的发布（owner）
+// (POST /admin/v1/config/releases/{releaseId}/reject)
+func (_ Unimplemented) RejectConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// 把这个已发布版本的内容作为新版本重新发布，同时把工作副本恢复成它（审批规则同提交）
+// (POST /admin/v1/config/releases/{releaseId}/rollback)
+func (_ Unimplemented) RollbackConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2252,6 +2726,346 @@ func (siw *ServerInterfaceWrapper) TestSendCampaign(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListConfigChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListConfigChanges(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConfigChanges(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConfigKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListConfigKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConfigKeysParams
+
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "archived", r.URL.Query(), &params.Archived)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConfigKeys(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateConfigKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateConfigKey(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateConfigKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetConfigKey operation middleware
+func (siw *ServerInterfaceWrapper) GetConfigKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "key" -------------
+	var key ConfigKeyName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetConfigKey(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateConfigKey operation middleware
+func (siw *ServerInterfaceWrapper) UpdateConfigKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "key" -------------
+	var key ConfigKeyName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateConfigKey(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewConfig operation middleware
+func (siw *ServerInterfaceWrapper) PreviewConfig(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewConfig(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConfigReleases operation middleware
+func (siw *ServerInterfaceWrapper) ListConfigReleases(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConfigReleasesParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConfigReleases(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SubmitConfigRelease operation middleware
+func (siw *ServerInterfaceWrapper) SubmitConfigRelease(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SubmitConfigRelease(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetConfigRelease operation middleware
+func (siw *ServerInterfaceWrapper) GetConfigRelease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "releaseId" -------------
+	var releaseId ReleaseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "releaseId", chi.URLParam(r, "releaseId"), &releaseId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "releaseId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetConfigRelease(w, r, releaseId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveConfigRelease operation middleware
+func (siw *ServerInterfaceWrapper) ApproveConfigRelease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "releaseId" -------------
+	var releaseId ReleaseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "releaseId", chi.URLParam(r, "releaseId"), &releaseId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "releaseId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveConfigRelease(w, r, releaseId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RejectConfigRelease operation middleware
+func (siw *ServerInterfaceWrapper) RejectConfigRelease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "releaseId" -------------
+	var releaseId ReleaseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "releaseId", chi.URLParam(r, "releaseId"), &releaseId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "releaseId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RejectConfigRelease(w, r, releaseId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackConfigRelease operation middleware
+func (siw *ServerInterfaceWrapper) RollbackConfigRelease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "releaseId" -------------
+	var releaseId ReleaseId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "releaseId", chi.URLParam(r, "releaseId"), &releaseId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "releaseId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackConfigRelease(w, r, releaseId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListConnectors operation middleware
 func (siw *ServerInterfaceWrapper) ListConnectors(w http.ResponseWriter, r *http.Request) {
 
@@ -2721,63 +3535,6 @@ func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPlans(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListReportFeedback operation middleware
-func (siw *ServerInterfaceWrapper) ListReportFeedback(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListReportFeedbackParams
-
-	// ------------- Optional query parameter "rating" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "rating", r.URL.Query(), &params.Rating)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "rating", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "reason" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "reason", r.URL.Query(), &params.Reason)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reason", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "cursor", r.URL.Query(), &params.Cursor)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListReportFeedback(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3671,6 +4428,42 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/admin/v1/campaigns/{campaignId}/test-send", wrapper.TestSendCampaign)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/config/changes", wrapper.ListConfigChanges)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/config/keys", wrapper.ListConfigKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/config/keys", wrapper.CreateConfigKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/config/keys/{key}", wrapper.GetConfigKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/admin/v1/config/keys/{key}", wrapper.UpdateConfigKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/config/preview", wrapper.PreviewConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/config/releases", wrapper.ListConfigReleases)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/config/releases", wrapper.SubmitConfigRelease)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/admin/v1/config/releases/{releaseId}", wrapper.GetConfigRelease)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/config/releases/{releaseId}/approve", wrapper.ApproveConfigRelease)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/config/releases/{releaseId}/reject", wrapper.RejectConfigRelease)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/admin/v1/config/releases/{releaseId}/rollback", wrapper.RollbackConfigRelease)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/admin/v1/connectors", wrapper.ListConnectors)
 	})
 	r.Group(func(r chi.Router) {
@@ -4305,6 +5098,357 @@ func (response TestSendCampaigndefaultJSONResponse) VisitTestSendCampaignRespons
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type ListConfigChangesRequestObject struct {
+}
+
+type ListConfigChangesResponseObject interface {
+	VisitListConfigChangesResponse(w http.ResponseWriter) error
+}
+
+type ListConfigChanges200JSONResponse ConfigChanges
+
+func (response ListConfigChanges200JSONResponse) VisitListConfigChangesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListConfigChangesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConfigChangesdefaultJSONResponse) VisitListConfigChangesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListConfigKeysRequestObject struct {
+	Params ListConfigKeysParams
+}
+
+type ListConfigKeysResponseObject interface {
+	VisitListConfigKeysResponse(w http.ResponseWriter) error
+}
+
+type ListConfigKeys200JSONResponse ConfigKeyList
+
+func (response ListConfigKeys200JSONResponse) VisitListConfigKeysResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListConfigKeysdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConfigKeysdefaultJSONResponse) VisitListConfigKeysResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateConfigKeyRequestObject struct {
+	Body *CreateConfigKeyJSONRequestBody
+}
+
+type CreateConfigKeyResponseObject interface {
+	VisitCreateConfigKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateConfigKey201JSONResponse ConfigKey
+
+func (response CreateConfigKey201JSONResponse) VisitCreateConfigKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateConfigKeydefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateConfigKeydefaultJSONResponse) VisitCreateConfigKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetConfigKeyRequestObject struct {
+	Key ConfigKeyName `json:"key"`
+}
+
+type GetConfigKeyResponseObject interface {
+	VisitGetConfigKeyResponse(w http.ResponseWriter) error
+}
+
+type GetConfigKey200JSONResponse ConfigKey
+
+func (response GetConfigKey200JSONResponse) VisitGetConfigKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConfigKeydefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetConfigKeydefaultJSONResponse) VisitGetConfigKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateConfigKeyRequestObject struct {
+	Key  ConfigKeyName `json:"key"`
+	Body *UpdateConfigKeyJSONRequestBody
+}
+
+type UpdateConfigKeyResponseObject interface {
+	VisitUpdateConfigKeyResponse(w http.ResponseWriter) error
+}
+
+type UpdateConfigKey200JSONResponse ConfigKey
+
+func (response UpdateConfigKey200JSONResponse) VisitUpdateConfigKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateConfigKeydefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response UpdateConfigKeydefaultJSONResponse) VisitUpdateConfigKeyResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type PreviewConfigRequestObject struct {
+	Body *PreviewConfigJSONRequestBody
+}
+
+type PreviewConfigResponseObject interface {
+	VisitPreviewConfigResponse(w http.ResponseWriter) error
+}
+
+type PreviewConfig200JSONResponse ConfigPreview
+
+func (response PreviewConfig200JSONResponse) VisitPreviewConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PreviewConfigdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response PreviewConfigdefaultJSONResponse) VisitPreviewConfigResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListConfigReleasesRequestObject struct {
+	Params ListConfigReleasesParams
+}
+
+type ListConfigReleasesResponseObject interface {
+	VisitListConfigReleasesResponse(w http.ResponseWriter) error
+}
+
+type ListConfigReleases200JSONResponse ConfigReleasePage
+
+func (response ListConfigReleases200JSONResponse) VisitListConfigReleasesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListConfigReleasesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListConfigReleasesdefaultJSONResponse) VisitListConfigReleasesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SubmitConfigReleaseRequestObject struct {
+	Body *SubmitConfigReleaseJSONRequestBody
+}
+
+type SubmitConfigReleaseResponseObject interface {
+	VisitSubmitConfigReleaseResponse(w http.ResponseWriter) error
+}
+
+type SubmitConfigRelease201JSONResponse ConfigReleaseDetail
+
+func (response SubmitConfigRelease201JSONResponse) VisitSubmitConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SubmitConfigReleasedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SubmitConfigReleasedefaultJSONResponse) VisitSubmitConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetConfigReleaseRequestObject struct {
+	ReleaseId ReleaseId `json:"releaseId"`
+}
+
+type GetConfigReleaseResponseObject interface {
+	VisitGetConfigReleaseResponse(w http.ResponseWriter) error
+}
+
+type GetConfigRelease200JSONResponse ConfigReleaseDetail
+
+func (response GetConfigRelease200JSONResponse) VisitGetConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetConfigReleasedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetConfigReleasedefaultJSONResponse) VisitGetConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ApproveConfigReleaseRequestObject struct {
+	ReleaseId ReleaseId `json:"releaseId"`
+	Body      *ApproveConfigReleaseJSONRequestBody
+}
+
+type ApproveConfigReleaseResponseObject interface {
+	VisitApproveConfigReleaseResponse(w http.ResponseWriter) error
+}
+
+type ApproveConfigRelease200JSONResponse ConfigReleaseDetail
+
+func (response ApproveConfigRelease200JSONResponse) VisitApproveConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ApproveConfigReleasedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ApproveConfigReleasedefaultJSONResponse) VisitApproveConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RejectConfigReleaseRequestObject struct {
+	ReleaseId ReleaseId `json:"releaseId"`
+	Body      *RejectConfigReleaseJSONRequestBody
+}
+
+type RejectConfigReleaseResponseObject interface {
+	VisitRejectConfigReleaseResponse(w http.ResponseWriter) error
+}
+
+type RejectConfigRelease200JSONResponse ConfigReleaseDetail
+
+func (response RejectConfigRelease200JSONResponse) VisitRejectConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RejectConfigReleasedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RejectConfigReleasedefaultJSONResponse) VisitRejectConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RollbackConfigReleaseRequestObject struct {
+	ReleaseId ReleaseId `json:"releaseId"`
+	Body      *RollbackConfigReleaseJSONRequestBody
+}
+
+type RollbackConfigReleaseResponseObject interface {
+	VisitRollbackConfigReleaseResponse(w http.ResponseWriter) error
+}
+
+type RollbackConfigRelease201JSONResponse ConfigReleaseDetail
+
+func (response RollbackConfigRelease201JSONResponse) VisitRollbackConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RollbackConfigReleasedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RollbackConfigReleasedefaultJSONResponse) VisitRollbackConfigReleaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type ListConnectorsRequestObject struct {
 }
 
@@ -4758,35 +5902,6 @@ type ListPlansdefaultJSONResponse struct {
 }
 
 func (response ListPlansdefaultJSONResponse) VisitListPlansResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(response.StatusCode)
-
-	return json.NewEncoder(w).Encode(response.Body)
-}
-
-type ListReportFeedbackRequestObject struct {
-	Params ListReportFeedbackParams
-}
-
-type ListReportFeedbackResponseObject interface {
-	VisitListReportFeedbackResponse(w http.ResponseWriter) error
-}
-
-type ListReportFeedback200JSONResponse ReportFeedbackPage
-
-func (response ListReportFeedback200JSONResponse) VisitListReportFeedbackResponse(w http.ResponseWriter) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-
-	return json.NewEncoder(w).Encode(response)
-}
-
-type ListReportFeedbackdefaultJSONResponse struct {
-	Body       Error
-	StatusCode int
-}
-
-func (response ListReportFeedbackdefaultJSONResponse) VisitListReportFeedbackResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -5401,6 +6516,42 @@ type StrictServerInterface interface {
 	// 发测试推送到指定 App 用户的设备（标题加「[测试]」，不进消息中心，不受频控）
 	// (POST /admin/v1/campaigns/{campaignId}/test-send)
 	TestSendCampaign(ctx context.Context, request TestSendCampaignRequestObject) (TestSendCampaignResponseObject, error)
+	// 工作副本相对线上版本的改动（发布前的 diff）
+	// (GET /admin/v1/config/changes)
+	ListConfigChanges(ctx context.Context, request ListConfigChangesRequestObject) (ListConfigChangesResponseObject, error)
+	// 配置项（工作副本），附线上版本的值
+	// (GET /admin/v1/config/keys)
+	ListConfigKeys(ctx context.Context, request ListConfigKeysRequestObject) (ListConfigKeysResponseObject, error)
+	// 新建配置项（owner）。新建后要发布才会下发
+	// (POST /admin/v1/config/keys)
+	CreateConfigKey(ctx context.Context, request CreateConfigKeyRequestObject) (CreateConfigKeyResponseObject, error)
+
+	// (GET /admin/v1/config/keys/{key})
+	GetConfigKey(ctx context.Context, request GetConfigKeyRequestObject) (GetConfigKeyResponseObject, error)
+	// 修改工作副本。改命名空间、归档需要 owner；类型不能改
+	// (PATCH /admin/v1/config/keys/{key})
+	UpdateConfigKey(ctx context.Context, request UpdateConfigKeyRequestObject) (UpdateConfigKeyResponseObject, error)
+	// 某个用户 / 设备会拿到什么值、命中哪条规则
+	// (POST /admin/v1/config/preview)
+	PreviewConfig(ctx context.Context, request PreviewConfigRequestObject) (PreviewConfigResponseObject, error)
+	// 发布记录，最新在前
+	// (GET /admin/v1/config/releases)
+	ListConfigReleases(ctx context.Context, request ListConfigReleasesRequestObject) (ListConfigReleasesResponseObject, error)
+	// 提交发布。按审批规则直接上线（status=published）或等待审批（status=pending）
+	// (POST /admin/v1/config/releases)
+	SubmitConfigRelease(ctx context.Context, request SubmitConfigReleaseRequestObject) (SubmitConfigReleaseResponseObject, error)
+	// 发布详情。已发布的与上一个发布版本比较，待审批的与当前线上版本比较
+	// (GET /admin/v1/config/releases/{releaseId})
+	GetConfigRelease(ctx context.Context, request GetConfigReleaseRequestObject) (GetConfigReleaseResponseObject, error)
+	// 审批并上线（owner；不能审批自己提交的，除非只有一个 owner）
+	// (POST /admin/v1/config/releases/{releaseId}/approve)
+	ApproveConfigRelease(ctx context.Context, request ApproveConfigReleaseRequestObject) (ApproveConfigReleaseResponseObject, error)
+	// 驳回待审批的发布（owner）
+	// (POST /admin/v1/config/releases/{releaseId}/reject)
+	RejectConfigRelease(ctx context.Context, request RejectConfigReleaseRequestObject) (RejectConfigReleaseResponseObject, error)
+	// 把这个已发布版本的内容作为新版本重新发布，同时把工作副本恢复成它（审批规则同提交）
+	// (POST /admin/v1/config/releases/{releaseId}/rollback)
+	RollbackConfigRelease(ctx context.Context, request RollbackConfigReleaseRequestObject) (RollbackConfigReleaseResponseObject, error)
 	// 内置工具与 MCP 白名单（含已下架）
 	// (GET /admin/v1/connectors)
 	ListConnectors(ctx context.Context, request ListConnectorsRequestObject) (ListConnectorsResponseObject, error)
@@ -6044,6 +7195,359 @@ func (sh *strictHandler) TestSendCampaign(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(TestSendCampaignResponseObject); ok {
 		if err := validResponse.VisitTestSendCampaignResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConfigChanges operation middleware
+func (sh *strictHandler) ListConfigChanges(w http.ResponseWriter, r *http.Request) {
+	var request ListConfigChangesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConfigChanges(ctx, request.(ListConfigChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConfigChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConfigChangesResponseObject); ok {
+		if err := validResponse.VisitListConfigChangesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConfigKeys operation middleware
+func (sh *strictHandler) ListConfigKeys(w http.ResponseWriter, r *http.Request, params ListConfigKeysParams) {
+	var request ListConfigKeysRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConfigKeys(ctx, request.(ListConfigKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConfigKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConfigKeysResponseObject); ok {
+		if err := validResponse.VisitListConfigKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateConfigKey operation middleware
+func (sh *strictHandler) CreateConfigKey(w http.ResponseWriter, r *http.Request) {
+	var request CreateConfigKeyRequestObject
+
+	var body CreateConfigKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateConfigKey(ctx, request.(CreateConfigKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateConfigKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateConfigKeyResponseObject); ok {
+		if err := validResponse.VisitCreateConfigKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConfigKey operation middleware
+func (sh *strictHandler) GetConfigKey(w http.ResponseWriter, r *http.Request, key ConfigKeyName) {
+	var request GetConfigKeyRequestObject
+
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConfigKey(ctx, request.(GetConfigKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConfigKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConfigKeyResponseObject); ok {
+		if err := validResponse.VisitGetConfigKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateConfigKey operation middleware
+func (sh *strictHandler) UpdateConfigKey(w http.ResponseWriter, r *http.Request, key ConfigKeyName) {
+	var request UpdateConfigKeyRequestObject
+
+	request.Key = key
+
+	var body UpdateConfigKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateConfigKey(ctx, request.(UpdateConfigKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateConfigKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateConfigKeyResponseObject); ok {
+		if err := validResponse.VisitUpdateConfigKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PreviewConfig operation middleware
+func (sh *strictHandler) PreviewConfig(w http.ResponseWriter, r *http.Request) {
+	var request PreviewConfigRequestObject
+
+	var body PreviewConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PreviewConfig(ctx, request.(PreviewConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PreviewConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PreviewConfigResponseObject); ok {
+		if err := validResponse.VisitPreviewConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConfigReleases operation middleware
+func (sh *strictHandler) ListConfigReleases(w http.ResponseWriter, r *http.Request, params ListConfigReleasesParams) {
+	var request ListConfigReleasesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConfigReleases(ctx, request.(ListConfigReleasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConfigReleases")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConfigReleasesResponseObject); ok {
+		if err := validResponse.VisitListConfigReleasesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SubmitConfigRelease operation middleware
+func (sh *strictHandler) SubmitConfigRelease(w http.ResponseWriter, r *http.Request) {
+	var request SubmitConfigReleaseRequestObject
+
+	var body SubmitConfigReleaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SubmitConfigRelease(ctx, request.(SubmitConfigReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SubmitConfigRelease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SubmitConfigReleaseResponseObject); ok {
+		if err := validResponse.VisitSubmitConfigReleaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetConfigRelease operation middleware
+func (sh *strictHandler) GetConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	var request GetConfigReleaseRequestObject
+
+	request.ReleaseId = releaseId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetConfigRelease(ctx, request.(GetConfigReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetConfigRelease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetConfigReleaseResponseObject); ok {
+		if err := validResponse.VisitGetConfigReleaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApproveConfigRelease operation middleware
+func (sh *strictHandler) ApproveConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	var request ApproveConfigReleaseRequestObject
+
+	request.ReleaseId = releaseId
+
+	var body ApproveConfigReleaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveConfigRelease(ctx, request.(ApproveConfigReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveConfigRelease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveConfigReleaseResponseObject); ok {
+		if err := validResponse.VisitApproveConfigReleaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RejectConfigRelease operation middleware
+func (sh *strictHandler) RejectConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	var request RejectConfigReleaseRequestObject
+
+	request.ReleaseId = releaseId
+
+	var body RejectConfigReleaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RejectConfigRelease(ctx, request.(RejectConfigReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RejectConfigRelease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RejectConfigReleaseResponseObject); ok {
+		if err := validResponse.VisitRejectConfigReleaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RollbackConfigRelease operation middleware
+func (sh *strictHandler) RollbackConfigRelease(w http.ResponseWriter, r *http.Request, releaseId ReleaseId) {
+	var request RollbackConfigReleaseRequestObject
+
+	request.ReleaseId = releaseId
+
+	var body RollbackConfigReleaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RollbackConfigRelease(ctx, request.(RollbackConfigReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RollbackConfigRelease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RollbackConfigReleaseResponseObject); ok {
+		if err := validResponse.VisitRollbackConfigReleaseResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -7016,174 +8520,222 @@ func (sh *strictHandler) SetUserQuota(w http.ResponseWriter, r *http.Request, us
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"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",
+	"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",
+	"/5JuhRqOCgEA",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

@@ -14,6 +14,7 @@ require (
 	github.com/pgvector/pgvector-go v0.2.2
 	github.com/pressly/goose/v3 v3.22.1
 	github.com/redis/go-redis/v9 v9.7.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.8
 	go.temporal.io/api v1.43.0
@@ -50,7 +51,6 @@ require (
 	github.com/pborman/uuid v1.2.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron v1.2.0 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
