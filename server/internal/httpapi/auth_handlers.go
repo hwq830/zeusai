@@ -52,7 +52,7 @@ func (s *Server) me(ctx context.Context, u db.User) (gen.Me, error) {
 		Plan: gen.Plan{Code: u.PlanCode, Name: planName, ExpiresAt: u.PlanExpiresAt},
 		Quota: gen.Quota{
 			BriefingSubscriptions: gen.QuotaItem{Used: usage.Subscriptions.Used, Limit: usage.Subscriptions.Limit},
-			Reports:               gen.QuotaItem{Used: usage.Reports.Used, Limit: usage.Reports.Limit, ResetsAt: usage.Reports.ResetsAt},
+			Tokens:                s.tokenQuota(u, usage.Tokens),
 		},
 	}, nil
 }

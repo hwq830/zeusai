@@ -28,6 +28,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/pdf"
 	"github.com/hwq830/zeusai/server/internal/push"
+	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 	"github.com/hwq830/zeusai/server/internal/search"
 	tpl "github.com/hwq830/zeusai/server/internal/template"
@@ -53,7 +54,9 @@ type Activities struct {
 	Push   push.Notifier
 	// Notify sends operator campaigns; nil fails campaign activities.
 	Notify *notify.Service
-	Now    func() time.Time
+	// Quota sends token usage reminders; nil sends none.
+	Quota *quota.Service
+	Now   func() time.Time
 }
 
 // Tools is the read-only connector toolbox (connector.Toolbox in production).
@@ -130,6 +133,7 @@ func BriefingWorkflow(ctx workflow.Context, run orch.BriefingRun) error {
 		_ = workflow.ExecuteActivity(dctx, a.AbortBriefing, plan, kind, err.Error()).Get(dctx, nil)
 		return err
 	}
+	_ = workflow.ExecuteActivity(ctx, a.NotifyQuota, plan.UserID).Get(ctx, nil)
 
 	if run.Scheduled && plan.PushEnabled {
 		if wait := plan.PushAt.Sub(workflow.Now(ctx)); wait > 0 {

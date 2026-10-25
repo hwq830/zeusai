@@ -347,6 +347,13 @@ func (s *Service) GetBriefing(ctx context.Context, userID uuid.UUID, id string) 
 	if rating, err := s.Q.GetBriefingFeedback(ctx, db.GetBriefingFeedbackParams{BriefingID: r.ID, UserID: userID}); err == nil {
 		b.Feedback = &rating
 	}
+	if r.TaskID != nil {
+		n, err := s.Q.SumTaskBilledTokens(ctx, r.TaskID)
+		if err != nil {
+			return Briefing{}, apperr.Internal(err)
+		}
+		b.TokensUsed = &n
+	}
 	return b, nil
 }
 

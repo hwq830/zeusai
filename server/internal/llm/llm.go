@@ -6,11 +6,13 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/hwq830/zeusai/server/internal/billing"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 )
@@ -77,15 +79,32 @@ func CompleteJSON(ctx context.Context, p Provider, req Request, out any) (Respon
 	return resp, nil
 }
 
-// Metered records token usage per user and task after every successful call.
+// Metered records token usage per user and task after every successful call, including the
+// billed tokens the free quota is metered in.
 type Metered struct {
 	Provider
 	Q *db.Queries
+	// Billing converts raw tokens into billed tokens and caps each task; nil bills every
+	// token at weight 1 with no cap.
+	Billing *billing.Policy
 }
+
+// ErrTaskBudget is returned instead of calling the model once a task has used its cap. The
+// task then fails, and failed tasks are not charged to the user's quota.
+var ErrTaskBudget = errors.New("task exceeded its token budget")
 
 func (m Metered) Complete(ctx context.Context, req Request) (Response, error) {
 	if req.UserID != nil {
 		ctx = moderation.WithUser(ctx, *req.UserID) // attributes output blocks in the moderation log
+	}
+	if limit := m.Billing.TaskCap(req.UserID); limit > 0 && req.TaskID != nil {
+		used, err := m.Q.SumTaskBilledTokens(ctx, req.TaskID)
+		if err != nil {
+			return Response{}, err
+		}
+		if used >= limit {
+			return Response{}, ErrTaskBudget
+		}
 	}
 	resp, err := m.Provider.Complete(ctx, req)
 	if err != nil {
@@ -95,6 +114,7 @@ func (m Metered) Complete(ctx context.Context, req Request) (Response, error) {
 		UserID: req.UserID, TaskID: req.TaskID, Provider: resp.Provider, Model: resp.Model, Tier: string(req.Tier),
 		InputTokens: int32(resp.Usage.InputTokens), OutputTokens: int32(resp.Usage.OutputTokens),
 		CachedTokens: int32(resp.Usage.CachedTokens), CostMicros: resp.CostMicros,
+		BilledTokens: m.Billing.Weights(req.UserID).Tokens(resp.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CachedTokens),
 	})
 	return resp, nil
 }

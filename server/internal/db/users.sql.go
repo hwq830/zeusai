@@ -109,7 +109,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getQuotaOverride = `-- name: GetQuotaOverride :one
-SELECT user_id, subscriptions, reports_per_month, note, updated_by, updated_at FROM user_quota_overrides WHERE user_id = $1
+SELECT user_id, subscriptions, note, updated_by, updated_at, tokens_per_month FROM user_quota_overrides WHERE user_id = $1
 `
 
 func (q *Queries) GetQuotaOverride(ctx context.Context, userID uuid.UUID) (UserQuotaOverride, error) {
@@ -118,10 +118,10 @@ func (q *Queries) GetQuotaOverride(ctx context.Context, userID uuid.UUID) (UserQ
 	err := row.Scan(
 		&i.UserID,
 		&i.Subscriptions,
-		&i.ReportsPerMonth,
 		&i.Note,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.TokensPerMonth,
 	)
 	return i, err
 }

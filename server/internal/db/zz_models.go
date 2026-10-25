@@ -263,6 +263,7 @@ type ModelUsage struct {
 	CachedTokens int32
 	CostMicros   int64
 	CreatedAt    time.Time
+	BilledTokens int64
 }
 
 type ModerationEvent struct {
@@ -292,6 +293,22 @@ type NotificationPref struct {
 	QuietStart       int32
 	QuietEnd         int32
 	UpdatedAt        time.Time
+}
+
+type QuotaGrant struct {
+	ID        int64
+	UserID    uuid.UUID
+	Tokens    int64
+	Reason    string
+	GrantedBy *uuid.UUID
+	CreatedAt time.Time
+}
+
+type QuotaNotice struct {
+	UserID    uuid.UUID
+	Period    time.Time
+	Threshold int32
+	CreatedAt time.Time
 }
 
 type RefreshToken struct {
@@ -415,10 +432,10 @@ type UserConnector struct {
 }
 
 type UserQuotaOverride struct {
-	UserID          uuid.UUID
-	Subscriptions   *int32
-	ReportsPerMonth *int32
-	Note            string
-	UpdatedBy       *uuid.UUID
-	UpdatedAt       time.Time
+	UserID         uuid.UUID
+	Subscriptions  *int32
+	Note           string
+	UpdatedBy      *uuid.UUID
+	UpdatedAt      time.Time
+	TokensPerMonth *int64
 }

@@ -72,7 +72,7 @@ func TestConfigCenter(t *testing.T) {
 		t.Fatalf("v1 = %+v", v1)
 	}
 	h.do("POST", "/admin/v1/config/releases", map[string]any{}, 409, nil) // nothing changed
-	if got := h.live(remoteconfig.KeyQuotaReportsPerMonth, remoteconfig.Context{}); got != "5" {
+	if got := h.live(remoteconfig.KeyQuotaTokensPerMonth, remoteconfig.Context{}); got != "7500000" {
 		t.Fatalf("live quota = %s", got)
 	}
 
@@ -138,8 +138,8 @@ func TestConfigCenter(t *testing.T) {
 	}
 
 	// ---- owners cannot approve their own release when there is another owner
-	h.do("PATCH", "/admin/v1/config/keys/quota.free.reports_per_month", map[string]any{"defaultValue": 8}, 200, nil)
-	p4 := h.submit("报告额度提到 8", gen.ConfigReleaseStatusPending)
+	h.do("PATCH", "/admin/v1/config/keys/quota.free.tokens_per_month", map[string]any{"defaultValue": 8000000}, 200, nil)
+	p4 := h.submit("token 额度提到 800 万", gen.ConfigReleaseStatusPending)
 	h.do("POST", fmt.Sprintf("/admin/v1/config/releases/%d/approve", p4.Id), map[string]any{}, 403, nil)
 	h.login("owner@zeus.test", "correct-horse-battery")
 	h.do("POST", fmt.Sprintf("/admin/v1/config/releases/%d/approve", p4.Id), map[string]any{}, 200, nil)
@@ -148,15 +148,15 @@ func TestConfigCenter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.live(remoteconfig.KeyQuotaReportsPerMonth, remoteconfig.Context{})
+	h.live(remoteconfig.KeyQuotaTokensPerMonth, remoteconfig.Context{})
 	lim, _, err := (&quota.Service{Q: h.q, Config: h.config}).Effective(ctx, u)
-	if err != nil || lim.ReportsPerMonth != 8 || lim.Subscriptions != 2 {
+	if err != nil || lim.TokensPerMonth != 8_000_000 || lim.Subscriptions != 2 {
 		t.Fatalf("effective quota = %+v, %v", lim, err)
 	}
 	var detail gen.UserDetail
 	h.do("GET", "/admin/v1/users/"+u.ID.String(), nil, 200, &detail)
-	if detail.Quota.Reports.PlanLimit != 8 {
-		t.Fatalf("user detail plan limit = %d", detail.Quota.Reports.PlanLimit)
+	if detail.Quota.Tokens.PlanLimit != 8_000_000 {
+		t.Fatalf("user detail plan limit = %d", detail.Quota.Tokens.PlanLimit)
 	}
 
 	// ---- a new submission supersedes the pending one; rejecting closes it

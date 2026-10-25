@@ -12,6 +12,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
+	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/task"
 )
 
@@ -260,6 +261,52 @@ type costModel struct {
 	InputTokens  int64   `json:"inputTokens"`
 	OutputTokens int64   `json:"outputTokens"`
 	CostCny      float64 `json:"costCny"`
+	BilledTokens int64   `json:"billedTokens"`
+	// CnyPerMillionBilled shows whether a model's weight covers its cost.
+	CnyPerMillionBilled *float64 `json:"cnyPerMillionBilled"`
+}
+
+type quotaBucket struct {
+	Label string `json:"label"`
+	Users int    `json:"users"`
+}
+
+type tokenQuotaStats struct {
+	PeriodStart  string        `json:"periodStart"`
+	PlanLimit    int64         `json:"planLimit"`
+	ActiveUsers  int           `json:"activeUsers"`
+	AvgTokens    int64         `json:"avgTokens"`
+	AtLimitUsers int           `json:"atLimitUsers"`
+	Buckets      []quotaBucket `json:"buckets"`
+}
+
+// tokenQuotaStats spreads this month's users over fifths of the free plan's allowance.
+func (s *Server) tokenQuotaStats(ctx context.Context) (tokenQuotaStats, error) {
+	start, _ := quota.MonthWindow(s.now(), reportingTZ)
+	limit := s.Quota.PlanLimits(db.User{PlanCode: "free"}).TokensPerMonth
+	out := tokenQuotaStats{PeriodStart: dateKey(start), PlanLimit: limit, Buckets: []quotaBucket{
+		{Label: "0–20%"}, {Label: "20–40%"}, {Label: "40–60%"}, {Label: "60–80%"}, {Label: "80–100%"}, {Label: "用满"},
+	}}
+	rows, err := s.Q.BilledTokensByUserSince(ctx, start)
+	if err != nil {
+		return out, apperr.Internal(err)
+	}
+	var total int64
+	for _, r := range rows {
+		total += r.Tokens
+		i := len(out.Buckets) - 1
+		if limit > 0 && r.Tokens < limit {
+			i = int(r.Tokens * 5 / limit)
+		} else {
+			out.AtLimitUsers++
+		}
+		out.Buckets[i].Users++
+	}
+	out.ActiveUsers = len(rows)
+	if len(rows) > 0 {
+		out.AvgTokens = total / int64(len(rows))
+	}
+	return out, nil
 }
 
 type costKind struct {
@@ -292,12 +339,13 @@ func (s *Server) GetCosts(ctx context.Context, req gen.GetCostsRequestObject) (g
 		byDay[dateKey(d.Day)] = d
 	}
 	out := struct {
-		Days     int         `json:"days"`
-		TotalCny float64     `json:"totalCny"`
-		Daily    []costDay   `json:"daily"`
-		ByModel  []costModel `json:"byModel"`
-		ByKind   []costKind  `json:"byKind"`
-		TopUsers []costUser  `json:"topUsers"`
+		Days     int             `json:"days"`
+		TotalCny float64         `json:"totalCny"`
+		Daily    []costDay       `json:"daily"`
+		ByModel  []costModel     `json:"byModel"`
+		ByKind   []costKind      `json:"byKind"`
+		TopUsers []costUser      `json:"topUsers"`
+		Quota    tokenQuotaStats `json:"tokenQuota"`
 	}{Days: days, Daily: []costDay{}, ByModel: []costModel{}, ByKind: []costKind{}, TopUsers: []costUser{}}
 	for i := 0; i < days; i++ {
 		k := dateKey(since.AddDate(0, 0, i))
@@ -310,8 +358,13 @@ func (s *Server) GetCosts(ctx context.Context, req gen.GetCostsRequestObject) (g
 		return nil, apperr.Internal(err)
 	}
 	for _, m := range models {
-		out.ByModel = append(out.ByModel, costModel{Provider: m.Provider, Model: m.Model, Tier: m.Tier, Calls: int(m.Calls),
-			InputTokens: m.InputTokens, OutputTokens: m.OutputTokens, CostCny: cny(m.CostMicros)})
+		cm := costModel{Provider: m.Provider, Model: m.Model, Tier: m.Tier, Calls: int(m.Calls),
+			InputTokens: m.InputTokens, OutputTokens: m.OutputTokens, CostCny: cny(m.CostMicros), BilledTokens: m.BilledTokens}
+		if m.BilledTokens > 0 {
+			v := cm.CostCny * 1e6 / float64(m.BilledTokens)
+			cm.CnyPerMillionBilled = &v
+		}
+		out.ByModel = append(out.ByModel, cm)
 	}
 	kinds, err := s.Q.CostByTaskKind(ctx, since)
 	if err != nil {
@@ -331,6 +384,9 @@ func (s *Server) GetCosts(ctx context.Context, req gen.GetCostsRequestObject) (g
 	for _, u := range top {
 		out.TopUsers = append(out.TopUsers, costUser{UserID: deref(idStr(u.UserID)), Nickname: u.Nickname,
 			PhoneMasked: maskPhone(u.Phone), Tasks: int(u.Tasks), CostCny: cny(u.CostMicros)})
+	}
+	if out.Quota, err = s.tokenQuotaStats(ctx); err != nil {
+		return nil, err
 	}
 	return gen.GetCosts200JSONResponse(recode[gen.CostReport](out)), nil
 }

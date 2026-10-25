@@ -74,6 +74,7 @@ type Briefing struct {
 	Sections       []Section  `json:"sections"`
 	TaskID         *string    `json:"taskId,omitempty"`
 	Feedback       *string    `json:"feedback,omitempty"`
+	TokensUsed     *int64     `json:"tokensUsed,omitempty"`
 }
 
 // FromRow converts a subscription row.

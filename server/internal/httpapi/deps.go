@@ -41,7 +41,9 @@ type Deps struct {
 	Wechat   auth.WechatExchanger
 	OneClick auth.OneClickVerifier
 	Config   config.Config
-	Now      func() time.Time
+	// RemoteConfig is shared with the metered LLM provider; nil creates one here.
+	RemoteConfig *remoteconfig.Cache
+	Now          func() time.Time
 }
 
 // New wires the domain services.
@@ -60,7 +62,10 @@ func New(d Deps) *Server {
 	}
 	q := db.New(d.Pool)
 	tokens := auth.NewTokens(d.Config.JWTSecret, d.Config.AccessTTL)
-	rc := &remoteconfig.Cache{Q: q, Redis: d.Redis, Log: d.Log, Region: d.Config.Region}
+	rc := d.RemoteConfig
+	if rc == nil {
+		rc = &remoteconfig.Cache{Q: q, Redis: d.Redis, Log: d.Log, Region: d.Config.Region}
+	}
 	qs := &quota.Service{Q: q, Config: rc, Now: d.Now}
 	tpl := &template.Service{Q: q, LLM: d.LLM, Mod: d.Mod}
 	return &Server{

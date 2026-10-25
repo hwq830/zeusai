@@ -19,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
 
@@ -59,7 +60,8 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	model, err := providers.LLM(cfg, db.New(pool), mod)
+	rc := &remoteconfig.Cache{Q: db.New(pool), Redis: rdb, Log: log, Region: cfg.Region}
+	model, err := providers.LLM(cfg, db.New(pool), mod, rc)
 	if err != nil {
 		return err
 	}
@@ -67,7 +69,7 @@ func run(log *slog.Logger) error {
 	srv := httpapi.New(httpapi.Deps{
 		SMS: ids.SMS, Apple: ids.Apple, Wechat: ids.Wechat, OneClick: ids.OneClick,
 		Log: log, Pool: pool, Redis: rdb, Orch: &workflows.Client{C: tc, TaskQueue: cfg.TaskQueue},
-		LLM: model, Mod: mod, Blob: providers.Blob(cfg), Config: cfg,
+		LLM: model, Mod: mod, Blob: providers.Blob(cfg), Config: cfg, RemoteConfig: rc,
 	})
 	// A failed first load is not fatal: the App falls back to its built-in defaults and the
 	// cache retries every 30 seconds.

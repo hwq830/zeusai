@@ -36,6 +36,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
 	"github.com/hwq830/zeusai/server/internal/platform/testenv"
 	"github.com/hwq830/zeusai/server/internal/push"
+	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/search"
 	"github.com/hwq830/zeusai/server/internal/template"
 	"github.com/hwq830/zeusai/server/internal/workflows"
@@ -86,8 +87,8 @@ func setup(t *testing.T) *harness {
 	y, m, d := time.Now().Date()
 	noon := time.Date(y, m, d, 4, 0, 0, 0, time.UTC)
 	notifier := &notify.Service{Q: q, Sender: pushes, Now: func() time.Time { return noon }}
-	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Mock{}, Search: search.Mock{}, Push: notifier, Tools: tools,
-		PDF: printer, Blob: files, Notify: notifier})
+	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Metered{Provider: llm.Mock{}, Q: q}, Search: search.Mock{},
+		Push: notifier, Tools: tools, PDF: printer, Blob: files, Notify: notifier, Quota: &quota.Service{Q: q}})
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,9 @@ type session struct {
 		} `json:"user"`
 		Quota struct {
 			BriefingSubscriptions struct{ Used, Limit int } `json:"briefingSubscriptions"`
-			Reports               struct{ Used, Limit int } `json:"reports"`
+			Tokens                struct {
+				Used, Limit, Remaining int64
+			} `json:"tokens"`
 		} `json:"quota"`
 	} `json:"me"`
 }
@@ -238,6 +241,7 @@ type apiError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Retryable bool   `json:"retryable"`
+	Details   map[string]any
 }
 
 func TestBriefingEndToEnd(t *testing.T) {
@@ -251,7 +255,7 @@ func TestBriefingEndToEnd(t *testing.T) {
 	}
 
 	s := h.login(randomPhone())
-	if !s.IsNewUser || !strings.HasPrefix(s.Me.User.PhoneMasked, "138****") || s.Me.Quota.BriefingSubscriptions.Limit != 2 || s.Me.Quota.Reports.Limit != 5 {
+	if !s.IsNewUser || !strings.HasPrefix(s.Me.User.PhoneMasked, "138****") || s.Me.Quota.BriefingSubscriptions.Limit != 2 || s.Me.Quota.Tokens.Limit != 7_500_000 {
 		t.Fatalf("unexpected session: %+v", s)
 	}
 
@@ -607,20 +611,66 @@ func TestReportEndToEnd(t *testing.T) {
 func TestReportQuota(t *testing.T) {
 	h := setup(t)
 	h.login(randomPhone())
-	for i := 0; i < 5; i++ {
-		var tk struct{ ID string }
-		h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": fmt.Sprintf("题目 %d", i), "depth": "quick"}, 202, &tk)
-		h.streamEvents(tk.ID, 0) // wait, so the concurrency cap does not trigger first
-	}
-	var e apiError
-	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "第六份"}, 403, &e)
-	if e.Code != "quota_exceeded" {
-		t.Fatalf("got %+v", e)
-	}
+	var tk struct{ ID, ReportID string }
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "题目", "depth": "quick"}, 202, &tk)
+	h.streamEvents(tk.ID, 0)
 	var me session
 	h.do("GET", "/v1/me", nil, 200, &me.Me)
-	if me.Me.Quota.Reports.Used != 5 {
-		t.Fatalf("quota: %+v", me.Me.Quota)
+	used := me.Me.Quota.Tokens.Used
+	if used <= 0 || me.Me.Quota.Tokens.Limit != 7_500_000 {
+		t.Fatalf("quota after one report: %+v", me.Me.Quota)
+	}
+	var rep struct{ TokensUsed int64 }
+	h.do("GET", "/v1/reports/"+tk.ReportID, nil, 200, &rep)
+	if rep.TokensUsed != used {
+		t.Fatalf("report tokens = %d, quota used = %d", rep.TokensUsed, used)
+	}
+
+	// Leave less than one report's worth (500k) of the 7.5M allowance.
+	uid := uuid.MustParse(me.Me.User.ID)
+	if err := h.q.RecordModelUsage(context.Background(), db.RecordModelUsageParams{UserID: &uid, Provider: "p", Model: "m",
+		Tier: "strong", BilledTokens: 7_100_000 - used}); err != nil {
+		t.Fatal(err)
+	}
+	var e apiError
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "第二份"}, 403, &e)
+	if e.Code != "quota_exceeded" || e.Details["remaining"] != float64(400_000) {
+		t.Fatalf("got %+v", e)
+	}
+	var usage struct {
+		Quota struct{ Used, Remaining int64 }
+		Daily []struct{ Tokens int64 }
+		Tasks []struct {
+			TaskID  string
+			Tokens  int64
+			Counted bool
+		}
+	}
+	h.do("GET", "/v1/me/usage", nil, 200, &usage)
+	if usage.Quota.Used != 7_100_000 || len(usage.Daily) != 1 || len(usage.Tasks) != 1 || usage.Tasks[0].TaskID != tk.ID || !usage.Tasks[0].Counted {
+		t.Fatalf("usage = %+v", usage)
+	}
+
+	// Follow-ups still work while tokens remain, and the first task to finish past 80% sends
+	// one reminder.
+	var fu struct{ ID string }
+	h.do("POST", "/v1/reports/"+tk.ReportID+"/followups", map[string]string{"question": "再说说风险"}, 202, &fu)
+	h.streamEvents(fu.ID, 0)
+	reminders := func() (n []push.Notification) {
+		for _, p := range h.pushes.Notifications() {
+			if p.DeepLink == "zeus://usage" {
+				n = append(n, p)
+			}
+		}
+		return n
+	}
+	for deadline := time.Now().Add(5 * time.Second); len(reminders()) == 0; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no quota reminder: %+v", h.pushes.Notifications())
+		}
+	}
+	if r := reminders(); len(r) != 1 || r[0].Title != "本月 token 额度已用 80%" {
+		t.Fatalf("reminders = %+v", r)
 	}
 }
 
@@ -657,7 +707,7 @@ func TestContentBlocked(t *testing.T) {
 	h.do("POST", "/v1/templates/draft", map[string]string{"prompt": blockedTerm}, 422, &e)
 	var me session
 	h.do("GET", "/v1/me", nil, 200, &me.Me)
-	if me.Me.Quota.Reports.Used != 0 {
+	if me.Me.Quota.Tokens.Used != 0 {
 		t.Fatalf("blocked report was charged: %+v", me.Me.Quota)
 	}
 }

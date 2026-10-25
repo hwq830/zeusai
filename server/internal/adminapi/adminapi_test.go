@@ -217,7 +217,7 @@ func TestAdminConsole(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		if err := h.q.RecordModelUsage(ctx, db.RecordModelUsageParams{UserID: &u.ID, TaskID: &tk.ID, Provider: "qwen", Model: "qwen-max",
-			Tier: "strong", InputTokens: 1000, OutputTokens: 500, CostMicros: 1_250_000}); err != nil {
+			Tier: "strong", InputTokens: 1000, OutputTokens: 500, CostMicros: 1_250_000, BilledTokens: 1500}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -252,25 +252,31 @@ func TestAdminConsole(t *testing.T) {
 	}
 	var ud gen.UserDetail
 	h.do("GET", "/admin/v1/users/"+u.ID.String(), nil, 200, &ud)
-	if ud.Phone == nil || *ud.Phone != phone || ud.Quota.Reports.Limit != 5 || ud.Quota.Reports.Used != 1 || ud.Cost30dCny != 2.5 || len(ud.Subscriptions) != 1 {
+	if ud.Phone == nil || *ud.Phone != phone || ud.Quota.Tokens.Limit != 7_500_000 || ud.Quota.Tokens.Used != 3000 || ud.Cost30dCny != 2.5 || len(ud.Subscriptions) != 1 {
 		t.Fatalf("user detail = %+v", ud)
 	}
-	h.do("PUT", "/admin/v1/users/"+u.ID.String()+"/quota", map[string]any{"reportsPerMonth": 20, "note": "种子用户"}, 200, &ud)
-	if ud.Quota.Reports.Limit != 20 || ud.Quota.Reports.PlanLimit != 5 || ud.Quota.Subscriptions.Limit != 2 || ud.Quota.Override == nil {
+	h.do("PUT", "/admin/v1/users/"+u.ID.String()+"/quota", map[string]any{"tokensPerMonth": 1_000_000, "note": "压测账号"}, 200, &ud)
+	if ud.Quota.Tokens.Limit != 1_000_000 || ud.Quota.Tokens.PlanLimit != 7_500_000 || ud.Quota.Subscriptions.Limit != 2 || ud.Quota.Override == nil {
 		t.Fatalf("quota override = %+v", ud.Quota)
 	}
 	qs := &quota.Service{Q: h.q}
-	for i := 0; i < 5; i++ { // five more reports: over the plan's 5, under the override's 20
-		if _, err := h.q.CreateReport(ctx, db.CreateReportParams{UserID: u.ID, Title: "r", Topic: "r", Depth: "standard", Focuses: []string{}}); err != nil {
-			t.Fatal(err)
-		}
+	if err := h.q.RecordModelUsage(ctx, db.RecordModelUsageParams{UserID: &u.ID, Provider: "qwen", Model: "qwen-max", Tier: "strong", BilledTokens: 600_000}); err != nil {
+		t.Fatal(err)
+	}
+	if err := qs.CheckReport(ctx, u); err == nil { // 603k of 1M used: under the 500k a report needs
+		t.Fatal("override not applied")
+	}
+	h.do("POST", "/admin/v1/users/"+u.ID.String()+"/token-grants", map[string]any{"tokens": 200_000, "reason": "补偿"}, 200, &ud)
+	if ud.Quota.Tokens.Limit != 1_200_000 || ud.Quota.Tokens.Granted != 200_000 || len(ud.Quota.Grants) != 1 || ud.Quota.Grants[0].Reason != "补偿" {
+		t.Fatalf("grant = %+v", ud.Quota)
 	}
 	if err := qs.CheckReport(ctx, u); err != nil {
-		t.Fatalf("override not applied: %v", err)
+		t.Fatalf("grant not applied: %v", err)
 	}
+	h.do("POST", "/admin/v1/users/"+u.ID.String()+"/token-grants", map[string]any{"tokens": 0, "reason": "x"}, 400, nil)
 	ud = gen.UserDetail{}
 	h.do("DELETE", "/admin/v1/users/"+u.ID.String()+"/quota", nil, 200, &ud)
-	if ud.Quota.Reports.Limit != 5 || ud.Quota.Override != nil {
+	if ud.Quota.Tokens.Limit != 7_700_000 || ud.Quota.Override != nil {
 		t.Fatalf("quota cleared = %+v", ud.Quota)
 	}
 
@@ -416,7 +422,7 @@ func TestAdminConsole(t *testing.T) {
 	h.token = ownerToken
 	var audit gen.AuditPage
 	h.do("GET", "/admin/v1/audit-log?targetType=user&targetId="+u.ID.String(), nil, 200, &audit)
-	if len(audit.Items) != 4 || audit.Items[0].Action != "user.enable" || audit.Items[0].AdminEmail != "owner@zeus.test" {
+	if len(audit.Items) != 5 || audit.Items[0].Action != "user.enable" || audit.Items[0].AdminEmail != "owner@zeus.test" {
 		t.Fatalf("audit = %+v", audit.Items)
 	}
 }

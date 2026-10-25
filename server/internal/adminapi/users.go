@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -81,11 +82,20 @@ func (s *Server) userDetail(ctx context.Context, u db.User) (gen.UserDetail, err
 	}
 	plan := s.Quota.PlanLimits(u)
 	d.Quota.Subscriptions = gen.QuotaItem{Used: usage.Subscriptions.Used, Limit: usage.Subscriptions.Limit, PlanLimit: plan.Subscriptions}
-	d.Quota.Reports = gen.QuotaItem{Used: usage.Reports.Used, Limit: usage.Reports.Limit, PlanLimit: plan.ReportsPerMonth, ResetsAt: usage.Reports.ResetsAt}
+	t := usage.Tokens
+	d.Quota.Tokens = gen.TokenQuotaItem{Used: t.Used, Limit: t.Limit, PlanLimit: plan.TokensPerMonth, Granted: t.Granted, ResetsAt: t.ResetsAt}
 	if o != nil {
 		d.Quota.Override = &gen.QuotaOverride{
-			Subscriptions: intPtr(o.Subscriptions), ReportsPerMonth: intPtr(o.ReportsPerMonth), Note: o.Note, UpdatedAt: o.UpdatedAt,
+			Subscriptions: intPtr(o.Subscriptions), TokensPerMonth: o.TokensPerMonth, Note: o.Note, UpdatedAt: o.UpdatedAt,
 		}
+	}
+	grants, err := s.Q.ListQuotaGrantsSince(ctx, db.ListQuotaGrantsSinceParams{UserID: u.ID, CreatedAt: t.PeriodStart})
+	if err != nil {
+		return d, apperr.Internal(err)
+	}
+	d.Quota.Grants = make([]gen.QuotaGrant, 0, len(grants))
+	for _, g := range grants {
+		d.Quota.Grants = append(d.Quota.Grants, gen.QuotaGrant{Id: g.ID, Tokens: g.Tokens, Reason: g.Reason, GrantedBy: idStr(g.GrantedBy), CreatedAt: g.CreatedAt})
 	}
 	subs, err := s.Q.ListSubscriptions(ctx, u.ID)
 	if err != nil {
@@ -171,13 +181,14 @@ func (s *Server) SetUserQuota(ctx context.Context, req gen.SetUserQuotaRequestOb
 		return nil, err
 	}
 	b := req.Body
-	for _, v := range []*int{b.Subscriptions, b.ReportsPerMonth} {
-		if v != nil && (*v < 0 || *v > 1000) {
-			return nil, apperr.Invalid("额度应在 0–1000 之间")
-		}
+	if v := b.Subscriptions; v != nil && (*v < 0 || *v > 100) {
+		return nil, apperr.Invalid("定时简报数应在 0–100 之间")
+	}
+	if v := b.TokensPerMonth; v != nil && (*v < 0 || *v > 1_000_000_000) {
+		return nil, apperr.Invalid("每月 token 额度应在 0–10 亿之间")
 	}
 	if _, err := s.Q.UpsertQuotaOverride(ctx, db.UpsertQuotaOverrideParams{
-		UserID: u.ID, Subscriptions: int32Ptr(b.Subscriptions), ReportsPerMonth: int32Ptr(b.ReportsPerMonth),
+		UserID: u.ID, Subscriptions: int32Ptr(b.Subscriptions), TokensPerMonth: b.TokensPerMonth,
 		Note: strings.TrimSpace(b.Note), UpdatedBy: &a.ID,
 	}); err != nil {
 		return nil, apperr.Internal(err)
@@ -188,6 +199,34 @@ func (s *Server) SetUserQuota(ctx context.Context, req gen.SetUserQuotaRequestOb
 		return nil, err
 	}
 	return gen.SetUserQuota200JSONResponse(d), nil
+}
+
+func (s *Server) GrantUserTokens(ctx context.Context, req gen.GrantUserTokensRequestObject) (gen.GrantUserTokensResponseObject, error) {
+	a, err := require(ctx, PermUsers)
+	if err != nil {
+		return nil, err
+	}
+	u, err := s.loadUser(ctx, req.UserId)
+	if err != nil {
+		return nil, err
+	}
+	b := req.Body
+	reason := strings.TrimSpace(b.Reason)
+	if b.Tokens < 1 || b.Tokens > 100_000_000 {
+		return nil, apperr.Invalid("加赠 token 应在 1–1 亿之间")
+	}
+	if reason == "" || utf8.RuneCountInString(reason) > 200 {
+		return nil, apperr.Invalid("请填写原因（不超过 200 字）")
+	}
+	if _, err := s.Q.InsertQuotaGrant(ctx, db.InsertQuotaGrantParams{UserID: u.ID, Tokens: b.Tokens, Reason: reason, GrantedBy: &a.ID}); err != nil {
+		return nil, apperr.Internal(err)
+	}
+	s.audit(ctx, "user.grant_tokens", "user", u.ID.String(), b)
+	d, err := s.userDetail(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GrantUserTokens200JSONResponse(d), nil
 }
 
 func (s *Server) ClearUserQuota(ctx context.Context, req gen.ClearUserQuotaRequestObject) (gen.ClearUserQuotaResponseObject, error) {
@@ -296,7 +335,7 @@ func (s *Server) syncSchedules(ctx context.Context, userID uuid.UUID, subs []db.
 func (s *Server) ListPlans(ctx context.Context, _ gen.ListPlansRequestObject) (gen.ListPlansResponseObject, error) {
 	out := gen.ListPlans200JSONResponse{}
 	for _, p := range s.Quota.Plans() {
-		out = append(out, gen.Plan{Code: p.Code, Subscriptions: p.Subscriptions, ReportsPerMonth: p.ReportsPerMonth})
+		out = append(out, gen.Plan{Code: p.Code, Subscriptions: p.Subscriptions, TokensPerMonth: p.TokensPerMonth})
 	}
 	return out, nil
 }

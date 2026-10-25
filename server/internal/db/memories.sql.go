@@ -62,6 +62,44 @@ func (q *Queries) CreateMemory(ctx context.Context, arg CreateMemoryParams) (uui
 	return id, err
 }
 
+const dailyBilledTokens = `-- name: DailyBilledTokens :many
+SELECT (m.created_at AT TIME ZONE $1::text)::date AS day, coalesce(sum(m.billed_tokens), 0)::bigint AS tokens
+FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
+WHERE m.user_id = $2 AND m.created_at >= $3 AND (t.status IS NULL OR t.status <> 'failed')
+GROUP BY day ORDER BY day
+`
+
+type DailyBilledTokensParams struct {
+	Tz     string
+	UserID *uuid.UUID
+	Since  time.Time
+}
+
+type DailyBilledTokensRow struct {
+	Day    time.Time
+	Tokens int64
+}
+
+func (q *Queries) DailyBilledTokens(ctx context.Context, arg DailyBilledTokensParams) ([]DailyBilledTokensRow, error) {
+	rows, err := q.db.Query(ctx, dailyBilledTokens, arg.Tz, arg.UserID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DailyBilledTokensRow{}
+	for rows.Next() {
+		var i DailyBilledTokensRow
+		if err := rows.Scan(&i.Day, &i.Tokens); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteAllMemories = `-- name: DeleteAllMemories :exec
 DELETE FROM memories WHERE user_id = $1
 `
@@ -82,6 +120,24 @@ type DeleteMemoryParams struct {
 
 func (q *Queries) DeleteMemory(ctx context.Context, arg DeleteMemoryParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteMemory, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertQuotaNotice = `-- name: InsertQuotaNotice :execrows
+INSERT INTO quota_notices (user_id, period, threshold) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+`
+
+type InsertQuotaNoticeParams struct {
+	UserID    uuid.UUID
+	Period    time.Time
+	Threshold int32
+}
+
+func (q *Queries) InsertQuotaNotice(ctx context.Context, arg InsertQuotaNoticeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertQuotaNotice, arg.UserID, arg.Period, arg.Threshold)
 	if err != nil {
 		return 0, err
 	}
@@ -175,8 +231,8 @@ func (q *Queries) ListMemories(ctx context.Context, arg ListMemoriesParams) ([]L
 }
 
 const recordModelUsage = `-- name: RecordModelUsage :exec
-INSERT INTO model_usage (user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO model_usage (user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros, billed_tokens)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type RecordModelUsageParams struct {
@@ -189,6 +245,7 @@ type RecordModelUsageParams struct {
 	OutputTokens int32
 	CachedTokens int32
 	CostMicros   int64
+	BilledTokens int64
 }
 
 func (q *Queries) RecordModelUsage(ctx context.Context, arg RecordModelUsageParams) error {
@@ -202,6 +259,7 @@ func (q *Queries) RecordModelUsage(ctx context.Context, arg RecordModelUsagePara
 		arg.OutputTokens,
 		arg.CachedTokens,
 		arg.CostMicros,
+		arg.BilledTokens,
 	)
 	return err
 }
@@ -235,6 +293,123 @@ func (q *Queries) SearchMemories(ctx context.Context, arg SearchMemoriesParams) 
 	for rows.Next() {
 		var i SearchMemoriesRow
 		if err := rows.Scan(&i.ID, &i.Kind, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumBilledTokensSince = `-- name: SumBilledTokensSince :one
+SELECT coalesce(sum(m.billed_tokens), 0)::bigint FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
+WHERE m.user_id = $1 AND m.created_at >= $2 AND (t.status IS NULL OR t.status <> 'failed')
+`
+
+type SumBilledTokensSinceParams struct {
+	UserID    *uuid.UUID
+	CreatedAt time.Time
+}
+
+// Tokens counted against the quota: calls of failed tasks are not charged.
+func (q *Queries) SumBilledTokensSince(ctx context.Context, arg SumBilledTokensSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumBilledTokensSince, arg.UserID, arg.CreatedAt)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const sumQuotaGrantsSince = `-- name: SumQuotaGrantsSince :one
+SELECT coalesce(sum(tokens), 0)::bigint FROM quota_grants WHERE user_id = $1 AND created_at >= $2
+`
+
+type SumQuotaGrantsSinceParams struct {
+	UserID    uuid.UUID
+	CreatedAt time.Time
+}
+
+func (q *Queries) SumQuotaGrantsSince(ctx context.Context, arg SumQuotaGrantsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumQuotaGrantsSince, arg.UserID, arg.CreatedAt)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const sumReportBilledTokens = `-- name: SumReportBilledTokens :one
+SELECT coalesce(sum(m.billed_tokens), 0)::bigint FROM model_usage m JOIN tasks t ON t.id = m.task_id
+WHERE t.report_id = $1 AND t.user_id = $2
+`
+
+type SumReportBilledTokensParams struct {
+	ReportID *uuid.UUID
+	UserID   uuid.UUID
+}
+
+// The report's own task plus its follow-ups.
+func (q *Queries) SumReportBilledTokens(ctx context.Context, arg SumReportBilledTokensParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumReportBilledTokens, arg.ReportID, arg.UserID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const sumTaskBilledTokens = `-- name: SumTaskBilledTokens :one
+SELECT coalesce(sum(billed_tokens), 0)::bigint FROM model_usage WHERE task_id = $1
+`
+
+func (q *Queries) SumTaskBilledTokens(ctx context.Context, taskID *uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, sumTaskBilledTokens, taskID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const taskBilledTokensSince = `-- name: TaskBilledTokensSince :many
+SELECT t.id, t.kind, t.title, t.status, t.report_id, t.briefing_id, t.created_at, sum(m.billed_tokens)::bigint AS tokens
+FROM tasks t JOIN model_usage m ON m.task_id = t.id
+WHERE t.user_id = $1 AND m.created_at >= $2
+GROUP BY t.id ORDER BY t.created_at DESC
+LIMIT $3
+`
+
+type TaskBilledTokensSinceParams struct {
+	UserID    uuid.UUID
+	CreatedAt time.Time
+	Limit     int32
+}
+
+type TaskBilledTokensSinceRow struct {
+	ID         uuid.UUID
+	Kind       string
+	Title      string
+	Status     string
+	ReportID   *uuid.UUID
+	BriefingID *uuid.UUID
+	CreatedAt  time.Time
+	Tokens     int64
+}
+
+func (q *Queries) TaskBilledTokensSince(ctx context.Context, arg TaskBilledTokensSinceParams) ([]TaskBilledTokensSinceRow, error) {
+	rows, err := q.db.Query(ctx, taskBilledTokensSince, arg.UserID, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskBilledTokensSinceRow{}
+	for rows.Next() {
+		var i TaskBilledTokensSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Title,
+			&i.Status,
+			&i.ReportID,
+			&i.BriefingID,
+			&i.CreatedAt,
+			&i.Tokens,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

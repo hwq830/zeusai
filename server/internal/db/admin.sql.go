@@ -790,10 +790,43 @@ func (q *Queries) AdminUpdateTemplate(ctx context.Context, arg AdminUpdateTempla
 	return i, err
 }
 
+const billedTokensByUserSince = `-- name: BilledTokensByUserSince :many
+SELECT m.user_id, coalesce(sum(m.billed_tokens), 0)::bigint AS tokens
+FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
+WHERE m.created_at >= $1 AND m.user_id IS NOT NULL AND (t.status IS NULL OR t.status <> 'failed')
+GROUP BY m.user_id
+`
+
+type BilledTokensByUserSinceRow struct {
+	UserID *uuid.UUID
+	Tokens int64
+}
+
+// Each user's counted billed tokens since the start of the quota month (failed tasks excluded).
+func (q *Queries) BilledTokensByUserSince(ctx context.Context, createdAt time.Time) ([]BilledTokensByUserSinceRow, error) {
+	rows, err := q.db.Query(ctx, billedTokensByUserSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BilledTokensByUserSinceRow{}
+	for rows.Next() {
+		var i BilledTokensByUserSinceRow
+		if err := rows.Scan(&i.UserID, &i.Tokens); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const costByModel = `-- name: CostByModel :many
 SELECT provider, model, tier, count(*)::int AS calls,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens, coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
-       coalesce(sum(cost_micros), 0)::bigint AS cost_micros
+       coalesce(sum(cost_micros), 0)::bigint AS cost_micros, coalesce(sum(billed_tokens), 0)::bigint AS billed_tokens
 FROM model_usage WHERE created_at >= $1
 GROUP BY provider, model, tier ORDER BY cost_micros DESC
 `
@@ -806,6 +839,7 @@ type CostByModelRow struct {
 	InputTokens  int64
 	OutputTokens int64
 	CostMicros   int64
+	BilledTokens int64
 }
 
 func (q *Queries) CostByModel(ctx context.Context, createdAt time.Time) ([]CostByModelRow, error) {
@@ -825,6 +859,7 @@ func (q *Queries) CostByModel(ctx context.Context, createdAt time.Time) ([]CostB
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CostMicros,
+			&i.BilledTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -1258,6 +1293,36 @@ func (q *Queries) InsertAdminAudit(ctx context.Context, arg InsertAdminAuditPara
 	return err
 }
 
+const insertQuotaGrant = `-- name: InsertQuotaGrant :one
+INSERT INTO quota_grants (user_id, tokens, reason, granted_by) VALUES ($1, $2, $3, $4) RETURNING id, user_id, tokens, reason, granted_by, created_at
+`
+
+type InsertQuotaGrantParams struct {
+	UserID    uuid.UUID
+	Tokens    int64
+	Reason    string
+	GrantedBy *uuid.UUID
+}
+
+func (q *Queries) InsertQuotaGrant(ctx context.Context, arg InsertQuotaGrantParams) (QuotaGrant, error) {
+	row := q.db.QueryRow(ctx, insertQuotaGrant,
+		arg.UserID,
+		arg.Tokens,
+		arg.Reason,
+		arg.GrantedBy,
+	)
+	var i QuotaGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Tokens,
+		&i.Reason,
+		&i.GrantedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listAdminAudit = `-- name: ListAdminAudit :many
 SELECT l.id, l.admin_id, l.action, l.target_type, l.target_id, l.detail, l.created_at, coalesce(a.email, '')::text AS admin_email
 FROM admin_audit_log l LEFT JOIN admin_users a ON a.id = l.admin_id
@@ -1414,8 +1479,44 @@ func (q *Queries) ListModerationEvents(ctx context.Context, arg ListModerationEv
 	return items, nil
 }
 
+const listQuotaGrantsSince = `-- name: ListQuotaGrantsSince :many
+SELECT id, user_id, tokens, reason, granted_by, created_at FROM quota_grants WHERE user_id = $1 AND created_at >= $2 ORDER BY created_at DESC
+`
+
+type ListQuotaGrantsSinceParams struct {
+	UserID    uuid.UUID
+	CreatedAt time.Time
+}
+
+func (q *Queries) ListQuotaGrantsSince(ctx context.Context, arg ListQuotaGrantsSinceParams) ([]QuotaGrant, error) {
+	rows, err := q.db.Query(ctx, listQuotaGrantsSince, arg.UserID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QuotaGrant{}
+	for rows.Next() {
+		var i QuotaGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Tokens,
+			&i.Reason,
+			&i.GrantedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskUsage = `-- name: ListTaskUsage :many
-SELECT id, user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros, created_at FROM model_usage WHERE task_id = $1 ORDER BY id
+SELECT id, user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros, created_at, billed_tokens FROM model_usage WHERE task_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListTaskUsage(ctx context.Context, taskID *uuid.UUID) ([]ModelUsage, error) {
@@ -1439,6 +1540,7 @@ func (q *Queries) ListTaskUsage(ctx context.Context, taskID *uuid.UUID) ([]Model
 			&i.CachedTokens,
 			&i.CostMicros,
 			&i.CreatedAt,
+			&i.BilledTokens,
 		); err != nil {
 			return nil, err
 		}
@@ -1660,27 +1762,27 @@ func (q *Queries) UpdateAdminUser(ctx context.Context, arg UpdateAdminUserParams
 }
 
 const upsertQuotaOverride = `-- name: UpsertQuotaOverride :one
-INSERT INTO user_quota_overrides (user_id, subscriptions, reports_per_month, note, updated_by)
+INSERT INTO user_quota_overrides (user_id, subscriptions, tokens_per_month, note, updated_by)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (user_id) DO UPDATE SET
-    subscriptions = excluded.subscriptions, reports_per_month = excluded.reports_per_month,
+    subscriptions = excluded.subscriptions, tokens_per_month = excluded.tokens_per_month,
     note = excluded.note, updated_by = excluded.updated_by, updated_at = now()
-RETURNING user_id, subscriptions, reports_per_month, note, updated_by, updated_at
+RETURNING user_id, subscriptions, note, updated_by, updated_at, tokens_per_month
 `
 
 type UpsertQuotaOverrideParams struct {
-	UserID          uuid.UUID
-	Subscriptions   *int32
-	ReportsPerMonth *int32
-	Note            string
-	UpdatedBy       *uuid.UUID
+	UserID         uuid.UUID
+	Subscriptions  *int32
+	TokensPerMonth *int64
+	Note           string
+	UpdatedBy      *uuid.UUID
 }
 
 func (q *Queries) UpsertQuotaOverride(ctx context.Context, arg UpsertQuotaOverrideParams) (UserQuotaOverride, error) {
 	row := q.db.QueryRow(ctx, upsertQuotaOverride,
 		arg.UserID,
 		arg.Subscriptions,
-		arg.ReportsPerMonth,
+		arg.TokensPerMonth,
 		arg.Note,
 		arg.UpdatedBy,
 	)
@@ -1688,10 +1790,10 @@ func (q *Queries) UpsertQuotaOverride(ctx context.Context, arg UpsertQuotaOverri
 	err := row.Scan(
 		&i.UserID,
 		&i.Subscriptions,
-		&i.ReportsPerMonth,
 		&i.Note,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.TokensPerMonth,
 	)
 	return i, err
 }
