@@ -1,0 +1,147 @@
+# Zeus 云端调试环境：一台 ECS 上用 docker compose 跑全套（不是生产形态，生产用 deploy/helm）。
+# 用法见同目录 README.md：
+#   cp env.example .env && vi .env
+#   docker compose up -d --build
+name: zeus
+
+x-server: &server
+  restart: unless-stopped
+  env_file: .env
+  environment: &env
+    ZEUS_DATABASE_URL: postgres://zeus:${ZEUS_PG_PASSWORD:?}@postgres:5432/zeus?sslmode=disable
+    ZEUS_REDIS_URL: redis://redis:6379/0
+    ZEUS_TEMPORAL_HOST: temporal:7233
+    ZEUS_PUBLIC_BASE_URL: https://${ZEUS_API_DOMAIN:?}
+    ZEUS_BLOB_DIR: /data/blob
+    ZEUS_MODELGW_CONFIG: /etc/zeus/modelgw.yaml
+    ZEUS_MODERATION_KEYWORDS_FILE: /etc/zeus/moderation-keywords.txt
+  volumes:
+    - blob:/data/blob
+    - ../modelgw.example.yaml:/etc/zeus/modelgw.yaml:ro
+    - ./moderation-keywords.txt:/etc/zeus/moderation-keywords.txt:ro
+    - ./secrets:/run/secrets:ro
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+
+services:
+  postgres:
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zeus
+      POSTGRES_PASSWORD: ${ZEUS_PG_PASSWORD:?}
+      POSTGRES_DB: zeus
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: [CMD, pg_isready, -U, zeus], interval: 2s, retries: 30 }
+
+  redis:
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/library/redis:7
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes"]
+    volumes: [redisdata:/data]
+    healthcheck: { test: [CMD, redis-cli, ping], interval: 2s, retries: 30 }
+
+  temporal:
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/temporalio/temporal:1.8.3
+    restart: unless-stopped
+    # start-dev 用 SQLite 文件持久化，调试环境够用；UI 只绑在本机，用 ssh -L 8233:localhost:8233 看。
+    command: [server, start-dev, --ip, 0.0.0.0, --ui-ip, 0.0.0.0, --db-filename, /data/temporal.db]
+    user: root
+    volumes: [temporaldata:/data]
+    ports: ["127.0.0.1:8233:8233"]
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, localhost:7233]
+      interval: 3s
+      retries: 40
+
+  migrate:
+    <<: *server
+    image: zeus-server:local
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile, target: server, args: { GOPROXY: "${ZEUS_GOPROXY:-https://proxy.golang.org,direct}" } }
+    restart: "no"
+    # distroless 没有 shell，migrate 和 seed 各用一个一次性容器。
+    entrypoint: [/usr/local/bin/zeusctl, migrate]
+    depends_on:
+      postgres: { condition: service_healthy }
+      volumes-init: { condition: service_completed_successfully }
+
+  # 命名卷默认属于 root，服务进程以 65532 运行，先把共享目录交给它。
+  volumes-init:
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/library/alpine:3.20
+    restart: "no"
+    command: [chown, -R, "65532:65532", /data/blob]
+    volumes: [blob:/data/blob]
+
+  seed:
+    <<: *server
+    image: zeus-server:local
+    restart: "no"
+    entrypoint: [/usr/local/bin/zeusctl, seed]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  api:
+    <<: *server
+    image: zeus-server:local
+    entrypoint: [/usr/local/bin/api]
+    depends_on:
+      seed: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      temporal: { condition: service_healthy }
+
+  orchestrator:
+    <<: *server
+    image: zeus-orchestrator:local
+    build: { context: ../.., dockerfile: deploy/docker/Dockerfile, target: orchestrator, args: { GOPROXY: "${ZEUS_GOPROXY:-https://proxy.golang.org,direct}" } }
+    environment:
+      <<: *env
+      ZEUS_CHROMIUM_NO_SANDBOX: "true"
+    tmpfs: [/tmp]
+    depends_on:
+      seed: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      temporal: { condition: service_healthy }
+
+  admin:
+    <<: *server
+    image: zeus-server:local
+    entrypoint: [/usr/local/bin/admin]
+    environment:
+      <<: *env
+      ZEUS_ADMIN_STATIC_DIR: /console
+    volumes:
+      - blob:/data/blob
+      - ../modelgw.example.yaml:/etc/zeus/modelgw.yaml:ro
+      - ./moderation-keywords.txt:/etc/zeus/moderation-keywords.txt:ro
+      - ./secrets:/run/secrets:ro
+      - console:/console:ro
+    depends_on:
+      seed: { condition: service_completed_successfully }
+      console: { condition: service_completed_successfully }
+
+  # 控制台静态文件：从 zeusai-admin 仓库（和 zeusai 放在同一个目录下）构建，复制到共享卷。
+  console:
+    image: zeus-admin-console:local
+    build: { context: ../../../zeusai-admin, args: { NPM_REGISTRY: "${ZEUS_NPM_REGISTRY:-https://registry.npmjs.org/}" } }
+    restart: "no"
+    entrypoint: [sh, -c, "rm -rf /console/* && cp -R /usr/share/nginx/html/. /console/"]
+    volumes: [console:/console]
+
+  # HTTPS：Caddy 自动申请 Let's Encrypt 证书。App 接口公开；控制台只放行 ZEUS_ADMIN_ALLOW_IPS。
+  caddy:
+    image: ${ZEUS_DOCKER_MIRROR:-docker.io}/library/caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on: [api, admin]
+
+volumes:
+  pgdata:
+  redisdata:
+  temporaldata:
+  blob:
+  console:
+  caddydata:
