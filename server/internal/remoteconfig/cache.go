@@ -142,6 +142,11 @@ func (c *Cache) String(ctx Context, key string, def string) string {
 	return read(c, ctx, key, def)
 }
 
+// Value reads a key of any JSON shape (typically a json key decoded into a struct or map).
+func Value[T any](c *Cache, ctx Context, key string, def T) T {
+	return read(c, ctx, key, def)
+}
+
 func read[T any](c *Cache, ctx Context, key string, def T) T {
 	if c == nil {
 		return def

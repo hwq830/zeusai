@@ -17,6 +17,7 @@ const (
 	KeyReportPDFEnabled     = "report.pdf_enabled"
 	KeyQuotaSubscriptions   = "quota.free.subscriptions"
 	KeyQuotaReportsPerMonth = "quota.free.reports_per_month"
+	KeyQuotaTokenWeights    = "quota.token_weights"
 	KeyAppMinVersion        = "app.min_version"
 	KeyAppRecommended       = "app.recommended_version"
 	KeyHomeNotice           = "home.notice"
@@ -36,6 +37,10 @@ var noticeSchema = `{"type":["object","null"],"required":["text"],"additionalPro
 "properties":{"text":{"type":"string","minLength":1,"maxLength":200},"level":{"enum":["info","warning","critical"]},
 "link":{"type":"string","pattern":"^(https://|zeus://)"}}}`
 
+var tokenWeightsSchema = `{"type":"object","minProperties":1,"additionalProperties":{"type":"object",
+"required":["input","output","cached"],"additionalProperties":false,"properties":{
+"input":{"type":"number","minimum":0},"output":{"type":"number","minimum":0},"cached":{"type":"number","minimum":0}}}}`
+
 var Builtins = []Builtin{
 	{Key: KeyReportCreateEnabled, Namespace: NSKillswitch, Type: TypeBool, Default: "true", ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "关闭后 App 隐藏「研究报告」入口，服务端拒绝新建报告"},
@@ -45,6 +50,9 @@ var Builtins = []Builtin{
 		Description: "免费用户最多同时保留的定时简报数；用户级覆盖仍在用户详情页设置"},
 	{Key: KeyQuotaReportsPerMonth, Namespace: NSQuota, Type: TypeInt, Default: "5", ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "免费用户每月研究报告数"},
+	{Key: KeyQuotaTokenWeights, Namespace: NSQuota, Type: TypeJSON, Default: `{"default":{"input":1,"output":1,"cached":1}}`,
+		Schema: tokenWeightsSchema, ApplyMode: ApplyImmediate, ClientVisible: false,
+		Description: "各模型的计费 token 折算系数：{模型名: {input, output, cached}}，未列出的模型用 default；只影响之后的调用，不对用户展示"},
 	{Key: KeyAppMinVersion, Namespace: NSApp, Type: TypeString, Default: `""`, ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "低于此版本的 App 显示不可关闭的升级页；空字符串表示不限制"},
 	{Key: KeyAppRecommended, Namespace: NSApp, Type: TypeString, Default: `""`, ApplyMode: ApplyImmediate, ClientVisible: true,

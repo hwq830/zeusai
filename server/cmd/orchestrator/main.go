@@ -19,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
 
@@ -60,7 +61,13 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	model, err := providers.LLM(cfg, q, mod)
+	// The orchestrator reads remote config only for billed-token weights.
+	rc := &remoteconfig.Cache{Q: q, Redis: rdb, Log: log, Region: cfg.Region}
+	if err := rc.Load(ctx); err != nil {
+		log.Warn("remote config not loaded yet", "err", err)
+	}
+	go rc.Run(ctx)
+	model, err := providers.LLM(cfg, q, mod, rc)
 	if err != nil {
 		return err
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/hwq830/zeusai/server/internal/billing"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 )
@@ -77,10 +78,13 @@ func CompleteJSON(ctx context.Context, p Provider, req Request, out any) (Respon
 	return resp, nil
 }
 
-// Metered records token usage per user and task after every successful call.
+// Metered records token usage per user and task after every successful call, including the
+// billed tokens the free quota is metered in.
 type Metered struct {
 	Provider
 	Q *db.Queries
+	// Weights converts raw tokens into billed tokens; nil bills every token at weight 1.
+	Weights *billing.Weights
 }
 
 func (m Metered) Complete(ctx context.Context, req Request) (Response, error) {
@@ -95,6 +99,7 @@ func (m Metered) Complete(ctx context.Context, req Request) (Response, error) {
 		UserID: req.UserID, TaskID: req.TaskID, Provider: resp.Provider, Model: resp.Model, Tier: string(req.Tier),
 		InputTokens: int32(resp.Usage.InputTokens), OutputTokens: int32(resp.Usage.OutputTokens),
 		CachedTokens: int32(resp.Usage.CachedTokens), CostMicros: resp.CostMicros,
+		BilledTokens: m.Weights.For(req.UserID).Tokens(resp.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CachedTokens),
 	})
 	return resp, nil
 }

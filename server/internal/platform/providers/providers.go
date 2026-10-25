@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/hwq830/zeusai/server/internal/auth"
+	"github.com/hwq830/zeusai/server/internal/billing"
 	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/browse"
 	"github.com/hwq830/zeusai/server/internal/db"
@@ -22,6 +23,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/pdf"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/push"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/search"
 )
 
@@ -45,8 +47,8 @@ func Moderation(cfg config.Config, q *db.Queries, log *slog.Logger) (moderation.
 	return moderation.Recorder{Checker: chain, Q: q, Log: log}, nil
 }
 
-// LLM returns the metered model provider.
-func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker) (llm.Provider, error) {
+// LLM returns the metered model provider; rc supplies the billed-token weights (nil: weight 1).
+func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remoteconfig.Cache) (llm.Provider, error) {
 	var p llm.Provider
 	switch cfg.LLMProvider {
 	case "", "mock":
@@ -64,7 +66,7 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker) (llm.Provider
 	default:
 		return nil, fmt.Errorf("unknown ZEUS_LLM_PROVIDER %q", cfg.LLMProvider)
 	}
-	return llm.Metered{Provider: p, Q: q}, nil
+	return llm.Metered{Provider: p, Q: q, Weights: &billing.Weights{Config: rc}}, nil
 }
 
 func Search(cfg config.Config) (search.Searcher, error) {

@@ -175,8 +175,8 @@ func (q *Queries) ListMemories(ctx context.Context, arg ListMemoriesParams) ([]L
 }
 
 const recordModelUsage = `-- name: RecordModelUsage :exec
-INSERT INTO model_usage (user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO model_usage (user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros, billed_tokens)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type RecordModelUsageParams struct {
@@ -189,6 +189,7 @@ type RecordModelUsageParams struct {
 	OutputTokens int32
 	CachedTokens int32
 	CostMicros   int64
+	BilledTokens int64
 }
 
 func (q *Queries) RecordModelUsage(ctx context.Context, arg RecordModelUsageParams) error {
@@ -202,6 +203,7 @@ func (q *Queries) RecordModelUsage(ctx context.Context, arg RecordModelUsagePara
 		arg.OutputTokens,
 		arg.CachedTokens,
 		arg.CostMicros,
+		arg.BilledTokens,
 	)
 	return err
 }
@@ -243,4 +245,31 @@ func (q *Queries) SearchMemories(ctx context.Context, arg SearchMemoriesParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const sumBilledTokensSince = `-- name: SumBilledTokensSince :one
+SELECT coalesce(sum(billed_tokens), 0)::bigint FROM model_usage WHERE user_id = $1 AND created_at >= $2
+`
+
+type SumBilledTokensSinceParams struct {
+	UserID    *uuid.UUID
+	CreatedAt time.Time
+}
+
+func (q *Queries) SumBilledTokensSince(ctx context.Context, arg SumBilledTokensSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumBilledTokensSince, arg.UserID, arg.CreatedAt)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const sumTaskBilledTokens = `-- name: SumTaskBilledTokens :one
+SELECT coalesce(sum(billed_tokens), 0)::bigint FROM model_usage WHERE task_id = $1
+`
+
+func (q *Queries) SumTaskBilledTokens(ctx context.Context, taskID *uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, sumTaskBilledTokens, taskID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }

@@ -1415,7 +1415,7 @@ func (q *Queries) ListModerationEvents(ctx context.Context, arg ListModerationEv
 }
 
 const listTaskUsage = `-- name: ListTaskUsage :many
-SELECT id, user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros, created_at FROM model_usage WHERE task_id = $1 ORDER BY id
+SELECT id, user_id, task_id, provider, model, tier, input_tokens, output_tokens, cached_tokens, cost_micros, created_at, billed_tokens FROM model_usage WHERE task_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListTaskUsage(ctx context.Context, taskID *uuid.UUID) ([]ModelUsage, error) {
@@ -1439,6 +1439,7 @@ func (q *Queries) ListTaskUsage(ctx context.Context, taskID *uuid.UUID) ([]Model
 			&i.CachedTokens,
 			&i.CostMicros,
 			&i.CreatedAt,
+			&i.BilledTokens,
 		); err != nil {
 			return nil, err
 		}

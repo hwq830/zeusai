@@ -263,6 +263,7 @@ type ModelUsage struct {
 	CachedTokens int32
 	CostMicros   int64
 	CreatedAt    time.Time
+	BilledTokens int64
 }
 
 type ModerationEvent struct {
