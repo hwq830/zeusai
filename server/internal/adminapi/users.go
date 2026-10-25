@@ -29,6 +29,7 @@ func toUserSummary(u db.User) gen.UserSummary {
 	return gen.UserSummary{
 		Id: u.ID.String(), Nickname: u.Nickname, PhoneMasked: maskPhone(u.Phone), LoginMethods: methods,
 		PlanCode: u.PlanCode, PlanExpiresAt: u.PlanExpiresAt, Timezone: u.Timezone,
+		UiLanguage: gen.UserSummaryUiLanguage(u.UiLanguage), ReportLanguage: gen.UserSummaryReportLanguage(u.ReportLanguage),
 		Disabled: u.DisabledAt != nil, DisabledAt: u.DisabledAt, DisabledReason: &reason, CreatedAt: u.CreatedAt,
 	}
 }
@@ -43,6 +44,7 @@ func (s *Server) ListUsers(ctx context.Context, req gen.ListUsersRequestObject) 
 	}
 	rows, err := s.Q.AdminListUsers(ctx, db.AdminListUsersParams{
 		Q: strPtr(p.Q), Plan: strPtr(p.Plan), Status: status, Limit: int32(lim), Offset: int32(off),
+		UiLanguage: (*string)(p.UiLanguage),
 	})
 	if err != nil {
 		return nil, apperr.Internal(err)

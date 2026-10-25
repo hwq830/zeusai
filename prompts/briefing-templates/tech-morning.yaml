@@ -39,3 +39,15 @@ sources:
     value: '{{companies}} 最新消息'
 default_schedule: { freq: daily, time: '08:00', tz: Asia/Shanghai }
 default_length: standard
+translations:
+  en:
+    name: Tech Morning
+    description: The top tech stories every morning, plus the companies and topics you follow
+    category: Industry news
+    fields:
+      topics: { label: Topics, placeholder: 'e.g. LLMs, chips, EVs' }
+      companies: { label: Companies, placeholder: 'e.g. Apple, BYD' }
+    sections:
+      headlines: { title: Top stories, instruction: The 3–5 most important things in tech today }
+      topics: { title: Your topics, instruction: 'Latest on {{topics}}' }
+      companies: { title: Company news, instruction: 'News, earnings and product launches from {{companies}}' }

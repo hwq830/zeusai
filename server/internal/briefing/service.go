@@ -14,6 +14,7 @@ import (
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
@@ -249,7 +250,7 @@ func (s *Service) RunNow(ctx context.Context, userID uuid.UUID, id string) (db.T
 		return db.Task{}, apperr.RateLimited("同时进行的任务太多，请等当前任务完成")
 	}
 	t, err := s.Q.CreateTask(ctx, db.CreateTaskParams{
-		UserID: userID, Kind: "briefing", Title: r.Name, Subtitle: "立即生成", Input: json.RawMessage(`{}`),
+		UserID: userID, Kind: "briefing", Title: r.Name, Subtitle: i18n.T(ctx, "立即生成", "Run now"), Input: json.RawMessage(`{}`),
 		SubscriptionID: &r.ID, PromptVersion: prompts.Version,
 	})
 	if err != nil {
@@ -394,7 +395,7 @@ func (s *Service) Draft(ctx context.Context, u db.User, prompt string) (Input, e
 		Length   string   `json:"length"`
 	}
 	if _, err := llm.CompleteJSON(ctx, s.LLM, llm.Request{
-		Purpose: "subscription.draft", Tier: llm.TierFast, System: string(sys),
+		Purpose: "subscription.draft", Tier: llm.TierFast, System: string(sys) + i18n.OutputInstruction(i18n.FromContext(ctx)),
 		Messages: []llm.Message{{Role: "user", Content: prompt}}, UserID: &u.ID,
 	}, &out); err != nil {
 		return Input{}, apperr.Unavailable("没能理解这句话，换个说法试试").WithCause(err)
@@ -406,7 +407,7 @@ func (s *Service) Draft(ctx context.Context, u db.User, prompt string) (Input, e
 		Length:   out.Length,
 	}
 	if in.Name == "" {
-		in.Name = "我的简报"
+		in.Name = i18n.T(ctx, "我的简报", "My briefing")
 	}
 	if in.Schedule.Freq == "" {
 		in.Schedule.Freq = "daily"

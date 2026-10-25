@@ -20,6 +20,7 @@ import (
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/schedule"
@@ -72,6 +73,88 @@ type Template struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	UpdatedAt time.Time  `json:"updatedAt"`
 	OwnerID   *uuid.UUID `json:"-"`
+	// Translations of an official template by language ("en"); the App gets the localized
+	// texts in place of the Chinese ones (Localize), the admin console edits them.
+	Translations map[string]Translation `json:"-"`
+}
+
+// Translation is a template's user-facing text in another language. Empty strings and missing
+// keys fall back to the Chinese text. Search terms are not translated. Translated select options
+// replace the Chinese ones one for one, so an English subscription stores English values (they
+// only feed the prompts and searches).
+type Translation struct {
+	Name        string                 `json:"name,omitempty" yaml:"name"`
+	Description string                 `json:"description,omitempty" yaml:"description"`
+	Category    string                 `json:"category,omitempty" yaml:"category"`
+	Fields      map[string]FieldText   `json:"fields,omitempty" yaml:"fields"`
+	Sections    map[string]SectionText `json:"sections,omitempty" yaml:"sections"`
+}
+
+type FieldText struct {
+	Label       string   `json:"label,omitempty" yaml:"label"`
+	Placeholder string   `json:"placeholder,omitempty" yaml:"placeholder"`
+	Help        string   `json:"help,omitempty" yaml:"help"`
+	Options     []string `json:"options,omitempty" yaml:"options"`
+}
+
+type SectionText struct {
+	Title       string `json:"title,omitempty" yaml:"title"`
+	Instruction string `json:"instruction,omitempty" yaml:"instruction"`
+}
+
+func or(s, fallback string) string {
+	if s != "" {
+		return s
+	}
+	return fallback
+}
+
+// Localize returns the template with its texts in l where a translation has them.
+func (t Template) Localize(l i18n.Lang) Template {
+	tr, ok := t.Translations[string(l)]
+	if l == i18n.ZH || !ok {
+		return t
+	}
+	t.Name, t.Description, t.Category = or(tr.Name, t.Name), or(tr.Description, t.Description), or(tr.Category, t.Category)
+	fields := make([]Field, len(t.Fields))
+	for i, f := range t.Fields {
+		ft := tr.Fields[f.Key]
+		f.Label, f.Placeholder, f.Help = or(ft.Label, f.Label), or(ft.Placeholder, f.Placeholder), or(ft.Help, f.Help)
+		if len(ft.Options) == len(f.Options) {
+			f.Options = ft.Options
+		}
+		fields[i] = f
+	}
+	sections := make([]Section, len(t.Sections))
+	for i, sec := range t.Sections {
+		st := tr.Sections[sec.Key]
+		sec.Title, sec.Instruction = or(st.Title, sec.Title), or(st.Instruction, sec.Instruction)
+		sections[i] = sec
+	}
+	t.Fields, t.Sections = fields, sections
+	return t
+}
+
+// ValidateTranslations checks the admin console's input; only English is supported.
+func ValidateTranslations(trs map[string]Translation) error {
+	for lang, tr := range trs {
+		if lang != string(i18n.EN) {
+			return apperr.Invalid("只支持英文译文（en）")
+		}
+		if len([]rune(tr.Name)) > 60 || len([]rune(tr.Description)) > 300 {
+			return apperr.Invalid("英文名称不超过 60 个字符，简介不超过 300 个字符")
+		}
+	}
+	return nil
+}
+
+// EncodeTranslations is the translations column value.
+func EncodeTranslations(trs map[string]Translation) json.RawMessage {
+	if len(trs) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	b, _ := json.Marshal(trs)
+	return b
 }
 
 var (
@@ -190,6 +273,11 @@ func FromRow(r db.Template) (Template, error) {
 			return t, err
 		}
 	}
+	if len(r.Translations) > 0 && string(r.Translations) != "{}" {
+		if err := json.Unmarshal(r.Translations, &t.Translations); err != nil {
+			return t, err
+		}
+	}
 	if len(r.DefaultSchedule) > 0 && string(r.DefaultSchedule) != "null" {
 		var s schedule.Schedule
 		if err := json.Unmarshal(r.DefaultSchedule, &s); err != nil {
@@ -254,17 +342,24 @@ func strPtr(s string) *string {
 }
 
 func (s *Service) List(ctx context.Context, userID uuid.UUID, p ListParams) ([]Template, []string, error) {
+	lang := i18n.FromContext(ctx)
+	cats, err := s.Q.ListOfficialCategories(ctx)
+	if err != nil {
+		return nil, nil, apperr.Internal(err)
+	}
+	if p.Category != "" && lang == i18n.EN {
+		for _, c := range cats { // the App filters by the English name it was shown
+			if c.CategoryEn == p.Category {
+				p.Category = c.Category
+			}
+		}
+	}
 	var rows []db.Template
-	var err error
 	if p.Scope == "mine" {
 		rows, err = s.Q.ListUserTemplates(ctx, db.ListUserTemplatesParams{OwnerID: &userID, Q: strPtr(p.Q), Limit: int32(p.Limit), Offset: int32(p.Offset)})
 	} else {
 		rows, err = s.Q.ListOfficialTemplates(ctx, db.ListOfficialTemplatesParams{Category: strPtr(p.Category), Q: strPtr(p.Q), Limit: int32(p.Limit), Offset: int32(p.Offset)})
 	}
-	if err != nil {
-		return nil, nil, apperr.Internal(err)
-	}
-	cats, err := s.Q.ListOfficialCategories(ctx)
 	if err != nil {
 		return nil, nil, apperr.Internal(err)
 	}
@@ -274,11 +369,11 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, p ListParams) ([]T
 		if err != nil {
 			return nil, nil, apperr.Internal(err)
 		}
-		out = append(out, t)
+		out = append(out, t.Localize(lang))
 	}
 	names := make([]string, 0, len(cats))
 	for _, c := range cats {
-		names = append(names, c.Category)
+		names = append(names, lang.Pick(c.Category, c.CategoryEn))
 	}
 	return out, names, nil
 }
@@ -299,7 +394,7 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, id string) (Templat
 	if err != nil {
 		return Template{}, apperr.Internal(err)
 	}
-	return t, nil
+	return t.Localize(i18n.FromContext(ctx)), nil
 }
 
 const maxCustomTemplates = 20
@@ -379,7 +474,7 @@ func (s *Service) Copy(ctx context.Context, userID uuid.UUID, id string) (Templa
 		return Template{}, err
 	}
 	in := t.Input
-	in.Name = truncate(in.Name+"（副本）", 40)
+	in.Name = truncate(in.Name+i18n.T(ctx, "（副本）", " (copy)"), 40)
 	return s.Create(ctx, userID, in)
 }
 
@@ -392,9 +487,10 @@ func truncate(s string, n int) string {
 }
 
 type seedFile struct {
-	Input     `yaml:",inline"`
-	Slug      string `yaml:"slug"`
-	SortOrder int    `yaml:"sort_order"`
+	Input        `yaml:",inline"`
+	Slug         string                 `yaml:"slug"`
+	SortOrder    int                    `yaml:"sort_order"`
+	Translations map[string]Translation `yaml:"translations"`
 }
 
 // SeedOfficial upserts every prompts/briefing-templates/*.yaml by slug. Version bumps when
@@ -416,12 +512,20 @@ func (s *Service) SeedOfficial(ctx context.Context) (int, error) {
 		if err := sf.Input.Validate(); err != nil {
 			return 0, fmt.Errorf("%s: %w", f, err)
 		}
+		if err := ValidateTranslations(sf.Translations); err != nil {
+			return 0, fmt.Errorf("%s: %w", f, err)
+		}
 		e := encode(sf.Input)
+		trs := EncodeTranslations(sf.Translations)
 		if err := s.Q.UpsertOfficialTemplate(ctx, db.UpsertOfficialTemplateParams{
 			Slug: &sf.Slug, Name: sf.Name, Description: sf.Description, Category: sf.Category, Icon: sf.Icon,
 			Fields: e.fields, Sections: e.sections, Sources: e.sources, DefaultSchedule: e.sched,
 			DefaultLength: sf.DefaultLength, RequiredConnectors: orEmpty(sf.RequiredConnectors), SortOrder: int32(sf.SortOrder),
+			Translations: trs,
 		}); err != nil {
+			return 0, fmt.Errorf("%s: %w", f, err)
+		}
+		if err := s.Q.FillOfficialTranslations(ctx, db.FillOfficialTranslationsParams{Slug: &sf.Slug, Translations: trs}); err != nil {
 			return 0, fmt.Errorf("%s: %w", f, err)
 		}
 	}
@@ -441,6 +545,7 @@ func (s *Service) Draft(ctx context.Context, userID uuid.UUID, tz, prompt string
 	if err != nil {
 		return Input{}, apperr.Internal(err)
 	}
+	sys += i18n.OutputInstruction(i18n.FromContext(ctx))
 	var in Input
 	if _, err := llm.CompleteJSON(ctx, s.LLM, llm.Request{
 		Purpose: "template.draft", Tier: llm.TierStrong, System: sys,

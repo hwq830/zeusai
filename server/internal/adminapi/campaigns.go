@@ -24,6 +24,7 @@ import (
 func (s *Server) campaign(ctx context.Context, c db.Campaign) (gen.Campaign, error) {
 	out := gen.Campaign{
 		Id: c.ID.String(), Name: c.Name, Category: gen.CampaignCategory(c.Category), Title: c.Title, Body: c.Body,
+		TitleEn: &c.TitleEn, BodyEn: &c.BodyEn,
 		ImageUrl: c.ImageUrl, Deeplink: c.Deeplink, SendAt: c.SendAt, Status: gen.CampaignStatus(c.Status),
 		AudienceEstimate: int(c.AudienceEstimate), RejectReason: c.RejectReason,
 		SubmittedAt: c.SubmittedAt, ApprovedAt: c.ApprovedAt, StartedAt: c.StartedAt, FinishedAt: c.FinishedAt,
@@ -84,6 +85,7 @@ func campaignParams(in gen.CampaignInput) (notify.Content, notify.Audience, erro
 	c := notify.Content{
 		Name: strings.TrimSpace(in.Name), Category: string(in.Category), Title: strings.TrimSpace(in.Title), Body: strings.TrimSpace(in.Body),
 		ImageURL: strings.TrimSpace(deref(in.ImageUrl)), DeepLink: strings.TrimSpace(deref(in.Deeplink)),
+		TitleEn: strings.TrimSpace(deref(in.TitleEn)), BodyEn: strings.TrimSpace(deref(in.BodyEn)),
 	}
 	if err := c.Validate(); err != nil {
 		return c, notify.Audience{}, err
@@ -130,6 +132,7 @@ func (s *Server) CreateCampaign(ctx context.Context, req gen.CreateCampaignReque
 	c, err := s.Q.CreateCampaign(ctx, db.CreateCampaignParams{
 		Name: content.Name, Category: content.Category, Title: content.Title, Body: content.Body, ImageUrl: content.ImageURL,
 		Deeplink: content.DeepLink, Audience: mustJSON(aud), SendAt: req.Body.SendAt, AudienceEstimate: int32(n), CreatedBy: &a.ID,
+		TitleEn: content.TitleEn, BodyEn: content.BodyEn,
 	})
 	if err != nil {
 		return nil, apperr.Internal(err)
@@ -181,6 +184,7 @@ func (s *Server) UpdateCampaign(ctx context.Context, req gen.UpdateCampaignReque
 	c, err := s.Q.UpdateCampaignDraft(ctx, db.UpdateCampaignDraftParams{
 		ID: old.ID, Name: content.Name, Category: content.Category, Title: content.Title, Body: content.Body, ImageUrl: content.ImageURL,
 		Deeplink: content.DeepLink, Audience: mustJSON(aud), SendAt: req.Body.SendAt, AudienceEstimate: int32(n),
+		TitleEn: content.TitleEn, BodyEn: content.BodyEn,
 	})
 	if err != nil {
 		return nil, s.wrongState(ctx, old.ID, err, "修改，只有草稿可以修改")
@@ -376,7 +380,7 @@ func (s *Server) TestSendCampaign(ctx context.Context, req gen.TestSendCampaignR
 		if uid, err := uuid.Parse(strings.TrimSpace(raw)); err == nil {
 			if _, err := s.Q.GetUser(ctx, uid); err == nil {
 				err := s.Notify.TestSend(ctx, uid, push.Notification{
-					Category: c.Category, Title: c.Title, Body: c.Body, Image: c.ImageUrl, DeepLink: c.Deeplink,
+					Category: c.Category, Title: c.Title, Body: c.Body, TitleEn: c.TitleEn, BodyEn: c.BodyEn, Image: c.ImageUrl, DeepLink: c.Deeplink,
 				})
 				switch {
 				case errors.Is(err, push.ErrNoDevice):

@@ -32,6 +32,8 @@ var messagesEN = map[string]string{
 	"模型服务繁忙，请稍后再试":                      "The AI service is busy. Please try again later",
 	"时区无效":                              "Invalid time zone",
 	"不存在":                               "Not found",
+	"只支持英文译文（en）":                       "Only English translations (en) are supported",
+	"英文名称不超过 60 个字符，简介不超过 300 个字符":      "English names can be up to 60 characters and descriptions up to 300",
 	"%s不存在":                             "Not found",
 	"decision 应为 approve / reject":      "decision must be approve or reject",
 	"上传失败，请重试":                          "Upload failed. Please try again",

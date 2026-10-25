@@ -20,6 +20,7 @@ import (
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/push"
@@ -42,6 +43,28 @@ var budgets = map[string]depthBudget{
 	"deep":     {7, 8, "5000 字左右", 3},
 }
 
+var lengthHintsEN = map[string]string{"quick": "about 1,000 words", "standard": "about 2,000 words", "deep": "about 3,500 words"}
+
+func reportLengthHint(l i18n.Lang, depth string) string {
+	return l.Pick(budgets[depth].LengthHint, lengthHintsEN[depth])
+}
+
+// wordCount is characters for Chinese and words for English, as the App labels it.
+func wordCount(l i18n.Lang, s string) int {
+	if l == i18n.EN {
+		return len(strings.Fields(s))
+	}
+	return utf8.RuneCountInString(s)
+}
+
+func researchStep(l i18n.Lang, i int, q string) events.Step {
+	return events.Step{Index: i + 1, Title: l.Pick("调研：", "Research: ") + clip(q, l.ClipLen(40)), Tool: "search"}
+}
+
+func writeStep(l i18n.Lang, n int) events.Step {
+	return events.Step{Index: n, Title: l.Pick("撰写报告", "Writing the report"), Tool: "write"}
+}
+
 type Question struct {
 	Question string   `json:"question"`
 	Queries  []string `json:"queries"`
@@ -56,6 +79,9 @@ type ReportPlan struct {
 	Focuses   []string
 	Title     string
 	Questions []Question
+	// Lang is the report's language; UILang the App's (progress steps, push).
+	Lang   i18n.Lang
+	UILang i18n.Lang
 }
 
 // QuestionNotes are one sub-question's findings; [n] in Notes indexes Sources from 1.
@@ -127,17 +153,27 @@ func (a *Activities) NotifyReport(ctx context.Context, plan ReportPlan) error {
 		return err
 	}
 	return a.Push.Notify(ctx, plan.UserID, push.Notification{
-		Category: push.CategoryReport, Title: "报告已完成", Body: r.Title, DeepLink: "zeus://report/" + plan.ReportID.String(),
+		Category: push.CategoryReport, Title: "报告已完成", TitleEn: "Your report is ready", Body: r.Title,
+		DeepLink: "zeus://report/" + plan.ReportID.String(),
 	})
 }
 
 var reportPrompts = texttemplate.Must(texttemplate.New("report").Funcs(texttemplate.FuncMap{"join": strings.Join}).
 	ParseFS(prompts.FS, "report/*.md"))
 
-func render(name string, data any) (string, error) {
+func render(l i18n.Lang, name string, data any) (string, error) {
 	var b bytes.Buffer
 	err := reportPrompts.ExecuteTemplate(&b, name, data)
-	return b.String(), err
+	return b.String() + i18n.OutputInstruction(l), err
+}
+
+// uiLang is the user's display language; a lookup failure falls back to Chinese.
+func (a *Activities) uiLang(ctx context.Context, userID uuid.UUID) i18n.Lang {
+	u, err := a.Q.GetUser(ctx, userID)
+	if err != nil {
+		return i18n.ZH
+	}
+	return i18n.Parse(u.UiLanguage)
 }
 
 func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (ReportPlan, error) {
@@ -149,8 +185,9 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		return ReportPlan{}, err
 	}
 	b := budgets[r.Depth]
+	lang, ui := i18n.Parse(r.Language), a.uiLang(ctx, run.UserID)
 	interests, _ := a.Q.ListInterestMemories(ctx, db.ListInterestMemoriesParams{UserID: run.UserID, Limit: 10})
-	sys, err := render("plan.md", map[string]any{"Questions": b.Questions, "Focuses": r.Focuses, "Interests": interests})
+	sys, err := render(lang, "plan.md", map[string]any{"Questions": b.Questions, "Focuses": r.Focuses, "Interests": interests, "Lang": string(lang)})
 	if err != nil {
 		return ReportPlan{}, err
 	}
@@ -171,21 +208,21 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		out.Questions = out.Questions[:b.Questions]
 	}
 	plan := ReportPlan{UserID: run.UserID, TaskID: run.TaskID, ReportID: r.ID, Topic: r.Topic, Depth: r.Depth, Focuses: r.Focuses,
-		Title: clip(strings.TrimSpace(out.Title), 30), Questions: out.Questions}
+		Title: clip(strings.TrimSpace(out.Title), lang.ClipLen(30)), Questions: out.Questions, Lang: lang, UILang: ui}
 	if plan.Title == "" {
 		plan.Title = r.Title
 	}
 	steps := make([]events.Step, 0, len(plan.Questions)+1)
 	for i, q := range plan.Questions {
-		steps = append(steps, events.Step{Index: i + 1, Title: "调研：" + clip(q.Question, 40), Tool: "search"})
+		steps = append(steps, researchStep(ui, i, q.Question))
 	}
-	steps = append(steps, events.Step{Index: len(steps) + 1, Title: "撰写报告", Tool: "write"})
+	steps = append(steps, writeStep(ui, len(steps)+1))
 	return plan, a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypePlan, Steps: steps})
 }
 
 func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i int, notes []string) (QuestionNotes, error) {
 	q := plan.Questions[i]
-	step := events.Step{Index: i + 1, Title: "调研：" + clip(q.Question, 40), Tool: "search"}
+	step := researchStep(plan.UILang, i, q.Question)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
 		return QuestionNotes{}, err
 	}
@@ -216,7 +253,7 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 	sources = append(sources, a.callTools(ctx, plan, q)...)
 	out := QuestionNotes{Question: q.Question, Sources: sources}
 	if len(sources) > 0 {
-		sys, err := render("research.md", map[string]any{"Title": plan.Title, "Question": q.Question, "Notes": notes})
+		sys, err := render(plan.Lang, "research.md", map[string]any{"Title": plan.Title, "Question": q.Question, "Notes": notes})
 		if err != nil {
 			return QuestionNotes{}, err
 		}
@@ -251,7 +288,7 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 		}
 		out.Notes = res.Notes
 	}
-	step.Detail = fmt.Sprintf("读了 %d 个来源", len(sources))
+	step.Detail = fmt.Sprintf(plan.UILang.Pick("读了 %d 个来源", "Read %d sources"), len(sources))
 	return out, a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step})
 }
 
@@ -286,13 +323,13 @@ func mergeNotes(results []QuestionNotes) (string, []events.Source) {
 }
 
 func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results []QuestionNotes, notes []string) error {
-	step := events.Step{Index: len(plan.Questions) + 1, Title: "撰写报告", Tool: "write"}
+	step := writeStep(plan.UILang, len(plan.Questions)+1)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
 		return err
 	}
 	merged, sources := mergeNotes(results)
-	sys, err := render("write.md", map[string]any{
-		"Title": plan.Title, "Topic": plan.Topic, "Focuses": plan.Focuses, "Notes": notes, "LengthHint": budgets[plan.Depth].LengthHint,
+	sys, err := render(plan.Lang, "write.md", map[string]any{
+		"Title": plan.Title, "Topic": plan.Topic, "Focuses": plan.Focuses, "Notes": notes, "LengthHint": reportLengthHint(plan.Lang, plan.Depth),
 	})
 	if err != nil {
 		return err
@@ -314,11 +351,11 @@ func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results [
 	srcJSON, _ := json.Marshal(orEmptySources(sources))
 	if _, err := a.Q.CompleteReport(ctx, db.CompleteReportParams{
 		ID: plan.ReportID, UserID: plan.UserID, Title: plan.Title, Summary: out.Summary, Markdown: out.Markdown,
-		Sources: srcJSON, SourceCount: int32(len(sources)), WordCount: int32(utf8.RuneCountInString(out.Markdown)),
+		Sources: srcJSON, SourceCount: int32(len(sources)), WordCount: int32(wordCount(plan.Lang, out.Markdown)),
 	}); err != nil {
 		return err
 	}
-	step.Detail = fmt.Sprintf("%d 字，%d 个来源", utf8.RuneCountInString(out.Markdown), len(sources))
+	step.Detail = fmt.Sprintf(plan.UILang.Pick("%d 字，%d 个来源", "%d words, %d sources"), wordCount(plan.Lang, out.Markdown), len(sources))
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step}); err != nil {
 		return err
 	}
@@ -356,8 +393,10 @@ func (a *Activities) AbortReport(ctx context.Context, run orch.ReportRun, kind s
 	if kind == "cancelled" {
 		return a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypeCancelled})
 	}
+	msg := a.uiLang(ctx, run.UserID).Pick("报告生成失败，本次不计入额度，请稍后重试",
+		"The report couldn't be generated. This one doesn't count toward your quota. Please try again later")
 	return a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypeFailed,
-		Error: &events.Error{Code: "internal", Message: "报告生成失败，本次不计入额度，请稍后重试", Retryable: true}})
+		Error: &events.Error{Code: "internal", Message: msg, Retryable: true}})
 }
 
 // FollowupWorkflow answers a question about a finished report and appends the answer to it.
@@ -370,15 +409,21 @@ func FollowupWorkflow(ctx workflow.Context, run orch.FollowupRun) error {
 	err := workflow.ExecuteActivity(ctx, a.AnswerFollowup, run).Get(ctx, nil)
 	if err != nil {
 		dctx, _ := workflow.NewDisconnectedContext(ctx)
-		ev := events.Event{Type: events.TypeFailed, Error: &events.Error{Code: "internal", Message: "追问失败，请稍后重试", Retryable: true}}
 		if temporal.IsCanceledError(err) {
-			ev = events.Event{Type: events.TypeCancelled}
+			_ = workflow.ExecuteActivity(dctx, a.EmitEvent, run.UserID, run.TaskID, events.Event{Type: events.TypeCancelled}).Get(dctx, nil)
+		} else {
+			_ = workflow.ExecuteActivity(dctx, a.FailFollowup, run).Get(dctx, nil)
 		}
-		_ = workflow.ExecuteActivity(dctx, a.EmitEvent, run.UserID, run.TaskID, ev).Get(dctx, nil)
 		return err
 	}
 	_ = workflow.ExecuteActivity(ctx, a.NotifyQuota, run.UserID).Get(ctx, nil)
 	return nil
+}
+
+// FailFollowup reports a failed follow-up in the user's display language.
+func (a *Activities) FailFollowup(ctx context.Context, run orch.FollowupRun) error {
+	msg := a.uiLang(ctx, run.UserID).Pick("追问失败，请稍后重试", "The follow-up failed. Please try again later")
+	return a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypeFailed, Error: &events.Error{Code: "internal", Message: msg, Retryable: true}})
 }
 
 func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) error {
@@ -386,7 +431,8 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 	if err != nil {
 		return err
 	}
-	step := events.Step{Index: 1, Title: "回答追问", Tool: "write"}
+	lang, ui := i18n.Parse(r.Language), a.uiLang(ctx, run.UserID)
+	step := events.Step{Index: 1, Title: ui.Pick("回答追问", "Answering your follow-up"), Tool: "write"}
 	for _, ev := range []events.Event{
 		{Type: events.TypeStatus, Status: "running"},
 		{Type: events.TypePlan, Steps: []events.Step{step}},
@@ -396,7 +442,7 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 			return err
 		}
 	}
-	sys, err := render("followup.md", map[string]any{"Markdown": clip(r.Markdown, 30000)})
+	sys, err := render(lang, "followup.md", map[string]any{"Markdown": clip(r.Markdown, 30000)})
 	if err != nil {
 		return err
 	}
@@ -413,7 +459,7 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 		return err
 	}
 	if err := a.Q.AppendReportMarkdown(ctx, db.AppendReportMarkdownParams{
-		ID: r.ID, UserID: run.UserID, Markdown: "\n\n## 追问：" + run.Question + "\n\n" + out.Answer + "\n",
+		ID: r.ID, UserID: run.UserID, Markdown: "\n\n## " + lang.Pick("追问：", "Follow-up: ") + run.Question + "\n\n" + out.Answer + "\n",
 	}); err != nil {
 		return err
 	}
@@ -460,7 +506,7 @@ func (a *Activities) callTools(ctx context.Context, plan ReportPlan, q Question)
 	if err != nil || len(specs) == 0 {
 		return nil
 	}
-	sys, err := render("tools.md", map[string]any{"Title": plan.Title, "Question": q.Question})
+	sys, err := render(plan.Lang, "tools.md", map[string]any{"Title": plan.Title, "Question": q.Question})
 	if err != nil {
 		return nil
 	}

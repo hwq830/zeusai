@@ -37,3 +37,15 @@ sources:
     value: '{{competitors}} 用户 评价'
 default_schedule: { freq: weekly, weekdays: [1], time: '09:00', tz: Asia/Shanghai }
 default_length: long
+translations:
+  en:
+    name: Competitor Weekly
+    description: A weekly roundup of competitors' product updates, pricing, funding and reputation
+    category: Business
+    fields:
+      my_product: { label: My product, placeholder: Describe your product in one sentence so we can judge relevance }
+      competitors: { label: Competitors }
+    sections:
+      product: { title: Product and feature updates, instruction: 'New features and releases from {{competitors}} this week; explain how they relate to {{my_product}}' }
+      business: { title: Pricing, funding and partnerships }
+      voice: { title: What users say, instruction: Recurring feedback on social media and in app stores }

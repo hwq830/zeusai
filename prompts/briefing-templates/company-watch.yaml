@@ -32,3 +32,16 @@ sources:
     value: '{{companies}} 公告 财报'
 default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '08:30', tz: Asia/Shanghai }
 default_length: standard
+translations:
+  en:
+    name: Company Watch
+    description: Keep an eye on a few companies — news, filings, products and leadership moves
+    category: Business
+    fields:
+      companies: { label: Companies to watch, placeholder: 'e.g. CATL, NVIDIA' }
+      aspects:
+        label: Focus
+        options: [Earnings, Product launches, Funding and M&A, Leadership changes, Regulation and lawsuits]
+    sections:
+      news: { title: Key news, instruction: 'Major news about {{companies}}, focusing on {{aspects}}' }
+      filings: { title: Filings and earnings, instruction: 'Company announcements and earnings, with the key numbers' }

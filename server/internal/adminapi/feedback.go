@@ -203,7 +203,7 @@ func (s *Server) ReplyFeedback(ctx context.Context, req gen.ReplyFeedbackRequest
 	if s.Push != nil {
 		// The reply is saved either way; a failed push only means the user sees it next time they open the app.
 		if err := s.Push.Notify(ctx, f.UserID, push.Notification{
-			Category: push.CategoryService, Title: "你的反馈有新回复", Body: clipRunes(content, 60), DeepLink: "zeus://feedback/" + id.String(),
+			Category: push.CategoryService, Title: "你的反馈有新回复", TitleEn: "There's a reply to your feedback", Body: clipRunes(content, 60), DeepLink: "zeus://feedback/" + id.String(),
 		}); err != nil {
 			s.Log.Warn("feedback reply push failed", "feedback", id, "err", err)
 		}

@@ -71,3 +71,24 @@ func FromContext(ctx context.Context) Lang {
 
 // T picks between a Chinese and an English text by the request's language.
 func T(ctx context.Context, zh, en string) string { return FromContext(ctx).Pick(zh, en) }
+
+// OutputInstruction is appended to a generation prompt. The prompts are written in Chinese;
+// this pins the language of everything the model writes for the user.
+func OutputInstruction(l Lang) string {
+	if l == EN {
+		return "\n\nOutput language: write every user-facing text in the JSON (titles, headlines, summaries, notes, " +
+			"answers, headings and Markdown) in natural English, even though these instructions and the sources may be " +
+			"in Chinese. Translate Chinese material and any fixed headings named above; keep names in their usual " +
+			"English form. Where a limit is given in 字 (Chinese characters), aim for about half as many English words. " +
+			"JSON keys stay exactly as specified."
+	}
+	return "\n\n输出语言：所有给用户看的文字都用简体中文，来源是外文时翻译成中文；人名、机构名等首次出现可附原文。JSON 的键名保持不变。"
+}
+
+// ClipLen scales a length limit given for Chinese text; English needs more characters than Chinese for the same text.
+func (l Lang) ClipLen(zh int) int {
+	if l == EN {
+		return zh * 8 / 3
+	}
+	return zh
+}

@@ -71,6 +71,7 @@ type Briefing struct {
 	SourceCount    int        `json:"sourceCount"`
 	ReadAt         *time.Time `json:"readAt,omitempty"`
 	GeneratedAt    *time.Time `json:"generatedAt,omitempty"`
+	Language       string     `json:"language,omitempty"`
 	Sections       []Section  `json:"sections"`
 	TaskID         *string    `json:"taskId,omitempty"`
 	Feedback       *string    `json:"feedback,omitempty"`
@@ -103,7 +104,7 @@ func briefingFromRow(r db.Briefing, withSections bool) Briefing {
 	b := Briefing{
 		ID: r.ID.String(), SubscriptionID: r.SubscriptionID.String(), Title: r.Title, Date: r.Date.Format(time.DateOnly),
 		Status: r.Status, Headline: r.Headline, ItemCount: int(r.ItemCount), SourceCount: int(r.SourceCount),
-		ReadAt: r.ReadAt, GeneratedAt: r.GeneratedAt,
+		ReadAt: r.ReadAt, GeneratedAt: r.GeneratedAt, Language: r.Language,
 	}
 	if r.TaskID != nil {
 		id := r.TaskID.String()

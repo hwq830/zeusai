@@ -114,6 +114,10 @@ paths:
         - name: plan
           in: query
           schema: { type: string }
+        - name: uiLanguage
+          in: query
+          description: 按 App 显示语言筛选
+          schema: { type: string, enum: [zh, en] }
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1344,7 +1348,7 @@ components:
     # ------------------------------------------------------------ users
     UserSummary:
       type: object
-      required: [id, nickname, phoneMasked, loginMethods, planCode, timezone, disabled, createdAt]
+      required: [id, nickname, phoneMasked, loginMethods, planCode, timezone, uiLanguage, reportLanguage, disabled, createdAt]
       properties:
         id: { type: string }
         nickname: { type: string }
@@ -1355,6 +1359,8 @@ components:
         planCode: { type: string }
         planExpiresAt: { type: string, format: date-time, nullable: true }
         timezone: { type: string }
+        uiLanguage: { type: string, enum: [zh, en], description: App 显示语言，简报和推送跟随它 }
+        reportLanguage: { type: string, enum: [auto, zh, en], description: 报告生成语言，auto 跟随显示语言 }
         disabled: { type: boolean }
         disabledReason: { type: string }
         disabledAt: { type: string, format: date-time, nullable: true }
@@ -1539,6 +1545,37 @@ components:
         slug:
           type: string
           description: 仅新建时有效；留空则不与 prompts/briefing-templates 关联
+        translations:
+          type: object
+          description: 其他语言的文案，键为语言（目前只有 en）；缺的字段回落中文
+          additionalProperties: { $ref: '#/components/schemas/TemplateTranslation' }
+    TemplateTranslation:
+      type: object
+      properties:
+        name: { type: string, maxLength: 60 }
+        description: { type: string, maxLength: 300 }
+        category: { type: string }
+        fields:
+          type: object
+          description: 键为字段 key
+          additionalProperties:
+            type: object
+            properties:
+              label: { type: string }
+              placeholder: { type: string }
+              help: { type: string }
+              options:
+                type: array
+                description: 与中文选项一一对应，个数不同时不生效
+                items: { type: string }
+        sections:
+          type: object
+          description: 键为栏目 key
+          additionalProperties:
+            type: object
+            properties:
+              title: { type: string }
+              instruction: { type: string }
     AdminTemplate:
       allOf:
         - $ref: '#/components/schemas/AdminTemplateInput'
@@ -2037,6 +2074,7 @@ components:
         inactiveForDays: { type: integer, minimum: 0, maximum: 365, description: 超过 N 天没打开 App }
         minAppVersion: { type: string, example: '1.2.0' }
         templateId: { type: string, description: 有用该模板创建的进行中简报订阅 }
+        language: { type: string, enum: [zh, en], description: App 显示语言；不填表示不限 }
     CampaignInput:
       type: object
       required: [name, category, title, body, audience]
@@ -2045,6 +2083,8 @@ components:
         category: { $ref: '#/components/schemas/CampaignCategory' }
         title: { type: string, maxLength: 40 }
         body: { type: string, maxLength: 200 }
+        titleEn: { type: string, maxLength: 80, description: 英文标题，选填；显示语言为英文的用户收到英文，未填则收中文 }
+        bodyEn: { type: string, maxLength: 400 }
         imageUrl: { type: string, description: https 图片，推送大图和消息中心都会显示 }
         deeplink: { type: string, description: 'zeus:// 页面或 https 链接，空表示只打开 App' }
         audience: { $ref: '#/components/schemas/CampaignAudience' }
@@ -2069,6 +2109,8 @@ components:
         category: { $ref: '#/components/schemas/CampaignCategory' }
         title: { type: string }
         body: { type: string }
+        titleEn: { type: string }
+        bodyEn: { type: string }
         imageUrl: { type: string }
         deeplink: { type: string }
         audience: { $ref: '#/components/schemas/CampaignAudience' }
