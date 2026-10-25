@@ -1,0 +1,6 @@
+.git
+.dev
+**/node_modules
+**/dist
+*.test
+dump.rdb

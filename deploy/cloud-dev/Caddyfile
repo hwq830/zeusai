@@ -1,0 +1,17 @@
+# App 接口：公开，HTTPS 证书自动申请（域名先解析到这台 ECS，安全组放行 80/443）。
+{$ZEUS_API_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8080 {
+		# SSE 任务流立即下发，不攒缓冲。
+		flush_interval -1
+	}
+}
+
+# 控制台：只允许 ZEUS_ADMIN_ALLOW_IPS 里的地址（空格分隔，支持 CIDR）。
+{$ZEUS_ADMIN_DOMAIN} {
+	@allowed remote_ip {$ZEUS_ADMIN_ALLOW_IPS}
+	handle @allowed {
+		reverse_proxy admin:8081
+	}
+	respond "forbidden" 403
+}

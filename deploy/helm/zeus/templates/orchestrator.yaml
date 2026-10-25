@@ -1,0 +1,52 @@
+{{- $c := dict "root" $ "component" "orchestrator" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zeus.fullname" . }}-orchestrator
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: orchestrator
+spec:
+  replicas: {{ .Values.orchestrator.replicas }}
+  selector:
+    matchLabels: {{- include "zeus.selector" $c | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "zeus.selector" $c | nindent 8 }}
+      annotations: {{- include "zeus.podAnnotations" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "zeus.serviceAccountName" . }}
+      securityContext: {{- include "zeus.podSecurityContext" . | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.orchestrator.terminationGracePeriodSeconds }}
+      {{- include "zeus.scheduling" . | nindent 6 }}
+      containers:
+        - name: orchestrator
+          image: {{ include "zeus.image" (dict "root" $ "image" .Values.image.orchestrator) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/orchestrator"]
+          {{- $extra := dict "ZEUS_CHROMIUM_PATH" "/usr/bin/chromium" "ZEUS_CHROMIUM_NO_SANDBOX" (toString .Values.orchestrator.chromiumNoSandbox) }}
+          env: {{- include "zeus.env" (dict "root" $ "extra" (merge (deepCopy .Values.orchestrator.extraEnv) $extra)) | nindent 12 }}
+          {{- include "zeus.envFrom" . | nindent 10 }}
+          resources: {{- toYaml .Values.orchestrator.resources | nindent 12 }}
+          # Chromium writes its profile under $HOME, so the root filesystem stays writable here.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts: {{- include "zeus.volumeMounts" . | nindent 12 }}
+            # Chromium writes its profile and crash dumps here.
+            - { name: tmp, mountPath: /tmp }
+      volumes: {{- include "zeus.volumes" . | nindent 8 }}
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 512Mi }
+{{- if .Values.orchestrator.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "zeus.fullname" . }}-orchestrator
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.orchestrator.pdb.minAvailable }}
+  selector:
+    matchLabels: {{- include "zeus.selector" $c | nindent 6 }}
+{{- end }}

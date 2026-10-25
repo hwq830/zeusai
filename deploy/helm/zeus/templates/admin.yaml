@@ -1,0 +1,75 @@
+{{- $c := dict "root" $ "component" "admin" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zeus.fullname" . }}-admin
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  replicas: {{ .Values.admin.replicas }}
+  selector:
+    matchLabels: {{- include "zeus.selector" $c | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "zeus.selector" $c | nindent 8 }}
+      annotations: {{- include "zeus.podAnnotations" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "zeus.serviceAccountName" . }}
+      securityContext: {{- include "zeus.podSecurityContext" . | nindent 8 }}
+      {{- include "zeus.scheduling" . | nindent 6 }}
+      {{- if .Values.image.console.enabled }}
+      initContainers:
+        # The console image only carries the built static files; copy them for the admin process.
+        - name: console
+          image: {{ include "zeus.image" (dict "root" $ "image" .Values.image.console) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "cp -R /usr/share/nginx/html/. /console/"]
+          securityContext: {{- include "zeus.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - { name: console, mountPath: /console }
+      {{- end }}
+      containers:
+        - name: admin
+          image: {{ include "zeus.image" (dict "root" $ "image" .Values.image.server) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/admin"]
+          {{- $extra := dict "ZEUS_ADMIN_HTTP_ADDR" ":8081" }}
+          {{- if .Values.image.console.enabled }}{{ $_ := set $extra "ZEUS_ADMIN_STATIC_DIR" "/console" }}{{ end }}
+          env: {{- include "zeus.env" (dict "root" $ "extra" (merge (deepCopy .Values.admin.extraEnv) $extra)) | nindent 12 }}
+          {{- include "zeus.envFrom" . | nindent 10 }}
+          ports:
+            - { name: http, containerPort: 8081 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources: {{- toYaml .Values.admin.resources | nindent 12 }}
+          securityContext: {{- include "zeus.containerSecurityContext" . | nindent 12 }}
+          volumeMounts: {{- include "zeus.volumeMounts" . | nindent 12 }}
+            {{- if .Values.image.console.enabled }}
+            - { name: console, mountPath: /console, readOnly: true }
+            {{- end }}
+      volumes: {{- include "zeus.volumes" . | nindent 8 }}
+        {{- if .Values.image.console.enabled }}
+        - name: console
+          emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "zeus.fullname" . }}-admin
+  labels: {{- include "zeus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admin
+spec:
+  type: {{ .Values.admin.service.type }}
+  selector: {{- include "zeus.selector" $c | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.admin.service.port }}, targetPort: http }
+{{- if .Values.admin.ingress.enabled }}
+---
+{{- include "zeus.ingress" (dict "root" $ "component" "admin" "ingress" .Values.admin.ingress "port" .Values.admin.service.port) }}
+{{- end }}

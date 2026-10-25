@@ -110,6 +110,10 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 
 非 dev 环境里，没配置的登录方式会返回 `unavailable`（“该登录方式暂未开放”），不会退回到假实现。
 
+## 部署到 K8s
+
+镜像（`deploy/docker/Dockerfile`）和 Helm chart（`deploy/helm/zeus`）的用法见 [deploy/helm/README.md](../deploy/helm/README.md)。
+
 ## 测试
 
 ```sh
