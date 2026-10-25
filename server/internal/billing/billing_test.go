@@ -27,7 +27,7 @@ func TestTokens(t *testing.T) {
 	if got := (Table{}).Tokens("x", 10, 5, 0); got != 15 {
 		t.Errorf("empty table should bill at weight 1, got %d", got)
 	}
-	if got := (*Weights)(nil).For(nil).Tokens("x", 10, 5, 0); got != 15 {
+	if got := (*Policy)(nil).Weights(nil).Tokens("x", 10, 5, 0); got != 15 {
 		t.Errorf("nil weights should be neutral, got %d", got)
 	}
 }

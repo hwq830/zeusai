@@ -103,7 +103,7 @@ func TestRemoteConfig(t *testing.T) {
 		}
 	}
 	setRules(remoteconfig.KeyHomeNotice, `[{"id":"tf","when":[{"attr":"channel","op":"eq","values":["testflight"]}],"value":{"text":"内测版","level":"info"}}]`)
-	setRules(remoteconfig.KeyQuotaReportsPerMonth, `[{"id":"all","when":[],"value":7}]`)
+	setRules(remoteconfig.KeyQuotaTokensPerMonth, `[{"id":"all","when":[],"value":7000000}]`)
 	rel := &remoteconfig.Releases{Pool: pool, Redis: rdb}
 	publish := func() {
 		t.Helper()
@@ -132,7 +132,7 @@ func TestRemoteConfig(t *testing.T) {
 	if v := rc.Values[remoteconfig.KeyTemplateSharing]; v.Expose == nil || !*v.Expose || val(v) != false {
 		t.Fatalf("template sharing = %+v", v)
 	}
-	if v := rc.Values[remoteconfig.KeyQuotaReportsPerMonth]; val(v) != float64(7) {
+	if v := rc.Values[remoteconfig.KeyQuotaTokensPerMonth]; val(v) != float64(7000000) {
 		t.Fatalf("quota = %+v", v)
 	}
 
@@ -152,7 +152,7 @@ func TestRemoteConfig(t *testing.T) {
 
 	// Logged in: user targeting, quotas from config, and the kill switch enforced on the server.
 	s := h.login(randomPhone())
-	if s.Me.Quota.Reports.Limit != 7 {
+	if s.Me.Quota.Tokens.Limit != 7_000_000 {
 		t.Fatalf("me quota = %+v", s.Me.Quota)
 	}
 	setRules(remoteconfig.KeyReportCreateEnabled, `[{"id":"blocked","when":[{"attr":"user_id","op":"in","values":["`+s.Me.User.ID+`"]}],"value":false}]`)

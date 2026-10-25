@@ -66,7 +66,7 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 	default:
 		return nil, fmt.Errorf("unknown ZEUS_LLM_PROVIDER %q", cfg.LLMProvider)
 	}
-	return llm.Metered{Provider: p, Q: q, Weights: &billing.Weights{Config: rc}}, nil
+	return llm.Metered{Provider: p, Q: q, Billing: &billing.Policy{Config: rc}}, nil
 }
 
 func Search(cfg config.Config) (search.Searcher, error) {

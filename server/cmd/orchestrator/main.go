@@ -19,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
+	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
 )
@@ -88,6 +89,7 @@ func run(log *slog.Logger) error {
 		Q: q, Bus: &events.Bus{R: rdb}, LLM: model,
 		Search: searcher, Browse: reader, Tools: &connector.Toolbox{Q: q},
 		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: notifier, Notify: notifier,
+		Quota: &quota.Service{Q: q, Config: rc},
 	})
 	// Quiet-hours pushes are sent when the window ends.
 	go notifier.Run(ctx, time.Minute)

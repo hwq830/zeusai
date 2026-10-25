@@ -178,6 +178,19 @@ paths:
         '204': { description: 已注销 }
         default: { $ref: '#/components/responses/Error' }
 
+  /v1/me/usage:
+    get:
+      tags: [me]
+      operationId: getMyUsage
+      summary: 本月 token 用量明细：按天和按任务
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenUsage' }
+        default: { $ref: '#/components/responses/Error' }
+
   # ---------------------------------------------------------------- devices
   /v1/devices:
     post:
@@ -561,7 +574,7 @@ paths:
     post:
       tags: [reports]
       operationId: createReportFollowup
-      summary: 针对报告追问。返回任务，答案以 text_delta 事件流式返回，并追加到报告末尾
+      summary: 针对报告追问。返回任务，答案以 text_delta 事件流式返回，并追加到报告末尾。本月 token 用完时返回 403 quota_exceeded
       requestBody:
         required: true
         content:
@@ -629,7 +642,7 @@ paths:
     post:
       tags: [tasks]
       operationId: createTask
-      summary: 发起调研报告。超出本月额度返回 403 quota_exceeded
+      summary: 发起调研报告。本月剩余 token 不足一份报告时返回 403 quota_exceeded
       requestBody:
         required: true
         content:
@@ -1139,7 +1152,7 @@ components:
             已知取值（客户端需容忍新增）：
             `unauthenticated` 令牌缺失或过期（先 refresh 再重试）、`forbidden`、`not_found`、
             `invalid_argument`、`conflict`、`auth_required`（连接器需先授权）、
-            `quota_exceeded`（额度用尽，见 details.quota）、`content_blocked`（内容安全拦截）、
+            `quota_exceeded`（额度用尽，见 details.quota；token 额度时 details 另有 used、limit、remaining、resetsAt）、`content_blocked`（内容安全拦截）、
             `rate_limited`、`sms_code_invalid`、`unavailable`、`internal`。
           example: quota_exceeded
         message:
@@ -1282,16 +1295,73 @@ components:
           type: string
           format: date-time
           description: 按周期重置的额度才有
+    TokenQuota:
+      type: object
+      description: |
+        本月 token 额度。用户只看到这一个数字；不同模型的折算在服务端完成，客户端不要展示模型、价格或系数。
+        失败的任务不计入。额度用完后定时简报照常推送，只拦截新的调研报告和追问。
+      required: [used, limit, remaining, resetsAt, reportMinTokens, reportEstimates]
+      properties:
+        used: { type: integer, format: int64 }
+        limit: { type: integer, format: int64, description: 含运营加赠 }
+        remaining: { type: integer, format: int64 }
+        resetsAt: { type: string, format: date-time, description: 下个月 1 日 0 点（用户时区） }
+        reportMinTokens:
+          type: integer
+          format: int64
+          description: 剩余低于此值时不能发起新报告（按钮置灰并展示 resetsAt）
+        reportEstimates:
+          type: object
+          description: 发起报告前展示的预计消耗，按深度
+          required: [quick, standard, deep]
+          properties:
+            quick: { $ref: '#/components/schemas/TokenRange' }
+            standard: { $ref: '#/components/schemas/TokenRange' }
+            deep: { $ref: '#/components/schemas/TokenRange' }
+    TokenRange:
+      type: object
+      required: [min, max]
+      properties:
+        min: { type: integer, format: int64 }
+        max: { type: integer, format: int64 }
     Quota:
       type: object
-      required: [briefingSubscriptions, reports]
+      required: [briefingSubscriptions, tokens]
       properties:
         briefingSubscriptions:
           allOf: [{ $ref: '#/components/schemas/QuotaItem' }]
           description: 可同时保留的定时简报数
-        reports:
-          allOf: [{ $ref: '#/components/schemas/QuotaItem' }]
-          description: 本月调研报告数
+        tokens: { $ref: '#/components/schemas/TokenQuota' }
+    TokenUsage:
+      type: object
+      required: [quota, daily, tasks]
+      properties:
+        quota: { $ref: '#/components/schemas/TokenQuota' }
+        daily:
+          type: array
+          description: 本月每天的消耗（只含有消耗的日期，用户时区）
+          items:
+            type: object
+            required: [date, tokens]
+            properties:
+              date: { type: string, format: date }
+              tokens: { type: integer, format: int64 }
+        tasks:
+          type: array
+          description: 本月有消耗的任务，最近的在前，最多 100 条
+          items: { $ref: '#/components/schemas/TaskTokenUsage' }
+    TaskTokenUsage:
+      type: object
+      required: [taskId, kind, title, tokens, counted, createdAt]
+      properties:
+        taskId: { type: string }
+        kind: { $ref: '#/components/schemas/TaskKind' }
+        title: { type: string }
+        tokens: { type: integer, format: int64 }
+        counted: { type: boolean, description: 失败的任务为 false，不计入额度 }
+        reportId: { type: string }
+        briefingId: { type: string }
+        createdAt: { type: string, format: date-time }
 
     RegisterDeviceRequest:
       type: object
@@ -1551,6 +1621,10 @@ components:
               items: { $ref: '#/components/schemas/BriefingSection' }
             taskId: { type: string }
             feedback: { $ref: '#/components/schemas/FeedbackRating' }
+            tokensUsed:
+              type: integer
+              format: int64
+              description: 生成这份简报消耗的 token
     BriefingList:
       allOf:
         - $ref: '#/components/schemas/Page'
@@ -1613,6 +1687,10 @@ components:
         createdAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time }
         feedback: { $ref: '#/components/schemas/ReportFeedback' }
+        tokensUsed:
+          type: integer
+          format: int64
+          description: 这份报告（含追问）消耗的 token；只在详情接口返回
     ReportList:
       allOf:
         - $ref: '#/components/schemas/Page'

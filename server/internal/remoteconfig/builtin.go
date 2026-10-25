@@ -16,8 +16,11 @@ const (
 	KeyReportCreateEnabled  = "report.create_enabled"
 	KeyReportPDFEnabled     = "report.pdf_enabled"
 	KeyQuotaSubscriptions   = "quota.free.subscriptions"
-	KeyQuotaReportsPerMonth = "quota.free.reports_per_month"
+	KeyQuotaTokensPerMonth  = "quota.free.tokens_per_month"
 	KeyQuotaTokenWeights    = "quota.token_weights"
+	KeyQuotaReportMinTokens = "quota.report_min_tokens"
+	KeyQuotaTaskTokenCap    = "quota.task_token_cap"
+	KeyQuotaReportEstimates = "quota.report_estimates"
 	KeyAppMinVersion        = "app.min_version"
 	KeyAppRecommended       = "app.recommended_version"
 	KeyHomeNotice           = "home.notice"
@@ -41,6 +44,21 @@ var tokenWeightsSchema = `{"type":"object","minProperties":1,"additionalProperti
 "required":["input","output","cached"],"additionalProperties":false,"properties":{
 "input":{"type":"number","minimum":0},"output":{"type":"number","minimum":0},"cached":{"type":"number","minimum":0}}}}`
 
+// Weights relative to qwen-max (weight 1), from the example price list in
+// deploy/modelgw.example.yaml; re-derive when the real prices are known.
+const defaultTokenWeights = `{"default":{"input":1,"output":1,"cached":1},
+"qwen-max":{"input":1,"output":1,"cached":0.4},
+"qwen-turbo":{"input":0.1,"output":0.1,"cached":0.04},
+"deepseek-chat":{"input":0.85,"output":0.85,"cached":0.2}}`
+
+const defaultReportEstimates = `{"quick":{"min":200000,"max":400000},
+"standard":{"min":400000,"max":800000},"deep":{"min":800000,"max":1500000}}`
+
+var reportEstimatesSchema = `{"type":"object","additionalProperties":false,"properties":{
+"quick":{"$ref":"#/$defs/r"},"standard":{"$ref":"#/$defs/r"},"deep":{"$ref":"#/$defs/r"}},
+"$defs":{"r":{"type":"object","required":["min","max"],"additionalProperties":false,
+"properties":{"min":{"type":"integer","minimum":0},"max":{"type":"integer","minimum":0}}}}}`
+
 var Builtins = []Builtin{
 	{Key: KeyReportCreateEnabled, Namespace: NSKillswitch, Type: TypeBool, Default: "true", ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "关闭后 App 隐藏「研究报告」入口，服务端拒绝新建报告"},
@@ -48,11 +66,18 @@ var Builtins = []Builtin{
 		Description: "关闭后 App 隐藏 PDF 导出，服务端拒绝导出"},
 	{Key: KeyQuotaSubscriptions, Namespace: NSQuota, Type: TypeInt, Default: "2", ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "免费用户最多同时保留的定时简报数；用户级覆盖仍在用户详情页设置"},
-	{Key: KeyQuotaReportsPerMonth, Namespace: NSQuota, Type: TypeInt, Default: "5", ApplyMode: ApplyImmediate, ClientVisible: true,
-		Description: "免费用户每月研究报告数"},
-	{Key: KeyQuotaTokenWeights, Namespace: NSQuota, Type: TypeJSON, Default: `{"default":{"input":1,"output":1,"cached":1}}`,
+	{Key: KeyQuotaTokensPerMonth, Namespace: NSQuota, Type: TypeInt, Default: "7500000", ApplyMode: ApplyImmediate, ClientVisible: true,
+		Description: "免费用户每月 token 额度（计费 token，按 quota.token_weights 折算）；用户级覆盖和加赠在用户详情页设置"},
+	{Key: KeyQuotaTokenWeights, Namespace: NSQuota, Type: TypeJSON, Default: defaultTokenWeights,
 		Schema: tokenWeightsSchema, ApplyMode: ApplyImmediate, ClientVisible: false,
-		Description: "各模型的计费 token 折算系数：{模型名: {input, output, cached}}，未列出的模型用 default；只影响之后的调用，不对用户展示"},
+		Description: "各模型的计费 token 折算系数：{模型名: {input, output, cached}}，以 qwen-max 为 1，未列出的模型用 default；只影响之后的调用，不对用户展示"},
+	{Key: KeyQuotaReportMinTokens, Namespace: NSQuota, Type: TypeInt, Default: "500000", ApplyMode: ApplyImmediate, ClientVisible: false,
+		Description: "剩余 token 低于此值时不能发起新的调研报告（定时简报不受影响）"},
+	{Key: KeyQuotaTaskTokenCap, Namespace: NSQuota, Type: TypeInt, Default: "1500000", ApplyMode: ApplyImmediate, ClientVisible: false,
+		Description: "单个任务最多消耗的计费 token；超过后任务失败，且不计入用户额度；0 表示不限"},
+	{Key: KeyQuotaReportEstimates, Namespace: NSQuota, Type: TypeJSON, Default: defaultReportEstimates,
+		Schema: reportEstimatesSchema, ApplyMode: ApplyImmediate, ClientVisible: false,
+		Description: "发起报告前展示的预计消耗（计费 token）：{quick|standard|deep: {min, max}}"},
 	{Key: KeyAppMinVersion, Namespace: NSApp, Type: TypeString, Default: `""`, ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "低于此版本的 App 显示不可关闭的升级页；空字符串表示不限制"},
 	{Key: KeyAppRecommended, Namespace: NSApp, Type: TypeString, Default: `""`, ApplyMode: ApplyImmediate, ClientVisible: true,

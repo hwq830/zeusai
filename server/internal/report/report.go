@@ -48,6 +48,8 @@ type Report struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	Feedback    *Feedback  `json:"feedback,omitempty"`
+	// TokensUsed is filled in by Get only.
+	TokensUsed *int64 `json:"tokensUsed,omitempty"`
 }
 
 // Feedback is the user's satisfaction rating of a report.
@@ -209,6 +211,11 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, id string) (Report,
 	case !errors.Is(err, pgx.ErrNoRows):
 		return Report{}, apperr.Internal(err)
 	}
+	n, err := s.Q.SumReportBilledTokens(ctx, db.SumReportBilledTokensParams{ReportID: &r.ID, UserID: userID})
+	if err != nil {
+		return Report{}, apperr.Internal(err)
+	}
+	out.TokensUsed = &n
 	return out, nil
 }
 
@@ -388,6 +395,13 @@ func (s *Service) Followup(ctx context.Context, userID uuid.UUID, id, question s
 	}
 	if r.Status != "done" {
 		return db.Task{}, apperr.Conflict("报告生成完后才能追问")
+	}
+	u, err := s.Q.GetUser(ctx, userID)
+	if err != nil {
+		return db.Task{}, apperr.Internal(err)
+	}
+	if err := s.Quota.CheckFollowup(ctx, u); err != nil {
+		return db.Task{}, err
 	}
 	if err := s.checkConcurrency(ctx, userID); err != nil {
 		return db.Task{}, err

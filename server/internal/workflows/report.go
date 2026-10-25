@@ -116,6 +116,7 @@ func ReportWorkflow(ctx workflow.Context, run orch.ReportRun) error {
 	}
 	// The report is already saved; a failed push must not fail the task.
 	_ = workflow.ExecuteActivity(ctx, a.NotifyReport, plan).Get(ctx, nil)
+	_ = workflow.ExecuteActivity(ctx, a.NotifyQuota, plan.UserID).Get(ctx, nil)
 	return nil
 }
 
@@ -374,8 +375,10 @@ func FollowupWorkflow(ctx workflow.Context, run orch.FollowupRun) error {
 			ev = events.Event{Type: events.TypeCancelled}
 		}
 		_ = workflow.ExecuteActivity(dctx, a.EmitEvent, run.UserID, run.TaskID, ev).Get(dctx, nil)
+		return err
 	}
-	return err
+	_ = workflow.ExecuteActivity(ctx, a.NotifyQuota, run.UserID).Get(ctx, nil)
+	return nil
 }
 
 func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) error {

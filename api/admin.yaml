@@ -153,6 +153,25 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/UserDetail' }
         default: { $ref: '#/components/responses/Error' }
+  /admin/v1/users/{userId}/token-grants:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [users]
+      operationId: grantUserTokens
+      summary: 给用户加赠本月 token（计入加赠当月，不结转）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotaGrantInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserDetail' }
+        default: { $ref: '#/components/responses/Error' }
   /admin/v1/users/{userId}/quota:
     parameters:
       - $ref: '#/components/parameters/UserId'
@@ -1356,12 +1375,37 @@ components:
         limit: { type: integer, description: 生效额度（含覆盖） }
         planLimit: { type: integer, description: 方案额度 }
         resetsAt: { type: string, format: date-time, nullable: true }
+    TokenQuotaItem:
+      type: object
+      description: 本月计费 token（各模型按 quota.token_weights 折算后的统一 token；失败任务不计入）
+      required: [used, limit, planLimit, granted, resetsAt]
+      properties:
+        used: { type: integer, format: int64 }
+        limit: { type: integer, format: int64, description: 生效额度（含覆盖与本月加赠） }
+        planLimit: { type: integer, format: int64, description: 方案额度 }
+        granted: { type: integer, format: int64, description: 本月加赠合计 }
+        resetsAt: { type: string, format: date-time }
+    QuotaGrant:
+      type: object
+      required: [id, tokens, reason, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        tokens: { type: integer, format: int64 }
+        reason: { type: string }
+        grantedBy: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    QuotaGrantInput:
+      type: object
+      required: [tokens, reason]
+      properties:
+        tokens: { type: integer, format: int64, minimum: 1, maximum: 100000000 }
+        reason: { type: string, minLength: 1, maxLength: 200, description: 原因，写入审计日志 }
     QuotaOverride:
       type: object
       required: [note, updatedAt]
       properties:
         subscriptions: { type: integer, nullable: true }
-        reportsPerMonth: { type: integer, nullable: true }
+        tokensPerMonth: { type: integer, format: int64, nullable: true }
         note: { type: string }
         updatedAt: { type: string, format: date-time }
     SubscriptionSummary:
@@ -1386,11 +1430,15 @@ components:
           description: 完整手机号，仅对有 users.write 权限的角色返回
         quota:
           type: object
-          required: [subscriptions, reports]
+          required: [subscriptions, tokens, grants]
           properties:
             subscriptions: { $ref: '#/components/schemas/QuotaItem' }
-            reports: { $ref: '#/components/schemas/QuotaItem' }
+            tokens: { $ref: '#/components/schemas/TokenQuotaItem' }
             override: { $ref: '#/components/schemas/QuotaOverride' }
+            grants:
+              type: array
+              description: 本月加赠记录，最近的在前
+              items: { $ref: '#/components/schemas/QuotaGrant' }
         subscriptions:
           type: array
           items: { $ref: '#/components/schemas/SubscriptionSummary' }
@@ -1407,7 +1455,7 @@ components:
       required: [note]
       properties:
         subscriptions: { type: integer, nullable: true, minimum: 0, maximum: 100 }
-        reportsPerMonth: { type: integer, nullable: true, minimum: 0, maximum: 1000 }
+        tokensPerMonth: { type: integer, format: int64, nullable: true, minimum: 0, maximum: 1000000000 }
         note: { type: string, maxLength: 200, description: 原因，写入审计日志 }
     DisableUserRequest:
       type: object
@@ -1416,11 +1464,11 @@ components:
         reason: { type: string, minLength: 1, maxLength: 200 }
     Plan:
       type: object
-      required: [code, subscriptions, reportsPerMonth]
+      required: [code, subscriptions, tokensPerMonth]
       properties:
         code: { type: string }
         subscriptions: { type: integer }
-        reportsPerMonth: { type: integer }
+        tokensPerMonth: { type: integer, format: int64 }
 
     # ------------------------------------------------------------ templates
     TemplateField:
@@ -1689,7 +1737,7 @@ components:
     # ------------------------------------------------------------ costs
     CostReport:
       type: object
-      required: [days, totalCny, daily, byModel, byKind, topUsers]
+      required: [days, totalCny, daily, byModel, byKind, topUsers, tokenQuota]
       properties:
         days: { type: integer }
         totalCny: { type: number, format: double }
@@ -1708,7 +1756,7 @@ components:
           type: array
           items:
             type: object
-            required: [provider, model, tier, calls, inputTokens, outputTokens, costCny]
+            required: [provider, model, tier, calls, inputTokens, outputTokens, costCny, billedTokens]
             properties:
               provider: { type: string }
               model: { type: string }
@@ -1717,6 +1765,30 @@ components:
               inputTokens: { type: integer, format: int64 }
               outputTokens: { type: integer, format: int64 }
               costCny: { type: number, format: double }
+              billedTokens: { type: integer, format: int64, description: 按折算系数扣给用户的 token }
+              cnyPerMillionBilled:
+                type: number
+                format: double
+                nullable: true
+                description: 每百万计费 token 的实际成本；各模型差距大说明折算系数需要调整
+        tokenQuota:
+          type: object
+          description: 本自然月（Asia/Shanghai）免费 token 额度的使用分布，按方案额度计算，不含用户级覆盖与加赠
+          required: [periodStart, planLimit, activeUsers, avgTokens, atLimitUsers, buckets]
+          properties:
+            periodStart: { type: string, format: date }
+            planLimit: { type: integer, format: int64 }
+            activeUsers: { type: integer, description: 本月有消耗的用户数 }
+            avgTokens: { type: integer, format: int64 }
+            atLimitUsers: { type: integer, description: 已用满额度的用户数 }
+            buckets:
+              type: array
+              items:
+                type: object
+                required: [label, users]
+                properties:
+                  label: { type: string, example: 20–40% }
+                  users: { type: integer }
         byKind:
           type: array
           description: 已完成任务按类型的总成本与平均成本

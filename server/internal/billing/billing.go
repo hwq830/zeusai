@@ -52,24 +52,37 @@ func (t Table) Tokens(model string, input, output, cached int) int64 {
 	return int64(math.Round(v))
 }
 
-// Weights reads the published weight table; a nil Weights or cache uses Neutral.
-type Weights struct {
+// Policy reads the published weights and per-task cap; a nil Policy or cache uses Neutral
+// weights and no cap.
+type Policy struct {
 	Config *remoteconfig.Cache
 }
 
-// For returns the table that applies to a call made for userID (nil for system calls), so
-// operators can target weights like any other key.
-func (w *Weights) For(userID *uuid.UUID) Table {
-	if w == nil || w.Config == nil {
-		return Neutral
-	}
+func userContext(userID *uuid.UUID) remoteconfig.Context {
 	var ctx remoteconfig.Context
 	if userID != nil {
 		ctx.UserID = userID.String()
 	}
-	t := remoteconfig.Value(w.Config, ctx, remoteconfig.KeyQuotaTokenWeights, Neutral)
+	return ctx
+}
+
+// Weights returns the table that applies to a call made for userID (nil for system calls), so
+// operators can target weights like any other key.
+func (p *Policy) Weights(userID *uuid.UUID) Table {
+	if p == nil || p.Config == nil {
+		return Neutral
+	}
+	t := remoteconfig.Value(p.Config, userContext(userID), remoteconfig.KeyQuotaTokenWeights, Neutral)
 	if len(t) == 0 {
 		return Neutral
 	}
 	return t
+}
+
+// TaskCap is the most billed tokens one task may use; 0 means no cap.
+func (p *Policy) TaskCap(userID *uuid.UUID) int64 {
+	if p == nil || p.Config == nil {
+		return 0
+	}
+	return int64(p.Config.Int(userContext(userID), remoteconfig.KeyQuotaTaskTokenCap, 0))
 }

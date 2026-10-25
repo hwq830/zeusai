@@ -295,6 +295,22 @@ type NotificationPref struct {
 	UpdatedAt        time.Time
 }
 
+type QuotaGrant struct {
+	ID        int64
+	UserID    uuid.UUID
+	Tokens    int64
+	Reason    string
+	GrantedBy *uuid.UUID
+	CreatedAt time.Time
+}
+
+type QuotaNotice struct {
+	UserID    uuid.UUID
+	Period    time.Time
+	Threshold int32
+	CreatedAt time.Time
+}
+
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -416,10 +432,10 @@ type UserConnector struct {
 }
 
 type UserQuotaOverride struct {
-	UserID          uuid.UUID
-	Subscriptions   *int32
-	ReportsPerMonth *int32
-	Note            string
-	UpdatedBy       *uuid.UUID
-	UpdatedAt       time.Time
+	UserID         uuid.UUID
+	Subscriptions  *int32
+	Note           string
+	UpdatedBy      *uuid.UUID
+	UpdatedAt      time.Time
+	TokensPerMonth *int64
 }
