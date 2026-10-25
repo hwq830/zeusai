@@ -16,7 +16,7 @@ const createTemplate = `-- name: CreateTemplate :one
 INSERT INTO templates (owner_id, slug, name, description, category, icon, fields, sections, sources,
                        default_schedule, default_length, required_connectors, sort_order)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed
+RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations
 `
 
 type CreateTemplateParams struct {
@@ -72,6 +72,7 @@ func (q *Queries) CreateTemplate(ctx context.Context, arg CreateTemplateParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AdminManaged,
+		&i.Translations,
 	)
 	return i, err
 }
@@ -93,8 +94,24 @@ func (q *Queries) DeleteUserTemplate(ctx context.Context, arg DeleteUserTemplate
 	return result.RowsAffected(), nil
 }
 
+const fillOfficialTranslations = `-- name: FillOfficialTranslations :exec
+UPDATE templates SET translations = $2, updated_at = now()
+WHERE slug = $1 AND admin_managed AND translations = '{}'::jsonb
+`
+
+type FillOfficialTranslationsParams struct {
+	Slug         *string
+	Translations json.RawMessage
+}
+
+// Gives a template edited in the admin console the seed file's translations, once.
+func (q *Queries) FillOfficialTranslations(ctx context.Context, arg FillOfficialTranslationsParams) error {
+	_, err := q.db.Exec(ctx, fillOfficialTranslations, arg.Slug, arg.Translations)
+	return err
+}
+
 const getTemplateForUser = `-- name: GetTemplateForUser :one
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed FROM templates WHERE id = $1 AND (owner_id IS NULL OR owner_id = $2)
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations FROM templates WHERE id = $1 AND (owner_id IS NULL OR owner_id = $2)
 `
 
 type GetTemplateForUserParams struct {
@@ -126,21 +143,25 @@ func (q *Queries) GetTemplateForUser(ctx context.Context, arg GetTemplateForUser
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AdminManaged,
+		&i.Translations,
 	)
 	return i, err
 }
 
 const listOfficialCategories = `-- name: ListOfficialCategories :many
-SELECT DISTINCT category, min(sort_order)::int AS ord FROM templates
+SELECT category, coalesce(max(translations->'en'->>'category'), '')::text AS category_en, min(sort_order)::int AS ord
+FROM templates
 WHERE owner_id IS NULL AND published AND category <> ''
 GROUP BY category ORDER BY ord, category
 `
 
 type ListOfficialCategoriesRow struct {
-	Category string
-	Ord      int32
+	Category   string
+	CategoryEn string
+	Ord        int32
 }
 
+// category_en is the English name from any template that has one (” when none does).
 func (q *Queries) ListOfficialCategories(ctx context.Context) ([]ListOfficialCategoriesRow, error) {
 	rows, err := q.db.Query(ctx, listOfficialCategories)
 	if err != nil {
@@ -150,7 +171,7 @@ func (q *Queries) ListOfficialCategories(ctx context.Context) ([]ListOfficialCat
 	items := []ListOfficialCategoriesRow{}
 	for rows.Next() {
 		var i ListOfficialCategoriesRow
-		if err := rows.Scan(&i.Category, &i.Ord); err != nil {
+		if err := rows.Scan(&i.Category, &i.CategoryEn, &i.Ord); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -162,7 +183,7 @@ func (q *Queries) ListOfficialCategories(ctx context.Context) ([]ListOfficialCat
 }
 
 const listOfficialTemplates = `-- name: ListOfficialTemplates :many
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed FROM templates
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations FROM templates
 WHERE owner_id IS NULL AND published
   AND ($3::text IS NULL OR category = $3)
   AND ($4::text IS NULL OR name ILIKE '%' || $4 || '%' OR description ILIKE '%' || $4 || '%')
@@ -211,6 +232,7 @@ func (q *Queries) ListOfficialTemplates(ctx context.Context, arg ListOfficialTem
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AdminManaged,
+			&i.Translations,
 		); err != nil {
 			return nil, err
 		}
@@ -223,7 +245,7 @@ func (q *Queries) ListOfficialTemplates(ctx context.Context, arg ListOfficialTem
 }
 
 const listUserTemplates = `-- name: ListUserTemplates :many
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed FROM templates
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations FROM templates
 WHERE owner_id = $1
   AND ($4::text IS NULL OR name ILIKE '%' || $4 || '%')
 ORDER BY updated_at DESC
@@ -271,6 +293,7 @@ func (q *Queries) ListUserTemplates(ctx context.Context, arg ListUserTemplatesPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AdminManaged,
+			&i.Translations,
 		); err != nil {
 			return nil, err
 		}
@@ -288,7 +311,7 @@ UPDATE templates SET
     default_schedule = $10, default_length = $11, required_connectors = $12,
     version = version + 1, updated_at = now()
 WHERE id = $1 AND owner_id = $2
-RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed
+RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations
 `
 
 type UpdateUserTemplateParams struct {
@@ -342,16 +365,18 @@ func (q *Queries) UpdateUserTemplate(ctx context.Context, arg UpdateUserTemplate
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AdminManaged,
+		&i.Translations,
 	)
 	return i, err
 }
 
 const upsertOfficialTemplate = `-- name: UpsertOfficialTemplate :exec
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
-                       default_schedule, default_length, required_connectors, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                       default_schedule, default_length, required_connectors, sort_order, translations)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (slug) DO UPDATE SET
     name = excluded.name, description = excluded.description, category = excluded.category,
+    translations = excluded.translations,
     icon = excluded.icon, fields = excluded.fields, sections = excluded.sections,
     sources = excluded.sources, default_schedule = excluded.default_schedule,
     default_length = excluded.default_length, required_connectors = excluded.required_connectors,
@@ -376,6 +401,7 @@ type UpsertOfficialTemplateParams struct {
 	DefaultLength      string
 	RequiredConnectors []string
 	SortOrder          int32
+	Translations       json.RawMessage
 }
 
 // Templates edited in the admin console keep their edits.
@@ -393,6 +419,7 @@ func (q *Queries) UpsertOfficialTemplate(ctx context.Context, arg UpsertOfficial
 		arg.DefaultLength,
 		arg.RequiredConnectors,
 		arg.SortOrder,
+		arg.Translations,
 	)
 	return err
 }

@@ -96,6 +96,7 @@ SELECT * FROM users
 WHERE (sqlc.narg(q)::text IS NULL
        OR id::text = sqlc.narg(q) OR phone LIKE '%' || sqlc.narg(q) || '%' OR nickname ILIKE '%' || sqlc.narg(q) || '%')
   AND (sqlc.narg(plan)::text IS NULL OR plan_code = sqlc.narg(plan))
+  AND (sqlc.narg(ui_language)::text IS NULL OR ui_language = sqlc.narg(ui_language))
   AND (sqlc.narg(status)::text IS NULL
        OR (sqlc.narg(status) = 'disabled' AND disabled_at IS NOT NULL)
        OR (sqlc.narg(status) = 'active' AND disabled_at IS NULL))
@@ -159,14 +160,15 @@ SELECT * FROM templates WHERE id = $1;
 
 -- name: AdminCreateOfficialTemplate :one
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
-                       default_schedule, default_length, required_connectors, published, sort_order, admin_managed)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, true)
+                       default_schedule, default_length, required_connectors, published, sort_order, translations, admin_managed)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, true)
 RETURNING *;
 
 -- name: AdminUpdateTemplate :one
 UPDATE templates SET
     name = $2, description = $3, category = $4, icon = $5, fields = $6, sections = $7, sources = $8,
     default_schedule = $9, default_length = $10, required_connectors = $11, published = $12, sort_order = $13,
+    translations = $14,
     version = CASE WHEN (fields, sections, sources) IS DISTINCT FROM ($6::jsonb, $7::jsonb, $8::jsonb)
                    THEN version + 1 ELSE version END,
     admin_managed = true, updated_at = now()

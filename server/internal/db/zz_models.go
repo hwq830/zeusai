@@ -58,6 +58,7 @@ type Briefing struct {
 	ReadAt         *time.Time
 	GeneratedAt    *time.Time
 	CreatedAt      time.Time
+	Language       string
 }
 
 type BriefingFeedback struct {
@@ -112,6 +113,8 @@ type Campaign struct {
 	RecalledAt       *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	TitleEn          string
+	BodyEn           string
 }
 
 type ConfigKey struct {
@@ -339,6 +342,7 @@ type Report struct {
 	PdfStatus            string
 	CreatedAt            time.Time
 	CompletedAt          *time.Time
+	Language             string
 }
 
 type ReportFeedback struct {
@@ -404,6 +408,7 @@ type Template struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	AdminManaged       bool
+	Translations       json.RawMessage
 }
 
 type User struct {
@@ -422,6 +427,8 @@ type User struct {
 	DisabledAt     *time.Time
 	DisabledReason string
 	LastSeenAt     *time.Time
+	UiLanguage     string
+	ReportLanguage string
 }
 
 type UserConnector struct {

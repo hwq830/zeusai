@@ -33,7 +33,7 @@ UPDATE reports SET
     status = 'done', title = $3, summary = $4, markdown = $5, sources = $6, source_count = $7,
     word_count = $8, completed_at = now()
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language
 `
 
 type CompleteReportParams struct {
@@ -78,6 +78,7 @@ func (q *Queries) CompleteReport(ctx context.Context, arg CompleteReportParams) 
 		&i.PdfStatus,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Language,
 	)
 	return i, err
 }
@@ -99,9 +100,9 @@ func (q *Queries) CountReportsSince(ctx context.Context, arg CountReportsSincePa
 }
 
 const createReport = `-- name: CreateReport :one
-INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at
+INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, language)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language
 `
 
 type CreateReportParams struct {
@@ -112,6 +113,7 @@ type CreateReportParams struct {
 	Depth                string
 	Focuses              []string
 	SourceBriefingItemID *string
+	Language             string
 }
 
 func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Report, error) {
@@ -123,6 +125,7 @@ func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Rep
 		arg.Depth,
 		arg.Focuses,
 		arg.SourceBriefingItemID,
+		arg.Language,
 	)
 	var i Report
 	err := row.Scan(
@@ -144,6 +147,7 @@ func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Rep
 		&i.PdfStatus,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Language,
 	)
 	return i, err
 }
@@ -198,7 +202,7 @@ func (q *Queries) DeleteReport(ctx context.Context, arg DeleteReportParams) (int
 }
 
 const getReport = `-- name: GetReport :one
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at FROM reports WHERE id = $1 AND user_id = $2
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language FROM reports WHERE id = $1 AND user_id = $2
 `
 
 type GetReportParams struct {
@@ -228,12 +232,13 @@ func (q *Queries) GetReport(ctx context.Context, arg GetReportParams) (Report, e
 		&i.PdfStatus,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Language,
 	)
 	return i, err
 }
 
 const getSharedReport = `-- name: GetSharedReport :one
-SELECT s.scope, r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at FROM shares s JOIN reports r ON r.id = s.report_id
+SELECT s.scope, r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at, r.language FROM shares s JOIN reports r ON r.id = s.report_id
 WHERE s.token = $1 AND s.revoked_at IS NULL AND r.status = 'done'
 `
 
@@ -257,6 +262,7 @@ type GetSharedReportRow struct {
 	PdfStatus            string
 	CreatedAt            time.Time
 	CompletedAt          *time.Time
+	Language             string
 }
 
 // Public lookup by share token; the only query that does not take user_id.
@@ -283,6 +289,7 @@ func (q *Queries) GetSharedReport(ctx context.Context, token string) (GetSharedR
 		&i.PdfStatus,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Language,
 	)
 	return i, err
 }
@@ -297,7 +304,7 @@ func (q *Queries) IncrementShareViews(ctx context.Context, token string) error {
 }
 
 const listReports = `-- name: ListReports :many
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at FROM reports
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language FROM reports
 WHERE user_id = $1
   AND ($4::text IS NULL OR status = $4)
   AND ($5::text IS NULL OR title ILIKE '%' || $5 || '%' OR topic ILIKE '%' || $5 || '%')
@@ -347,6 +354,7 @@ func (q *Queries) ListReports(ctx context.Context, arg ListReportsParams) ([]Rep
 			&i.PdfStatus,
 			&i.CreatedAt,
 			&i.CompletedAt,
+			&i.Language,
 		); err != nil {
 			return nil, err
 		}

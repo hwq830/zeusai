@@ -26,6 +26,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/feedback"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -65,7 +66,7 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 // Handler returns the full HTTP handler: health check plus the /v1 API.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, s.configVersionHeader)
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, s.configVersionHeader, requestLanguage)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/s/{token}", s.sharePage)
 	if s.Files != nil {
@@ -92,7 +93,7 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	if e.Status >= 500 {
 		s.Log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 	}
-	body := gen.Error{Code: e.Code, Message: e.Message, Retryable: e.Retryable}
+	body := gen.Error{Code: e.Code, Message: i18n.Message(i18n.FromContext(r.Context()), e.Code, e.Message), Retryable: e.Retryable}
 	if e.Details != nil {
 		d := e.Details
 		body.Details = &d
@@ -103,6 +104,15 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 type ctxKey struct{}
+
+// requestLanguage reads the App's display language from Accept-Language; error messages and
+// official template texts follow it.
+func requestLanguage(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		l := i18n.FromAcceptLanguage(r.Header.Get("Accept-Language"))
+		next.ServeHTTP(w, r.WithContext(i18n.WithLang(r.Context(), l)))
+	})
+}
 
 // authenticate enforces bearer auth on operations the contract marks as secured. On open
 // operations a valid token still identifies the user (GET /v1/config targets users) and an

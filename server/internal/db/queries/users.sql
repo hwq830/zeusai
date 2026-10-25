@@ -19,6 +19,8 @@ SELECT * FROM users WHERE wechat_unionid = $1;
 UPDATE users SET
     nickname = coalesce(sqlc.narg(nickname), nickname),
     timezone = coalesce(sqlc.narg(timezone), timezone),
+    ui_language = coalesce(sqlc.narg(ui_language), ui_language),
+    report_language = coalesce(sqlc.narg(report_language), report_language),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

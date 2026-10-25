@@ -29,10 +29,10 @@ WHERE id = $1 AND user_id = $2;
 
 -- name: StartBriefing :one
 -- One briefing per subscription per day; a re-run of the same day regenerates it.
-INSERT INTO briefings (user_id, subscription_id, task_id, title, date)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO briefings (user_id, subscription_id, task_id, title, date, language)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (subscription_id, date) DO UPDATE SET
-    task_id = excluded.task_id, title = excluded.title, status = 'generating'
+    task_id = excluded.task_id, title = excluded.title, language = excluded.language, status = 'generating'
 RETURNING *;
 
 -- name: CompleteBriefing :one

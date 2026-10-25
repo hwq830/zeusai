@@ -43,7 +43,7 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (nickname, phone, wechat_unionid, wechat_openid, apple_sub, timezone)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language
 `
 
 type CreateUserParams struct {
@@ -81,6 +81,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
 	)
 	return i, err
 }
@@ -127,7 +129,7 @@ func (q *Queries) GetQuotaOverride(ctx context.Context, userID uuid.UUID) (UserQ
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE id = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -149,12 +151,14 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
 	)
 	return i, err
 }
 
 const getUserByAppleSub = `-- name: GetUserByAppleSub :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE apple_sub = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language FROM users WHERE apple_sub = $1
 `
 
 func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User, error) {
@@ -176,12 +180,14 @@ func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE phone = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language FROM users WHERE phone = $1
 `
 
 func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, error) {
@@ -203,12 +209,14 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
 	)
 	return i, err
 }
 
 const getUserByWechatUnionID = `-- name: GetUserByWechatUnionID :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at FROM users WHERE wechat_unionid = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language FROM users WHERE wechat_unionid = $1
 `
 
 func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *string) (User, error) {
@@ -230,6 +238,8 @@ func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *str
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
 	)
 	return i, err
 }
@@ -339,19 +349,29 @@ const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users SET
     nickname = coalesce($2, nickname),
     timezone = coalesce($3, timezone),
+    ui_language = coalesce($4, ui_language),
+    report_language = coalesce($5, report_language),
     updated_at = now()
 WHERE id = $1
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language
 `
 
 type UpdateUserProfileParams struct {
-	ID       uuid.UUID
-	Nickname *string
-	Timezone *string
+	ID             uuid.UUID
+	Nickname       *string
+	Timezone       *string
+	UiLanguage     *string
+	ReportLanguage *string
 }
 
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserProfile, arg.ID, arg.Nickname, arg.Timezone)
+	row := q.db.QueryRow(ctx, updateUserProfile,
+		arg.ID,
+		arg.Nickname,
+		arg.Timezone,
+		arg.UiLanguage,
+		arg.ReportLanguage,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -369,6 +389,8 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.DisabledAt,
 		&i.DisabledReason,
 		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
 	)
 	return i, err
 }

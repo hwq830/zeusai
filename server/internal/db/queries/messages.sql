@@ -77,13 +77,13 @@ UPDATE users SET last_seen_at = $2 WHERE id = $1 AND (last_seen_at IS NULL OR la
 -- ---------------------------------------------------------------- campaigns (admin)
 
 -- name: CreateCampaign :one
-INSERT INTO campaigns (name, category, title, body, image_url, deeplink, audience, send_at, audience_estimate, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO campaigns (name, category, title, body, image_url, deeplink, audience, send_at, audience_estimate, created_by, title_en, body_en)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- name: UpdateCampaignDraft :one
 UPDATE campaigns SET name = $2, category = $3, title = $4, body = $5, image_url = $6, deeplink = $7,
-    audience = $8, send_at = $9, audience_estimate = $10, updated_at = now()
+    audience = $8, send_at = $9, audience_estimate = $10, title_en = $11, body_en = $12, updated_at = now()
 WHERE id = $1 AND status = 'draft'
 RETURNING *;
 
@@ -147,10 +147,11 @@ FROM messages WHERE campaign_id = $1;
 
 -- name: CampaignAudiencePage :many
 -- Users matching a campaign's targeting rule, keyset-paged by id. Suspended users never match.
-SELECT u.id FROM users u
+SELECT u.id, u.ui_language FROM users u
 WHERE u.id > sqlc.arg(after_id)::uuid
   AND u.disabled_at IS NULL
   AND (sqlc.narg(user_ids)::uuid[] IS NULL OR u.id = ANY(sqlc.narg(user_ids)::uuid[]))
+  AND (sqlc.narg(ui_language)::text IS NULL OR u.ui_language = sqlc.narg(ui_language))
   AND (sqlc.narg(registered_after)::timestamptz IS NULL OR u.created_at >= sqlc.narg(registered_after))
   AND (sqlc.narg(registered_before)::timestamptz IS NULL OR u.created_at < sqlc.narg(registered_before))
   AND (sqlc.narg(seen_after)::timestamptz IS NULL OR u.last_seen_at >= sqlc.narg(seen_after))
@@ -168,6 +169,7 @@ LIMIT sqlc.arg(page_size);
 SELECT count(*)::int FROM users u
 WHERE u.disabled_at IS NULL
   AND (sqlc.narg(user_ids)::uuid[] IS NULL OR u.id = ANY(sqlc.narg(user_ids)::uuid[]))
+  AND (sqlc.narg(ui_language)::text IS NULL OR u.ui_language = sqlc.narg(ui_language))
   AND (sqlc.narg(registered_after)::timestamptz IS NULL OR u.created_at >= sqlc.narg(registered_after))
   AND (sqlc.narg(registered_before)::timestamptz IS NULL OR u.created_at < sqlc.narg(registered_before))
   AND (sqlc.narg(seen_after)::timestamptz IS NULL OR u.last_seen_at >= sqlc.narg(seen_after))
