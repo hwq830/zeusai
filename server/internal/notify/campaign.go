@@ -14,6 +14,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/push"
 )
 
@@ -37,6 +38,8 @@ type Audience struct {
 	MinAppVersion    string `json:"minAppVersion,omitempty"`
 	// Has an active briefing subscription made from this template.
 	TemplateID string `json:"templateId,omitempty"`
+	// Display language zh or en; empty matches everyone.
+	Language string `json:"language,omitempty"`
 }
 
 func (a Audience) Validate() error {
@@ -64,6 +67,9 @@ func (a Audience) Validate() error {
 			if _, err := uuid.Parse(a.TemplateID); err != nil {
 				return apperr.Invalid("模板 ID 格式不正确")
 			}
+		}
+		if a.Language != "" && !i18n.Valid(a.Language) {
+			return apperr.Invalid("语言只能是 zh 或 en")
 		}
 	default:
 		return apperr.Invalid("目标人群类型不正确")
@@ -106,6 +112,9 @@ func (a Audience) params(now time.Time) db.CampaignAudiencePageParams {
 		if a.TemplateID != "" {
 			p.TemplateID = ptr(uuid.MustParse(a.TemplateID))
 		}
+		if a.Language != "" {
+			p.UiLanguage = ptr(a.Language)
+		}
 	}
 	return p
 }
@@ -117,7 +126,7 @@ func (s *Service) EstimateAudience(ctx context.Context, a Audience) (int, error)
 	p := a.params(s.now())
 	n, err := s.Q.CountCampaignAudience(ctx, db.CountCampaignAudienceParams{
 		UserIds: p.UserIds, RegisteredAfter: p.RegisteredAfter, RegisteredBefore: p.RegisteredBefore, SeenAfter: p.SeenAfter,
-		NotSeenAfter: p.NotSeenAfter, MinAppVersion: p.MinAppVersion, TemplateID: p.TemplateID,
+		NotSeenAfter: p.NotSeenAfter, MinAppVersion: p.MinAppVersion, TemplateID: p.TemplateID, UiLanguage: p.UiLanguage,
 	})
 	if err != nil {
 		return 0, apperr.Internal(err)
@@ -131,6 +140,9 @@ type Content struct {
 	Category string
 	Title    string
 	Body     string
+	// Optional English push for English-language users.
+	TitleEn  string
+	BodyEn   string
 	ImageURL string
 	DeepLink string
 }
@@ -147,6 +159,15 @@ func (c Content) Validate() error {
 	}
 	if utf8.RuneCountInString(c.Body) > 200 {
 		return apperr.Invalid("推送正文不能超过 200 字")
+	}
+	if utf8.RuneCountInString(c.TitleEn) > 80 {
+		return apperr.Invalid("英文标题不能超过 80 个字符")
+	}
+	if utf8.RuneCountInString(c.BodyEn) > 400 {
+		return apperr.Invalid("英文正文不能超过 400 个字符")
+	}
+	if strings.TrimSpace(c.TitleEn) == "" && strings.TrimSpace(c.BodyEn) != "" {
+		return apperr.Invalid("填写英文正文时也要填写英文标题")
 	}
 	if c.ImageURL != "" && !strings.HasPrefix(c.ImageURL, "https://") {
 		return apperr.Invalid("图片地址必须是 https 链接")
@@ -199,12 +220,17 @@ func (s *Service) SendCampaignBatch(ctx context.Context, id, after uuid.UUID) (n
 	if err != nil {
 		return after, false, err
 	}
-	for _, uid := range ids {
+	for _, row := range ids {
 		if err := ctx.Err(); err != nil {
 			return after, false, err
 		}
+		uid := row.ID
+		title, body := c.Title, c.Body
+		if i18n.Parse(row.UiLanguage) == i18n.EN && c.TitleEn != "" {
+			title, body = c.TitleEn, c.BodyEn
+		}
 		m, err := s.Q.CreateCampaignMessage(ctx, db.CreateCampaignMessageParams{
-			UserID: uid, Category: c.Category, Title: c.Title, Body: c.Body, ImageUrl: c.ImageUrl, Deeplink: c.Deeplink, CampaignID: &c.ID,
+			UserID: uid, Category: c.Category, Title: title, Body: body, ImageUrl: c.ImageUrl, Deeplink: c.Deeplink, CampaignID: &c.ID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			after = uid

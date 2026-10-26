@@ -241,3 +241,54 @@ func TestCampaignBatch(t *testing.T) {
 		t.Fatal("recalled message still listed")
 	}
 }
+
+// English-language users get the English texts of system messages and campaigns, and the
+// Chinese ones when no English text was written.
+func TestLanguage(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	zh, en := e.user(), e.user()
+	lang := "en"
+	if _, err := e.q.UpdateUserProfile(ctx, db.UpdateUserProfileParams{ID: en.ID, UiLanguage: &lang}); err != nil {
+		t.Fatal(err)
+	}
+	n := push.Notification{Category: push.CategoryReport, Title: "报告已完成", TitleEn: "Your report is ready", Body: "标题"}
+	for _, u := range []db.User{zh, en} {
+		if err := e.svc.Notify(ctx, u.ID, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m := e.messages(zh.ID)[0]; m.Title != "报告已完成" || m.Body != "标题" {
+		t.Fatalf("zh message %+v", m)
+	}
+	if m := e.messages(en.ID)[0]; m.Title != "Your report is ready" || m.Body != "标题" {
+		t.Fatalf("en message %+v", m)
+	}
+
+	// A campaign aimed at English users only, with English texts.
+	aud := notify.Audience{Type: "filter", Language: "en"}
+	if n, err := e.svc.EstimateAudience(ctx, aud); err != nil || n != 1 {
+		t.Fatalf("estimate = %d %v", n, err)
+	}
+	raw, _ := json.Marshal(notify.Audience{Type: "all"})
+	c, err := e.q.CreateCampaign(ctx, db.CreateCampaignParams{Name: "c", Category: "service", Title: "新功能", Body: "来看看",
+		TitleEn: "New feature", BodyEn: "Take a look", Audience: raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = e.q.SubmitCampaign(ctx, db.SubmitCampaignParams{ID: c.ID})
+	_, _ = e.q.ApproveCampaign(ctx, db.ApproveCampaignParams{ID: c.ID})
+	_, _ = e.svc.StartCampaign(ctx, c.ID)
+	if _, _, err := e.svc.SendCampaignBatch(ctx, c.ID, uuid.Nil); err != nil {
+		t.Fatal(err)
+	}
+	if m := e.messages(en.ID)[0]; m.Title != "New feature" || m.Body != "Take a look" {
+		t.Fatalf("en campaign %+v", m)
+	}
+	if m := e.messages(zh.ID)[0]; m.Title != "新功能" {
+		t.Fatalf("zh campaign %+v", m)
+	}
+	if err := (notify.Content{Name: "c", Category: "service", Title: "t", BodyEn: "only body"}).Validate(); err == nil {
+		t.Fatal("English body without English title must be rejected")
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/push"
 )
 
@@ -197,6 +198,10 @@ func (s *Service) UpdatePrefs(ctx context.Context, userID uuid.UUID, in Prefs) (
 
 // TestSend pushes a preview straight to the user's devices, without a message-center entry.
 func (s *Service) TestSend(ctx context.Context, userID uuid.UUID, n push.Notification) error {
-	n.Title = "[测试] " + n.Title
+	if u, err := s.Q.GetUser(ctx, userID); err == nil && i18n.Parse(u.UiLanguage) == i18n.EN && n.TitleEn != "" {
+		n.Title, n.Body = "[Test] "+n.TitleEn, n.BodyEn
+	} else {
+		n.Title = "[测试] " + n.Title
+	}
 	return s.Sender.Notify(ctx, userID, n)
 }

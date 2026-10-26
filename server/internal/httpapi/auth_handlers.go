@@ -7,11 +7,19 @@ import (
 	"github.com/hwq830/zeusai/server/internal/auth"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 )
 
 func (s *Server) session(ctx context.Context, ss auth.Session, err error) (gen.Session, error) {
 	if err != nil {
 		return gen.Session{}, err
+	}
+	// A new account starts in the language the App is showing.
+	if l := i18n.FromContext(ctx); ss.IsNewUser && string(l) != ss.User.UiLanguage {
+		lang := string(l)
+		if u, err := s.Q.UpdateUserProfile(ctx, db.UpdateUserProfileParams{ID: ss.User.ID, UiLanguage: &lang}); err == nil {
+			ss.User = u
+		}
 	}
 	me, err := s.me(ctx, ss.User)
 	if err != nil {
@@ -38,12 +46,13 @@ func (s *Server) me(ctx context.Context, u db.User) (gen.Me, error) {
 	if u.AppleSub != nil {
 		methods = append(methods, gen.Apple)
 	}
-	user := gen.User{Id: u.ID.String(), Nickname: u.Nickname, Timezone: u.Timezone, CreatedAt: u.CreatedAt, LoginMethods: methods}
+	user := gen.User{Id: u.ID.String(), Nickname: u.Nickname, Timezone: u.Timezone, CreatedAt: u.CreatedAt, LoginMethods: methods,
+		UiLanguage: gen.Language(i18n.Parse(u.UiLanguage)), ReportLanguage: gen.ReportLanguage(u.ReportLanguage)}
 	if u.Phone != nil {
 		m := auth.MaskPhone(*u.Phone)
 		user.PhoneMasked = &m
 	}
-	planName := map[string]string{"free": "免费版"}[u.PlanCode]
+	planName := map[string]string{"free": i18n.T(ctx, "免费版", "Free")}[u.PlanCode]
 	if planName == "" {
 		planName = u.PlanCode
 	}
@@ -134,7 +143,20 @@ func (s *Server) UpdateMe(ctx context.Context, req gen.UpdateMeRequestObject) (g
 			return nil, errInvalid("时区无效")
 		}
 	}
-	u, err := s.Q.UpdateUserProfile(ctx, db.UpdateUserProfileParams{ID: userID(ctx), Nickname: req.Body.Nickname, Timezone: req.Body.Timezone})
+	p := db.UpdateUserProfileParams{ID: userID(ctx), Nickname: req.Body.Nickname, Timezone: req.Body.Timezone}
+	if l := req.Body.UiLanguage; l != nil {
+		if !i18n.Valid(string(*l)) {
+			return nil, errInvalid("参数不正确")
+		}
+		p.UiLanguage = (*string)(l)
+	}
+	if l := req.Body.ReportLanguage; l != nil {
+		if *l != i18n.Auto && !i18n.Valid(string(*l)) {
+			return nil, errInvalid("参数不正确")
+		}
+		p.ReportLanguage = (*string)(l)
+	}
+	u, err := s.Q.UpdateUserProfile(ctx, p)
 	if err != nil {
 		return nil, err
 	}

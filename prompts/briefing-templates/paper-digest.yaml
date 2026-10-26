@@ -28,3 +28,13 @@ sources:
     value: '{{fields}} 论文 {{venues}}'
 default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '09:00', tz: Asia/Shanghai }
 default_length: standard
+translations:
+  en:
+    name: Paper Digest
+    description: New papers in your research areas, each with a one-line summary of its contribution
+    category: Research
+    fields:
+      fields: { label: Research areas, placeholder: 'e.g. multimodal LLMs, protein structure prediction' }
+      venues: { label: Conferences or journals }
+    sections:
+      papers: { title: New papers, instruction: 'New papers on {{fields}}; for each, the problem it solves, the core method and the results' }

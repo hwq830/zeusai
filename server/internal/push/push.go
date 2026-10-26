@@ -27,6 +27,10 @@ type Notification struct {
 	Category string
 	Title    string
 	Body     string
+	// English texts for users whose display language is English; empty falls back to Title/Body.
+	// notify.Service picks one before saving the message.
+	TitleEn  string
+	BodyEn   string
 	DeepLink string // zeus://briefing/{id}, zeus://report/{id}
 	Image    string // optional https cover image, shown by the iOS notification service extension
 	// Set by notify.Service: the message-center entry this push opens, and the app icon badge.

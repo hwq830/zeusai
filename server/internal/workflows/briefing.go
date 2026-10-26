@@ -23,6 +23,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
@@ -94,6 +95,8 @@ type BriefingPlan struct {
 	Sections    []SectionPlan
 	PushEnabled bool
 	PushAt      time.Time
+	// Lang is the user's display language when the issue started; briefings follow it.
+	Lang i18n.Lang
 }
 
 type SectionResult struct {
@@ -180,7 +183,7 @@ func clip(s string, n int) string {
 }
 
 // buildSections turns a subscription (and its template, if any) into section plans.
-func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int) []SectionPlan {
+func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i18n.Lang) []SectionPlan {
 	q := func(text, site string) search.Query {
 		return search.Query{Q: clip(strings.TrimSpace(text), 60), Site: site, FreshDays: fresh, Limit: 6}
 	}
@@ -192,7 +195,7 @@ func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int) []Sect
 			}
 			out = append(out, SectionPlan{
 				Key: fmt.Sprintf("t%d", i+1), Title: topic, MaxItems: 4,
-				Queries: []search.Query{q(topic+" 最新", "")},
+				Queries: []search.Query{q(topic+lang.Pick(" 最新", " latest"), "")},
 			})
 		}
 		return out
@@ -241,6 +244,7 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 	}
 	sub := briefing.FromRow(row)
 	now := a.now()
+	lang := a.uiLang(ctx, run.UserID)
 
 	taskID := run.TaskID
 	if run.Scheduled {
@@ -251,7 +255,7 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 			return BriefingPlan{Skip: true}, a.pauseInactive(ctx, row)
 		}
 		t, err := a.Q.CreateTask(ctx, db.CreateTaskParams{
-			UserID: run.UserID, Kind: "briefing", Title: row.Name, Subtitle: "定时简报", Input: json.RawMessage(`{}`),
+			UserID: run.UserID, Kind: "briefing", Title: row.Name, Subtitle: lang.Pick("定时简报", "Scheduled briefing"), Input: json.RawMessage(`{}`),
 			SubscriptionID: &row.ID, PromptVersion: prompts.Version,
 		})
 		if err != nil {
@@ -268,6 +272,7 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 			if err != nil {
 				return BriefingPlan{}, err
 			}
+			tt = tt.Localize(lang)
 			t = &tt
 		}
 	}
@@ -277,7 +282,7 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 
 	loc := sub.Schedule.Location()
 	date := schedule.LocalDate(now, loc)
-	b, err := a.Q.StartBriefing(ctx, db.StartBriefingParams{UserID: run.UserID, SubscriptionID: row.ID, TaskID: &taskID, Title: row.Name, Date: date})
+	b, err := a.Q.StartBriefing(ctx, db.StartBriefingParams{UserID: run.UserID, SubscriptionID: row.ID, TaskID: &taskID, Title: row.Name, Date: date, Language: string(lang)})
 	if err != nil {
 		return BriefingPlan{}, err
 	}
@@ -289,7 +294,7 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 	fresh := freshDays(sub.Schedule.Freq)
 	plan := BriefingPlan{
 		UserID: run.UserID, TaskID: taskID, BriefingID: b.ID, SubID: row.ID, Title: row.Name, Length: row.Length,
-		FreshDays: fresh, Interests: interests, Sections: buildSections(sub, t, fresh), PushEnabled: row.PushEnabled, PushAt: now,
+		FreshDays: fresh, Interests: interests, Sections: buildSections(sub, t, fresh, lang), PushEnabled: row.PushEnabled, PushAt: now, Lang: lang,
 	}
 	h, m := sub.Schedule.Clock()
 	l := now.In(loc)
@@ -299,9 +304,9 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 
 	steps := make([]events.Step, 0, len(plan.Sections)+1)
 	for i, s := range plan.Sections {
-		steps = append(steps, events.Step{Index: i + 1, Title: "整理「" + s.Title + "」", Tool: "search"})
+		steps = append(steps, sectionStep(lang, i, s.Title))
 	}
-	steps = append(steps, events.Step{Index: len(steps) + 1, Title: "汇总成稿", Tool: "write"})
+	steps = append(steps, finalizeStep(lang, len(steps)+1))
 	if err := a.emit(ctx, run.UserID, taskID, events.Event{Type: events.TypeStatus, Status: "running"}); err != nil {
 		return BriefingPlan{}, err
 	}
@@ -309,6 +314,14 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 		return BriefingPlan{}, err
 	}
 	return plan, nil
+}
+
+func sectionStep(l i18n.Lang, i int, title string) events.Step {
+	return events.Step{Index: i + 1, Title: l.Pick("整理「"+title+"」", "Gathering “"+title+"”"), Tool: "search"}
+}
+
+func finalizeStep(l i18n.Lang, n int) events.Step {
+	return events.Step{Index: n, Title: l.Pick("汇总成稿", "Putting it together"), Tool: "write"}
 }
 
 func (a *Activities) inactive(row db.BriefingSubscription, now time.Time) bool {
@@ -329,6 +342,7 @@ func (a *Activities) pauseInactive(ctx context.Context, row db.BriefingSubscript
 	// The Temporal schedule keeps firing; PrepareBriefing skips paused subscriptions.
 	return a.Push.Notify(ctx, row.UserID, push.Notification{
 		Category: push.CategoryService, Title: row.Name + " 已暂停", Body: "你已经一周没看这份简报了，我们先暂停推送。想恢复可以在 App 里打开。",
+		TitleEn: row.Name + " is paused", BodyEn: "You haven't opened this briefing for a week, so we've paused it. You can turn it back on in the app.",
 		DeepLink: "zeus://briefing-subscription/" + row.ID.String(),
 	})
 }
@@ -337,6 +351,8 @@ var sectionPrompt = texttemplate.Must(texttemplate.New("section").Funcs(texttemp
 	ParseFS(prompts.FS, "briefing/section.md")).Lookup("section.md")
 
 var lengthHints = map[string]string{"short": "不超过 40 字", "standard": "60–100 字", "long": "120–200 字"}
+
+var lengthHintsBriefingEN = map[string]string{"short": "under 25 words", "standard": "40–60 words", "long": "80–120 words"}
 
 type promptSource struct {
 	Title       string `json:"title"`
@@ -347,7 +363,7 @@ type promptSource struct {
 
 func (a *Activities) ResearchSection(ctx context.Context, plan BriefingPlan, i int) (SectionResult, error) {
 	sec := plan.Sections[i]
-	step := events.Step{Index: i + 1, Title: "整理「" + sec.Title + "」", Tool: "search"}
+	step := sectionStep(plan.Lang, i, sec.Title)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
 		return SectionResult{}, err
 	}
@@ -377,10 +393,12 @@ func (a *Activities) ResearchSection(ctx context.Context, plan BriefingPlan, i i
 	if len(sources) > 0 {
 		var sys bytes.Buffer
 		if err := sectionPrompt.Execute(&sys, map[string]any{
-			"Section": sec, "MaxItems": sec.MaxItems, "LengthHint": lengthHints[plan.Length], "FreshDays": plan.FreshDays, "Interests": plan.Interests,
+			"Section": sec, "MaxItems": sec.MaxItems, "LengthHint": plan.Lang.Pick(lengthHints[plan.Length], lengthHintsBriefingEN[plan.Length]),
+			"FreshDays": plan.FreshDays, "Interests": plan.Interests,
 		}); err != nil {
 			return SectionResult{}, err
 		}
+		sys.WriteString(i18n.OutputInstruction(plan.Lang))
 		ps := make([]promptSource, len(sources))
 		for j, r := range sources {
 			ps[j] = promptSource{Title: r.Title, Site: r.SiteName, Snippet: clip(r.Snippet, 400)}
@@ -424,14 +442,14 @@ func (a *Activities) ResearchSection(ctx context.Context, plan BriefingPlan, i i
 		result.Sources = len(used)
 	}
 
-	step.Detail = fmt.Sprintf("%d 条", len(result.Items))
+	step.Detail = fmt.Sprintf(plan.Lang.Pick("%d 条", "%d items"), len(result.Items))
 	return result, a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step})
 }
 
 var headlinePrompt = texttemplate.Must(texttemplate.ParseFS(prompts.FS, "briefing/headline.md")).Lookup("headline.md")
 
 func (a *Activities) FinalizeBriefing(ctx context.Context, plan BriefingPlan, results []SectionResult) error {
-	step := events.Step{Index: len(plan.Sections) + 1, Title: "汇总成稿", Tool: "write"}
+	step := finalizeStep(plan.Lang, len(plan.Sections)+1)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
 		return err
 	}
@@ -454,6 +472,7 @@ func (a *Activities) FinalizeBriefing(ctx context.Context, plan BriefingPlan, re
 	if len(titles) > 0 {
 		var sys bytes.Buffer
 		_ = headlinePrompt.Execute(&sys, map[string]any{"Title": plan.Title})
+		sys.WriteString(i18n.OutputInstruction(plan.Lang))
 		var out struct {
 			Headline string `json:"headline"`
 		}
@@ -464,9 +483,9 @@ func (a *Activities) FinalizeBriefing(ctx context.Context, plan BriefingPlan, re
 		}, &out); err != nil {
 			return err
 		}
-		headline = clip(out.Headline, 60)
+		headline = clip(out.Headline, plan.Lang.ClipLen(60))
 	} else {
-		headline = "这期没有找到值得推送的新内容"
+		headline = plan.Lang.Pick("这期没有找到值得推送的新内容", "Nothing new worth sending this time")
 	}
 
 	secJSON, _ := json.Marshal(sections)
@@ -483,7 +502,7 @@ func (a *Activities) FinalizeBriefing(ctx context.Context, plan BriefingPlan, re
 			return err
 		}
 	}
-	step.Detail = fmt.Sprintf("%d 条，%d 个来源", items, sources)
+	step.Detail = fmt.Sprintf(plan.Lang.Pick("%d 条，%d 个来源", "%d items, %d sources"), items, sources)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step}); err != nil {
 		return err
 	}
@@ -499,7 +518,8 @@ func (a *Activities) AbortBriefing(ctx context.Context, plan BriefingPlan, kind,
 		return a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeCancelled})
 	}
 	return a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeFailed,
-		Error: &events.Error{Code: "internal", Message: "简报生成失败，我们会在下一期重试", Retryable: true}})
+		Error: &events.Error{Code: "internal", Message: plan.Lang.Pick("简报生成失败，我们会在下一期重试",
+			"This briefing couldn't be generated. We'll try again with the next one"), Retryable: true}})
 }
 
 func (a *Activities) NotifyBriefing(ctx context.Context, plan BriefingPlan) error {

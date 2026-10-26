@@ -22,6 +22,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/quota"
@@ -34,11 +35,19 @@ const MaxConcurrentTasks = 2
 
 var DepthLabels = map[string]string{"quick": "快速报告", "standard": "标准报告", "deep": "深度报告"}
 
+var depthLabelsEN = map[string]string{"quick": "Quick report", "standard": "Standard report", "deep": "In-depth report"}
+
+// DepthLabel names a depth in the given language.
+func DepthLabel(l i18n.Lang, depth string) string {
+	return l.Pick(DepthLabels[depth], depthLabelsEN[depth])
+}
+
 type Report struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
 	Topic       string     `json:"topic"`
 	Depth       string     `json:"depth"`
+	Language    string     `json:"language"`
 	Status      string     `json:"status"`
 	Summary     string     `json:"summary,omitempty"`
 	TaskID      string     `json:"taskId"`
@@ -63,7 +72,7 @@ var feedbackReasons = map[string]bool{"inaccurate": true, "shallow": true, "bad_
 
 func FromRow(r db.Report) Report {
 	out := Report{
-		ID: r.ID.String(), Title: r.Title, Topic: r.Topic, Depth: r.Depth, Status: r.Status, Summary: r.Summary,
+		ID: r.ID.String(), Title: r.Title, Topic: r.Topic, Depth: r.Depth, Language: string(i18n.Parse(r.Language)), Status: r.Status, Summary: r.Summary,
 		SourceCount: int(r.SourceCount), WordCount: int(r.WordCount), CreatedAt: r.CreatedAt, CompletedAt: r.CompletedAt,
 	}
 	if r.TaskID != nil {
@@ -80,6 +89,8 @@ type Input struct {
 	Depth                string   `json:"depth,omitempty"`
 	Focuses              []string `json:"focuses,omitempty"`
 	SourceBriefingItemID *string  `json:"sourceBriefingItemId,omitempty"`
+	// Language overrides the user's report language for this report.
+	Language string `json:"language,omitempty"`
 }
 
 type Share struct {
@@ -109,13 +120,22 @@ func clip(s string, n int) string {
 	return string([]rune(s)[:n])
 }
 
-// Subtitle is the progress-page line under the title, e.g. "标准报告 · 侧重市场规模、竞品对比".
-func Subtitle(depth string, focuses []string) string {
-	s := DepthLabels[depth]
+// Subtitle is the progress-page line under the title, e.g. "标准报告 · 侧重市场规模、竞品对比",
+// in the App's display language.
+func Subtitle(l i18n.Lang, depth string, focuses []string) string {
+	s := DepthLabel(l, depth)
 	if len(focuses) > 0 {
-		s += " · 侧重" + strings.Join(focuses, "、")
+		s += l.Pick(" · 侧重"+strings.Join(focuses, "、"), " · Focus: "+strings.Join(focuses, ", "))
 	}
 	return s
+}
+
+// TitleFromTopic is the placeholder title until the planner names the report.
+func TitleFromTopic(topic string) string {
+	if utf8.RuneCountInString(topic) == len(topic) { // ASCII: an English topic
+		return clip(topic, 80)
+	}
+	return clip(topic, 30)
 }
 
 func (s *Service) checkConcurrency(ctx context.Context, userID uuid.UUID) error {
@@ -144,6 +164,14 @@ func (s *Service) Create(ctx context.Context, u db.User, in Input) (db.Task, err
 	if len(in.Focuses) > 6 {
 		return db.Task{}, apperr.Invalid("侧重角度最多 6 个")
 	}
+	if in.Language != "" && !i18n.Valid(in.Language) {
+		return db.Task{}, apperr.Invalid("参数不正确")
+	}
+	pref := in.Language
+	if pref == "" {
+		pref = u.ReportLanguage
+	}
+	lang := i18n.ReportLang(pref, u.UiLanguage)
 	if !s.Config.Bool(remoteconfig.UserContext(u, ""), remoteconfig.KeyReportCreateEnabled, true) {
 		return db.Task{}, apperr.Unavailable("研究报告功能暂时不可用，请稍后再试")
 	}
@@ -157,16 +185,16 @@ func (s *Service) Create(ctx context.Context, u db.User, in Input) (db.Task, err
 		return db.Task{}, err
 	}
 	input, _ := json.Marshal(in)
-	title := clip(in.Topic, 30)
+	title := TitleFromTopic(in.Topic)
 	t, err := s.Q.CreateTask(ctx, db.CreateTaskParams{
-		UserID: u.ID, Kind: "report", Title: title, Subtitle: Subtitle(in.Depth, in.Focuses), Input: input, PromptVersion: prompts.Version,
+		UserID: u.ID, Kind: "report", Title: title, Subtitle: Subtitle(i18n.Parse(u.UiLanguage), in.Depth, in.Focuses), Input: input, PromptVersion: prompts.Version,
 	})
 	if err != nil {
 		return db.Task{}, apperr.Internal(err)
 	}
 	r, err := s.Q.CreateReport(ctx, db.CreateReportParams{
 		UserID: u.ID, TaskID: &t.ID, Title: title, Topic: in.Topic, Depth: in.Depth, Focuses: orEmpty(in.Focuses),
-		SourceBriefingItemID: in.SourceBriefingItemID,
+		SourceBriefingItemID: in.SourceBriefingItemID, Language: string(lang),
 	})
 	if err != nil {
 		return db.Task{}, apperr.Internal(err)
@@ -299,7 +327,8 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID, id string) error
 }
 
 func templateData(r db.Report, full bool) reporttemplate.Data {
-	d := reporttemplate.Data{Title: r.Title, Summary: r.Summary, DepthLabel: DepthLabels[r.Depth], SourceCount: int(r.SourceCount)}
+	l := i18n.Parse(r.Language)
+	d := reporttemplate.Data{Title: r.Title, Summary: r.Summary, DepthLabel: DepthLabel(l, r.Depth), SourceCount: int(r.SourceCount), Lang: string(l)}
 	if r.CompletedAt != nil {
 		d.CompletedAt = r.CompletedAt.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02")
 	}
@@ -408,7 +437,7 @@ func (s *Service) Followup(ctx context.Context, userID uuid.UUID, id, question s
 	}
 	input, _ := json.Marshal(map[string]string{"question": question})
 	t, err := s.Q.CreateTask(ctx, db.CreateTaskParams{
-		UserID: userID, Kind: "followup", Title: clip(question, 30), Subtitle: "追问 · " + clip(r.Title, 20), Input: input,
+		UserID: userID, Kind: "followup", Title: TitleFromTopic(question), Subtitle: i18n.Parse(u.UiLanguage).Pick("追问 · "+clip(r.Title, 20), "Follow-up · "+clip(r.Title, 40)), Input: input,
 		ReportID: &r.ID, PromptVersion: prompts.Version,
 	})
 	if err != nil {
@@ -471,7 +500,7 @@ func (s *Service) SharedHTML(ctx context.Context, token string) ([]byte, error) 
 	}
 	_ = s.Q.IncrementShareViews(ctx, token)
 	r := db.Report{ID: row.ID, Title: row.Title, Depth: row.Depth, Summary: row.Summary, Markdown: row.Markdown,
-		Sources: row.Sources, SourceCount: row.SourceCount, CompletedAt: row.CompletedAt}
+		Sources: row.Sources, SourceCount: row.SourceCount, CompletedAt: row.CompletedAt, Language: row.Language}
 	d := templateData(r, row.Scope == "full")
 	d.Share = true
 	d.AppURL = strings.TrimRight(s.PublicBaseURL, "/") + "/app"

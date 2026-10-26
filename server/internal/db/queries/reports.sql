@@ -2,8 +2,8 @@
 SELECT count(*)::int FROM reports WHERE user_id = $1 AND created_at >= $2 AND status <> 'failed';
 
 -- name: CreateReport :one
-INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, language)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: GetReport :one

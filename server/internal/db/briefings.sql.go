@@ -17,7 +17,7 @@ const completeBriefing = `-- name: CompleteBriefing :one
 UPDATE briefings SET
     status = 'ready', headline = $3, sections = $4, item_count = $5, source_count = $6, generated_at = now()
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at
+RETURNING id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at, language
 `
 
 type CompleteBriefingParams struct {
@@ -54,6 +54,7 @@ func (q *Queries) CompleteBriefing(ctx context.Context, arg CompleteBriefingPara
 		&i.ReadAt,
 		&i.GeneratedAt,
 		&i.CreatedAt,
+		&i.Language,
 	)
 	return i, err
 }
@@ -157,7 +158,7 @@ func (q *Queries) FailBriefing(ctx context.Context, arg FailBriefingParams) erro
 }
 
 const getBriefing = `-- name: GetBriefing :one
-SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at FROM briefings WHERE id = $1 AND user_id = $2
+SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at, language FROM briefings WHERE id = $1 AND user_id = $2
 `
 
 type GetBriefingParams struct {
@@ -183,6 +184,7 @@ func (q *Queries) GetBriefing(ctx context.Context, arg GetBriefingParams) (Brief
 		&i.ReadAt,
 		&i.GeneratedAt,
 		&i.CreatedAt,
+		&i.Language,
 	)
 	return i, err
 }
@@ -238,7 +240,7 @@ func (q *Queries) GetSubscription(ctx context.Context, arg GetSubscriptionParams
 }
 
 const listBriefings = `-- name: ListBriefings :many
-SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at FROM briefings
+SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at, language FROM briefings
 WHERE user_id = $1 AND ($4::uuid IS NULL OR subscription_id = $4)
 ORDER BY date DESC, created_at DESC
 LIMIT $2 OFFSET $3
@@ -280,6 +282,7 @@ func (q *Queries) ListBriefings(ctx context.Context, arg ListBriefingsParams) ([
 			&i.ReadAt,
 			&i.GeneratedAt,
 			&i.CreatedAt,
+			&i.Language,
 		); err != nil {
 			return nil, err
 		}
@@ -292,7 +295,7 @@ func (q *Queries) ListBriefings(ctx context.Context, arg ListBriefingsParams) ([
 }
 
 const listBriefingsOnDate = `-- name: ListBriefingsOnDate :many
-SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at FROM briefings WHERE user_id = $1 AND date = $2 ORDER BY created_at
+SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at, language FROM briefings WHERE user_id = $1 AND date = $2 ORDER BY created_at
 `
 
 type ListBriefingsOnDateParams struct {
@@ -324,6 +327,7 @@ func (q *Queries) ListBriefingsOnDate(ctx context.Context, arg ListBriefingsOnDa
 			&i.ReadAt,
 			&i.GeneratedAt,
 			&i.CreatedAt,
+			&i.Language,
 		); err != nil {
 			return nil, err
 		}
@@ -414,11 +418,11 @@ func (q *Queries) SetSubscriptionLastBriefing(ctx context.Context, arg SetSubscr
 }
 
 const startBriefing = `-- name: StartBriefing :one
-INSERT INTO briefings (user_id, subscription_id, task_id, title, date)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO briefings (user_id, subscription_id, task_id, title, date, language)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (subscription_id, date) DO UPDATE SET
-    task_id = excluded.task_id, title = excluded.title, status = 'generating'
-RETURNING id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at
+    task_id = excluded.task_id, title = excluded.title, language = excluded.language, status = 'generating'
+RETURNING id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at, language
 `
 
 type StartBriefingParams struct {
@@ -427,6 +431,7 @@ type StartBriefingParams struct {
 	TaskID         *uuid.UUID
 	Title          string
 	Date           time.Time
+	Language       string
 }
 
 // One briefing per subscription per day; a re-run of the same day regenerates it.
@@ -437,6 +442,7 @@ func (q *Queries) StartBriefing(ctx context.Context, arg StartBriefingParams) (B
 		arg.TaskID,
 		arg.Title,
 		arg.Date,
+		arg.Language,
 	)
 	var i Briefing
 	err := row.Scan(
@@ -454,6 +460,7 @@ func (q *Queries) StartBriefing(ctx context.Context, arg StartBriefingParams) (B
 		&i.ReadAt,
 		&i.GeneratedAt,
 		&i.CreatedAt,
+		&i.Language,
 	)
 	return i, err
 }

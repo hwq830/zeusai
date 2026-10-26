@@ -133,3 +133,13 @@ go generate ./server/...   # 重新生成 httpapi/gen 和 db
 ```
 
 CI 会检查生成代码与 `api/openapi.yaml`、`queries/*.sql` 一致。
+
+## 中文 / English
+
+- 用户有两个语言：`users.ui_language`（App 显示语言，zh / en）和 `users.report_language`（auto 跟随显示语言）。
+  简报、推送、消息中心、进度步骤跟随显示语言；报告按 `reports.language` 生成，新建时可单次指定。
+- 请求的 `Accept-Language` 决定错误提示和官方模板文案的语言（`internal/i18n`，在 `httpapi` 中间件里设置）。
+- 错误提示：服务里照旧写中文，`i18n/messages.go` 按中文原文给出英文；`TestCatalogCoversErrors` 会扫出漏翻的提示。
+- 推送：`push.Notification` 填 `TitleEn` / `BodyEn`，`notify.Service` 按用户显示语言挑选；运营推送的英文版选填。
+- 生成：提示词仍是中文，`i18n.OutputInstruction` 在末尾指定输出语言；篇幅提示分中英两套。
+- 官方模板：`prompts/briefing-templates/*.yaml` 的 `translations.en` 写英文文案（缺的回落中文），控制台也可编辑。

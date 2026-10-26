@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{.L.HTMLLang}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -48,7 +48,7 @@ pre code { display: block; padding: 12px; overflow-x: auto; }
 <body>
 <main>
   <h1>{{.Title}}</h1>
-  <div class="meta">{{.DepthLabel}} · {{.SourceCount}} 个来源{{if .CompletedAt}} · {{.CompletedAt}}{{end}}</div>
+  <div class="meta">{{.DepthLabel}} · {{printf .L.SourceCount .SourceCount}}{{if .CompletedAt}} · {{.CompletedAt}}{{end}}</div>
   {{- if .Summary}}
   <div class="summary">{{.Summary}}</div>
   {{- end}}
@@ -57,7 +57,7 @@ pre code { display: block; padding: 12px; overflow-x: auto; }
   {{- end}}
   {{- if and .Sources .Body}}
   <section class="sources">
-    <h2>来源</h2>
+    <h2>{{.L.Sources}}</h2>
     <ol>
     {{- range .Sources}}
       <li id="src-{{.Index}}">{{if isWeb .URL}}<a href="{{.URL}}" rel="noopener nofollow" target="_blank">{{.Title}}</a>{{else}}{{.Title}}{{end}}{{if .SiteName}} · {{.SiteName}}{{end}}</li>
@@ -66,9 +66,9 @@ pre code { display: block; padding: 12px; overflow-x: auto; }
   </section>
   {{- end}}
   <div class="footer">
-    本报告由 AI 生成，内容仅供参考，请以原始来源为准。
+    {{.L.Disclaimer}}
     {{- if .Share}}
-    <div><a class="cta" href="{{.AppURL}}">用 Zeus 生成你自己的报告</a></div>
+    <div><a class="cta" href="{{.AppURL}}">{{.L.CTA}}</a></div>
     {{- end}}
   </div>
 </main>

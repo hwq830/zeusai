@@ -16,6 +16,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/push"
 )
 
@@ -80,8 +81,18 @@ func (s *Service) Notify(ctx context.Context, userID uuid.UUID, n push.Notificat
 	if !Categories[cat] {
 		return errors.New("notify: unknown category " + cat)
 	}
+	title, body := n.Title, n.Body
+	if n.TitleEn != "" || n.BodyEn != "" {
+		u, err := s.Q.GetUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if l := i18n.Parse(u.UiLanguage); l == i18n.EN {
+			title, body = l.Pick(n.Title, n.TitleEn), l.Pick(n.Body, n.BodyEn)
+		}
+	}
 	m, err := s.Q.CreateMessage(ctx, db.CreateMessageParams{
-		UserID: userID, Category: cat, Title: n.Title, Body: n.Body, ImageUrl: n.Image, Deeplink: n.DeepLink,
+		UserID: userID, Category: cat, Title: title, Body: body, ImageUrl: n.Image, Deeplink: n.DeepLink,
 	})
 	if err != nil {
 		return err

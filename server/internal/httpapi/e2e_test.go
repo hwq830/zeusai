@@ -52,6 +52,8 @@ type harness struct {
 	orch   *workflows.Client
 	pushes *push.Log
 	q      *db.Queries
+	// lang is sent as Accept-Language when set.
+	lang string
 }
 
 func setup(t *testing.T) *harness {
@@ -127,6 +129,9 @@ func (h *harness) do(method, path string, body any, wantStatus int, out any) {
 	}
 	req, _ := http.NewRequest(method, h.url+path, rd)
 	req.Header.Set("Content-Type", "application/json")
+	if h.lang != "" {
+		req.Header.Set("Accept-Language", h.lang)
+	}
 	if h.token != "" {
 		req.Header.Set("Authorization", "Bearer "+h.token)
 	}

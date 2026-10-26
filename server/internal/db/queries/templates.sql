@@ -7,7 +7,9 @@ ORDER BY sort_order, created_at
 LIMIT $1 OFFSET $2;
 
 -- name: ListOfficialCategories :many
-SELECT DISTINCT category, min(sort_order)::int AS ord FROM templates
+-- category_en is the English name from any template that has one ('' when none does).
+SELECT category, coalesce(max(translations->'en'->>'category'), '')::text AS category_en, min(sort_order)::int AS ord
+FROM templates
 WHERE owner_id IS NULL AND published AND category <> ''
 GROUP BY category ORDER BY ord, category;
 
@@ -42,10 +44,11 @@ DELETE FROM templates WHERE id = $1 AND owner_id = $2;
 -- name: UpsertOfficialTemplate :exec
 -- Templates edited in the admin console keep their edits.
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
-                       default_schedule, default_length, required_connectors, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                       default_schedule, default_length, required_connectors, sort_order, translations)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (slug) DO UPDATE SET
     name = excluded.name, description = excluded.description, category = excluded.category,
+    translations = excluded.translations,
     icon = excluded.icon, fields = excluded.fields, sections = excluded.sections,
     sources = excluded.sources, default_schedule = excluded.default_schedule,
     default_length = excluded.default_length, required_connectors = excluded.required_connectors,
@@ -55,3 +58,8 @@ ON CONFLICT (slug) DO UPDATE SET
                    THEN templates.version + 1 ELSE templates.version END,
     updated_at = now()
 WHERE NOT templates.admin_managed;
+
+-- name: FillOfficialTranslations :exec
+-- Gives a template edited in the admin console the seed file's translations, once.
+UPDATE templates SET translations = $2, updated_at = now()
+WHERE slug = $1 AND admin_managed AND translations = '{}'::jsonb;

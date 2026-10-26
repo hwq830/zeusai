@@ -28,3 +28,13 @@ sources:
 default_schedule: { freq: weekly, weekdays: [5], time: '18:00', tz: Asia/Shanghai }
 default_length: standard
 required_connectors: [github]
+translations:
+  en:
+    name: Open Source Weekly
+    description: Track releases, notable PRs and community discussion for open-source projects
+    category: Developers
+    fields:
+      repos: { label: Projects, placeholder: 'e.g. kubernetes/kubernetes, pytorch' }
+    sections:
+      releases: { title: Releases, instruction: 'Releases and notable changes in {{repos}} this week' }
+      discussions: { title: Community, instruction: 'Issues, RFCs and discussions worth a look' }

@@ -19,6 +19,9 @@ info:
     - 远程配置：App 启动和回到前台时调 `GET /v1/config`。每个 `/v1` 响应都带 `X-Zeus-Config-Version`
       （当前发布版本号），比本地缓存新时补拉一次。App 每个请求都带 `X-Zeus-App-Version`、`X-Zeus-Platform`、
       `X-Zeus-OS-Version`、`X-Zeus-Install-Id`（安装时生成的随机 ID）、`X-Zeus-Channel`，供灰度规则使用。
+    - 语言：App 每个请求都带 `Accept-Language`（App 当前显示语言，如 `zh-Hans`、`en`）。错误的 `message`、
+      官方模板的名称和栏目等按它返回中文或英文；其他语言一律按中文。推送、消息中心和简报跟随 `User.uiLanguage`，
+      报告按 `Report.language` 生成。
 servers:
   - url: https://api.zeus.example.com
     description: 生产（域名待定）
@@ -1253,7 +1256,7 @@ components:
         quota: { $ref: '#/components/schemas/Quota' }
     User:
       type: object
-      required: [id, nickname, timezone, createdAt, loginMethods]
+      required: [id, nickname, timezone, createdAt, loginMethods, uiLanguage, reportLanguage]
       properties:
         id: { type: string }
         nickname: { type: string }
@@ -1269,12 +1272,27 @@ components:
           items:
             type: string
             enum: [phone, wechat, apple]
+        uiLanguage: { $ref: '#/components/schemas/Language' }
+        reportLanguage: { $ref: '#/components/schemas/ReportLanguage' }
         createdAt: { type: string, format: date-time }
+    Language:
+      type: string
+      description: 中文 / English
+      enum: [zh, en]
+    ReportLanguage:
+      type: string
+      description: 报告生成语言；auto 跟随 App 显示语言
+      enum: [auto, zh, en]
     UpdateMeRequest:
       type: object
       properties:
         nickname: { type: string, maxLength: 32 }
         timezone: { type: string }
+        uiLanguage:
+          allOf:
+            - $ref: '#/components/schemas/Language'
+          description: App 的显示语言（"跟随系统"时由 App 换算成 zh / en 再上报）；简报、推送和消息中心跟随它
+        reportLanguage: { $ref: '#/components/schemas/ReportLanguage' }
     Plan:
       type: object
       required: [code, name]
@@ -1610,6 +1628,10 @@ components:
         sourceCount: { type: integer }
         readAt: { type: string, format: date-time }
         generatedAt: { type: string, format: date-time }
+        language:
+          allOf:
+            - $ref: '#/components/schemas/Language'
+          description: 这期生成时用户的显示语言
     Briefing:
       allOf:
         - $ref: '#/components/schemas/BriefingSummary'
@@ -1668,19 +1690,22 @@ components:
       enum: [quick, standard, deep]
     Report:
       type: object
-      required: [id, title, topic, depth, status, createdAt, taskId, sourceCount]
+      required: [id, title, topic, depth, status, createdAt, taskId, sourceCount, language]
       properties:
         id: { type: string }
         title: { type: string }
         topic: { type: string }
         depth: { $ref: '#/components/schemas/ReportDepth' }
+        language: { $ref: '#/components/schemas/Language' }
         status: { $ref: '#/components/schemas/ReportStatus' }
         summary:
           type: string
           description: 3–5 句摘要，列表和分享卡片用
         taskId: { type: string }
         sourceCount: { type: integer }
-        wordCount: { type: integer }
+        wordCount:
+          type: integer
+          description: 中文报告按字数，英文报告按单词数
         htmlUrl:
           type: string
           description: 相对路径 /v1/reports/{id}/html，done 时才有
@@ -1770,6 +1795,10 @@ components:
         sourceBriefingItemId:
           type: string
           description: 从简报条目"深入调研"发起时填
+        language:
+          allOf:
+            - $ref: '#/components/schemas/Language'
+          description: 本次报告的生成语言；不填用 User.reportLanguage
     StepInfo:
       type: object
       required: [index, title]

@@ -16,7 +16,7 @@ import (
 const approveCampaign = `-- name: ApproveCampaign :one
 UPDATE campaigns SET status = 'scheduled', approved_by = $2, approved_at = now(), updated_at = now()
 WHERE id = $1 AND status = 'pending_approval'
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 type ApproveCampaignParams struct {
@@ -50,32 +50,36 @@ func (q *Queries) ApproveCampaign(ctx context.Context, arg ApproveCampaignParams
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
 
 const campaignAudiencePage = `-- name: CampaignAudiencePage :many
-SELECT u.id FROM users u
+SELECT u.id, u.ui_language FROM users u
 WHERE u.id > $1::uuid
   AND u.disabled_at IS NULL
   AND ($2::uuid[] IS NULL OR u.id = ANY($2::uuid[]))
-  AND ($3::timestamptz IS NULL OR u.created_at >= $3)
-  AND ($4::timestamptz IS NULL OR u.created_at < $4)
-  AND ($5::timestamptz IS NULL OR u.last_seen_at >= $5)
-  AND ($6::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < $6)
-  AND ($7::int[] IS NULL OR EXISTS (
+  AND ($3::text IS NULL OR u.ui_language = $3)
+  AND ($4::timestamptz IS NULL OR u.created_at >= $4)
+  AND ($5::timestamptz IS NULL OR u.created_at < $5)
+  AND ($6::timestamptz IS NULL OR u.last_seen_at >= $6)
+  AND ($7::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < $7)
+  AND ($8::int[] IS NULL OR EXISTS (
         SELECT 1 FROM devices d WHERE d.user_id = u.id AND CASE
-            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $7::int[]
+            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $8::int[]
             ELSE false END))
-  AND ($8::uuid IS NULL OR EXISTS (
-        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $8 AND s.status = 'active'))
+  AND ($9::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $9 AND s.status = 'active'))
 ORDER BY u.id
-LIMIT $9
+LIMIT $10
 `
 
 type CampaignAudiencePageParams struct {
 	AfterID          uuid.UUID
 	UserIds          []uuid.UUID
+	UiLanguage       *string
 	RegisteredAfter  *time.Time
 	RegisteredBefore *time.Time
 	SeenAfter        *time.Time
@@ -85,11 +89,17 @@ type CampaignAudiencePageParams struct {
 	PageSize         int32
 }
 
+type CampaignAudiencePageRow struct {
+	ID         uuid.UUID
+	UiLanguage string
+}
+
 // Users matching a campaign's targeting rule, keyset-paged by id. Suspended users never match.
-func (q *Queries) CampaignAudiencePage(ctx context.Context, arg CampaignAudiencePageParams) ([]uuid.UUID, error) {
+func (q *Queries) CampaignAudiencePage(ctx context.Context, arg CampaignAudiencePageParams) ([]CampaignAudiencePageRow, error) {
 	rows, err := q.db.Query(ctx, campaignAudiencePage,
 		arg.AfterID,
 		arg.UserIds,
+		arg.UiLanguage,
 		arg.RegisteredAfter,
 		arg.RegisteredBefore,
 		arg.SeenAfter,
@@ -102,13 +112,13 @@ func (q *Queries) CampaignAudiencePage(ctx context.Context, arg CampaignAudience
 		return nil, err
 	}
 	defer rows.Close()
-	items := []uuid.UUID{}
+	items := []CampaignAudiencePageRow{}
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i CampaignAudiencePageRow
+		if err := rows.Scan(&i.ID, &i.UiLanguage); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -155,7 +165,7 @@ func (q *Queries) CampaignStats(ctx context.Context, campaignID *uuid.UUID) (Cam
 const cancelCampaign = `-- name: CancelCampaign :one
 UPDATE campaigns SET status = 'cancelled', cancelled_at = now(), updated_at = now()
 WHERE id = $1 AND status IN ('pending_approval', 'scheduled', 'sending')
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 func (q *Queries) CancelCampaign(ctx context.Context, id uuid.UUID) (Campaign, error) {
@@ -184,6 +194,8 @@ func (q *Queries) CancelCampaign(ctx context.Context, id uuid.UUID) (Campaign, e
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -247,20 +259,22 @@ const countCampaignAudience = `-- name: CountCampaignAudience :one
 SELECT count(*)::int FROM users u
 WHERE u.disabled_at IS NULL
   AND ($1::uuid[] IS NULL OR u.id = ANY($1::uuid[]))
-  AND ($2::timestamptz IS NULL OR u.created_at >= $2)
-  AND ($3::timestamptz IS NULL OR u.created_at < $3)
-  AND ($4::timestamptz IS NULL OR u.last_seen_at >= $4)
-  AND ($5::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < $5)
-  AND ($6::int[] IS NULL OR EXISTS (
+  AND ($2::text IS NULL OR u.ui_language = $2)
+  AND ($3::timestamptz IS NULL OR u.created_at >= $3)
+  AND ($4::timestamptz IS NULL OR u.created_at < $4)
+  AND ($5::timestamptz IS NULL OR u.last_seen_at >= $5)
+  AND ($6::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < $6)
+  AND ($7::int[] IS NULL OR EXISTS (
         SELECT 1 FROM devices d WHERE d.user_id = u.id AND CASE
-            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $6::int[]
+            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $7::int[]
             ELSE false END))
-  AND ($7::uuid IS NULL OR EXISTS (
-        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $7 AND s.status = 'active'))
+  AND ($8::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $8 AND s.status = 'active'))
 `
 
 type CountCampaignAudienceParams struct {
 	UserIds          []uuid.UUID
+	UiLanguage       *string
 	RegisteredAfter  *time.Time
 	RegisteredBefore *time.Time
 	SeenAfter        *time.Time
@@ -272,6 +286,7 @@ type CountCampaignAudienceParams struct {
 func (q *Queries) CountCampaignAudience(ctx context.Context, arg CountCampaignAudienceParams) (int32, error) {
 	row := q.db.QueryRow(ctx, countCampaignAudience,
 		arg.UserIds,
+		arg.UiLanguage,
 		arg.RegisteredAfter,
 		arg.RegisteredBefore,
 		arg.SeenAfter,
@@ -315,9 +330,9 @@ func (q *Queries) CountUnreadMessages(ctx context.Context, userID uuid.UUID) (in
 
 const createCampaign = `-- name: CreateCampaign :one
 
-INSERT INTO campaigns (name, category, title, body, image_url, deeplink, audience, send_at, audience_estimate, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+INSERT INTO campaigns (name, category, title, body, image_url, deeplink, audience, send_at, audience_estimate, created_by, title_en, body_en)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 type CreateCampaignParams struct {
@@ -331,6 +346,8 @@ type CreateCampaignParams struct {
 	SendAt           *time.Time
 	AudienceEstimate int32
 	CreatedBy        *uuid.UUID
+	TitleEn          string
+	BodyEn           string
 }
 
 // ---------------------------------------------------------------- campaigns (admin)
@@ -346,6 +363,8 @@ func (q *Queries) CreateCampaign(ctx context.Context, arg CreateCampaignParams) 
 		arg.SendAt,
 		arg.AudienceEstimate,
 		arg.CreatedBy,
+		arg.TitleEn,
+		arg.BodyEn,
 	)
 	var i Campaign
 	err := row.Scan(
@@ -371,6 +390,8 @@ func (q *Queries) CreateCampaign(ctx context.Context, arg CreateCampaignParams) 
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -510,7 +531,7 @@ func (q *Queries) FinishCampaign(ctx context.Context, id uuid.UUID) error {
 }
 
 const getCampaign = `-- name: GetCampaign :one
-SELECT id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at FROM campaigns WHERE id = $1
+SELECT id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en FROM campaigns WHERE id = $1
 `
 
 func (q *Queries) GetCampaign(ctx context.Context, id uuid.UUID) (Campaign, error) {
@@ -539,6 +560,8 @@ func (q *Queries) GetCampaign(ctx context.Context, id uuid.UUID) (Campaign, erro
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -598,7 +621,7 @@ func (q *Queries) GetNotificationPrefs(ctx context.Context, userID uuid.UUID) (N
 }
 
 const listCampaigns = `-- name: ListCampaigns :many
-SELECT id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at FROM campaigns
+SELECT id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en FROM campaigns
 WHERE ($3::text IS NULL OR status = $3)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -642,6 +665,8 @@ func (q *Queries) ListCampaigns(ctx context.Context, arg ListCampaignsParams) ([
 			&i.RecalledAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TitleEn,
+			&i.BodyEn,
 		); err != nil {
 			return nil, err
 		}
@@ -765,7 +790,7 @@ func (q *Queries) MarkMessageRead(ctx context.Context, arg MarkMessageReadParams
 const recallCampaign = `-- name: RecallCampaign :one
 UPDATE campaigns SET status = 'recalled', recalled_at = now(), updated_at = now()
 WHERE id = $1 AND status IN ('sending', 'sent', 'cancelled')
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 func (q *Queries) RecallCampaign(ctx context.Context, id uuid.UUID) (Campaign, error) {
@@ -794,6 +819,8 @@ func (q *Queries) RecallCampaign(ctx context.Context, id uuid.UUID) (Campaign, e
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -813,7 +840,7 @@ func (q *Queries) RecallCampaignMessages(ctx context.Context, campaignID *uuid.U
 const rejectCampaign = `-- name: RejectCampaign :one
 UPDATE campaigns SET status = 'draft', reject_reason = $2, updated_at = now()
 WHERE id = $1 AND status = 'pending_approval'
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 type RejectCampaignParams struct {
@@ -847,6 +874,8 @@ func (q *Queries) RejectCampaign(ctx context.Context, arg RejectCampaignParams) 
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -886,7 +915,7 @@ func (q *Queries) SetMessagePush(ctx context.Context, arg SetMessagePushParams) 
 const startCampaignSending = `-- name: StartCampaignSending :one
 UPDATE campaigns SET status = 'sending', started_at = coalesce(started_at, now()), updated_at = now()
 WHERE id = $1 AND status IN ('scheduled', 'sending')
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 func (q *Queries) StartCampaignSending(ctx context.Context, id uuid.UUID) (Campaign, error) {
@@ -915,6 +944,8 @@ func (q *Queries) StartCampaignSending(ctx context.Context, id uuid.UUID) (Campa
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -922,7 +953,7 @@ func (q *Queries) StartCampaignSending(ctx context.Context, id uuid.UUID) (Campa
 const submitCampaign = `-- name: SubmitCampaign :one
 UPDATE campaigns SET status = 'pending_approval', submitted_at = now(), reject_reason = '', audience_estimate = $2, updated_at = now()
 WHERE id = $1 AND status = 'draft'
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 type SubmitCampaignParams struct {
@@ -956,6 +987,8 @@ func (q *Queries) SubmitCampaign(ctx context.Context, arg SubmitCampaignParams) 
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
@@ -976,9 +1009,9 @@ func (q *Queries) TouchUserSeen(ctx context.Context, arg TouchUserSeenParams) er
 
 const updateCampaignDraft = `-- name: UpdateCampaignDraft :one
 UPDATE campaigns SET name = $2, category = $3, title = $4, body = $5, image_url = $6, deeplink = $7,
-    audience = $8, send_at = $9, audience_estimate = $10, updated_at = now()
+    audience = $8, send_at = $9, audience_estimate = $10, title_en = $11, body_en = $12, updated_at = now()
 WHERE id = $1 AND status = 'draft'
-RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at
+RETURNING id, name, category, title, body, image_url, deeplink, audience, status, send_at, audience_estimate, reject_reason, created_by, submitted_at, approved_by, approved_at, started_at, finished_at, cancelled_at, recalled_at, created_at, updated_at, title_en, body_en
 `
 
 type UpdateCampaignDraftParams struct {
@@ -992,6 +1025,8 @@ type UpdateCampaignDraftParams struct {
 	Audience         json.RawMessage
 	SendAt           *time.Time
 	AudienceEstimate int32
+	TitleEn          string
+	BodyEn           string
 }
 
 func (q *Queries) UpdateCampaignDraft(ctx context.Context, arg UpdateCampaignDraftParams) (Campaign, error) {
@@ -1006,6 +1041,8 @@ func (q *Queries) UpdateCampaignDraft(ctx context.Context, arg UpdateCampaignDra
 		arg.Audience,
 		arg.SendAt,
 		arg.AudienceEstimate,
+		arg.TitleEn,
+		arg.BodyEn,
 	)
 	var i Campaign
 	err := row.Scan(
@@ -1031,6 +1068,8 @@ func (q *Queries) UpdateCampaignDraft(ctx context.Context, arg UpdateCampaignDra
 		&i.RecalledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TitleEn,
+		&i.BodyEn,
 	)
 	return i, err
 }
