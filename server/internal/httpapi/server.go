@@ -32,6 +32,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/report"
+	"github.com/hwq830/zeusai/server/internal/share"
 	"github.com/hwq830/zeusai/server/internal/task"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
@@ -47,6 +48,7 @@ type Server struct {
 	Tasks      *task.Service
 	Connectors *connector.Service
 	Reports    *report.Service
+	Shares     *share.Service
 	Feedback   *feedback.Service
 	Notify     *notify.Service
 	Bus        *events.Bus
@@ -69,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, s.configVersionHeader, requestLanguage)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/s/{token}", s.sharePage)
+	r.Get("/s/{token}/go", s.shareCTA)
 	if s.Files != nil {
 		r.Handle("/files/*", http.StripPrefix("/files", s.Files))
 	}

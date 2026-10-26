@@ -57,7 +57,9 @@ type Item struct {
 type Section struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
-	Items []Item `json:"items"`
+	// Private sections hold personal content and are left out of shares.
+	Private bool   `json:"private,omitempty"`
+	Items   []Item `json:"items"`
 }
 
 type Briefing struct {

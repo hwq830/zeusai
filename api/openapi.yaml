@@ -487,6 +487,53 @@ paths:
       responses:
         '204': { description: OK }
         default: { $ref: '#/components/responses/Error' }
+  /v1/briefings/{briefingId}/html:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    get:
+      tags: [briefings]
+      operationId: getBriefingHtml
+      summary: 简报 HTML（与 PDF、H5 分享页同一模板；含全部区块）
+      responses:
+        '200':
+          description: OK
+          content:
+            text/html:
+              schema: { type: string }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefings/{briefingId}/pdf:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    get:
+      tags: [briefings]
+      operationId: getBriefingPdf
+      summary: PDF 下载地址（短时签名链接）。尚未生成时返回 status=generating，稍后重试
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileLink' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/briefings/{briefingId}/shares:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    post:
+      tags: [shares]
+      operationId: createBriefingShare
+      summary: 生成简报 H5 分享链接（scope=item 时只分享 itemId 这一条）。标记为 private 的区块不会出现在分享页
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShareRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Share' }
+        default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- reports
   /v1/reports:
@@ -596,7 +643,7 @@ paths:
     post:
       tags: [shares]
       operationId: createShare
-      summary: 生成 H5 分享链接
+      summary: 生成 H5 分享链接（scope 只能是 full / summary）
       requestBody:
         required: true
         content:
@@ -608,6 +655,28 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Share' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/shares:
+    get:
+      tags: [shares]
+      operationId: listShares
+      summary: 我的分享（报告和简报），新的在前，含已过期和已撤销的
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShareList' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [shares]
+      operationId: revokeAllShares
+      summary: 撤销我的全部分享
+      responses:
+        '204': { description: Revoked }
         default: { $ref: '#/components/responses/Error' }
   /v1/shares/{shareId}:
     parameters:
@@ -1428,6 +1497,10 @@ components:
           type: string
           description: 给 Agent 的本节写作要求，可引用字段 {{companies}}
         maxItems: { type: integer, default: 5 }
+        private:
+          type: boolean
+          default: false
+          description: 本节含个人信息（如定位天气、日程），分享简报时自动隐藏
     TemplateSource:
       type: object
       required: [type, value]
@@ -1606,6 +1679,9 @@ components:
       properties:
         key: { type: string }
         title: { type: string }
+        private:
+          type: boolean
+          description: 含个人信息（来自模板区块的 private），分享时自动隐藏
         items:
           type: array
           items: { $ref: '#/components/schemas/BriefingItem' }
@@ -1748,16 +1824,34 @@ components:
       required: [question]
       properties:
         question: { type: string, maxLength: 1000 }
+    ShareScope:
+      type: string
+      description: full=全文；summary=只有标题和导语/摘要（简报还带每条标题）；item=简报的单条
+      enum: [full, summary, item]
     ShareRequest:
       type: object
       required: [scope]
       properties:
-        scope:
+        scope: { $ref: '#/components/schemas/ShareScope' }
+        itemId:
           type: string
-          enum: [full, summary]
+          description: scope=item 时必填，简报条目 id
+        expiresInDays:
+          type: integer
+          minimum: 0
+          maximum: 365
+          description: 有效期天数，0 表示永久；不传用服务端默认值（share.default_expiry_days，默认 30）
+        channel:
+          type: string
+          maxLength: 32
+          description: 首次分享的渠道（wechat_session / wechat_timeline / image / link / pdf / system），只用于统计
+        showName:
+          type: boolean
+          default: false
+          description: 分享页显示"来自 {昵称} 的分享"
     Share:
       type: object
-      required: [id, url, title, scope, createdAt]
+      required: [id, url, title, scope, targetType, targetId, status, createdAt]
       properties:
         id: { type: string }
         url:
@@ -1766,10 +1860,37 @@ components:
           description: H5 分享页，如 https://zeus.example.com/s/{token}
         title: { type: string }
         summary: { type: string }
-        scope:
+        scope: { $ref: '#/components/schemas/ShareScope' }
+        targetType:
           type: string
-          enum: [full, summary]
+          enum: [report, briefing]
+        targetId: { type: string }
+        itemId: { type: string }
+        showName: { type: boolean }
+        status:
+          type: string
+          enum: [active, expired, revoked]
+        expiresAt:
+          type: string
+          format: date-time
+          description: 不返回表示永久有效
+        viewCount:
+          type: integer
+          description: 访问人数（同一访客每天计一次）
+        hiddenSections:
+          type: integer
+          description: 仅创建简报分享时返回：因含个人信息而未出现在分享页的区块数
         createdAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time }
+    ShareList:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/Share' }
 
     # ------------------------------------------------------------ tasks
     TaskKind:

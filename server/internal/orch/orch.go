@@ -41,6 +41,13 @@ type ReportPDFRun struct {
 	Key      string
 }
 
+// BriefingPDFRun prints a finished briefing to PDF and stores it under Key.
+type BriefingPDFRun struct {
+	UserID     uuid.UUID
+	BriefingID uuid.UUID
+	Key        string
+}
+
 // CampaignRun sends an approved operator campaign at SendAt (zero: now). After is the last user
 // already handled, carried across continue-as-new.
 type CampaignRun struct {
@@ -57,6 +64,8 @@ type Client interface {
 	StartFollowup(ctx context.Context, run FollowupRun) error
 	// StartReportPDF is idempotent while a print for the same report is running.
 	StartReportPDF(ctx context.Context, run ReportPDFRun) error
+	// StartBriefingPDF is idempotent while a print for the same briefing is running.
+	StartBriefingPDF(ctx context.Context, run BriefingPDFRun) error
 	CancelTask(ctx context.Context, taskID uuid.UUID) error
 	SendTaskMessage(ctx context.Context, taskID uuid.UUID, text string) error
 	ResolveConfirm(ctx context.Context, taskID uuid.UUID, confirmID, decision string) error

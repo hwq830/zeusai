@@ -225,7 +225,7 @@ func TestAdminConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	share, err := h.q.CreateShare(ctx, db.CreateShareParams{UserID: u.ID, ReportID: rep.ID, Token: "tok123", Scope: "full"})
+	share, err := h.q.CreateShare(ctx, db.CreateShareParams{UserID: u.ID, ReportID: &rep.ID, Token: "tok123", Scope: "full", Channel: "wechat_session"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,6 +242,9 @@ func TestAdminConsole(t *testing.T) {
 	}
 	if dash.Cost.AvgReportCostCny == nil || *dash.Cost.AvgReportCostCny != 2.5 || dash.Cost.TodayCny != 2.5 {
 		t.Fatalf("dashboard cost = %+v", dash.Cost)
+	}
+	if st := dash.Shares; st == nil || st.CreatedToday != 1 || st.Created7d != 1 || len(st.Channels7d) != 1 || st.Channels7d[0].Channel != "wechat_session" {
+		t.Fatalf("dashboard shares = %+v", dash.Shares)
 	}
 
 	// ---- users
@@ -361,8 +364,13 @@ func TestAdminConsole(t *testing.T) {
 
 	var sp gen.SharePage
 	h.do("GET", "/admin/v1/shares", nil, 200, &sp)
-	if len(sp.Items) != 1 || deref(sp.Items[0].Url) != "https://zeus.test/s/tok123" {
+	if len(sp.Items) != 1 || deref(sp.Items[0].Url) != "https://zeus.test/s/tok123" || sp.Items[0].TargetType != gen.AdminShareTargetTypeReport ||
+		sp.Items[0].Title != "新能源调研" || sp.Items[0].TargetId != rep.ID.String() {
 		t.Fatalf("shares = %+v", sp.Items)
+	}
+	h.do("GET", "/admin/v1/shares?type=briefing", nil, 200, &sp)
+	if len(sp.Items) != 0 {
+		t.Fatalf("type filter: %+v", sp.Items)
 	}
 	h.do("POST", "/admin/v1/shares/"+share.ID.String()+"/revoke", nil, 204, nil)
 	h.do("GET", "/admin/v1/shares", nil, 200, &sp)

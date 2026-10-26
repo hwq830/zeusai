@@ -152,38 +152,6 @@ func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Rep
 	return i, err
 }
 
-const createShare = `-- name: CreateShare :one
-INSERT INTO shares (user_id, report_id, token, scope) VALUES ($1, $2, $3, $4) RETURNING id, user_id, report_id, token, scope, view_count, created_at, revoked_at
-`
-
-type CreateShareParams struct {
-	UserID   uuid.UUID
-	ReportID uuid.UUID
-	Token    string
-	Scope    string
-}
-
-func (q *Queries) CreateShare(ctx context.Context, arg CreateShareParams) (Share, error) {
-	row := q.db.QueryRow(ctx, createShare,
-		arg.UserID,
-		arg.ReportID,
-		arg.Token,
-		arg.Scope,
-	)
-	var i Share
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.ReportID,
-		&i.Token,
-		&i.Scope,
-		&i.ViewCount,
-		&i.CreatedAt,
-		&i.RevokedAt,
-	)
-	return i, err
-}
-
 const deleteReport = `-- name: DeleteReport :execrows
 DELETE FROM reports WHERE id = $1 AND user_id = $2
 `
@@ -235,72 +203,6 @@ func (q *Queries) GetReport(ctx context.Context, arg GetReportParams) (Report, e
 		&i.Language,
 	)
 	return i, err
-}
-
-const getSharedReport = `-- name: GetSharedReport :one
-SELECT s.scope, r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at, r.language FROM shares s JOIN reports r ON r.id = s.report_id
-WHERE s.token = $1 AND s.revoked_at IS NULL AND r.status = 'done'
-`
-
-type GetSharedReportRow struct {
-	Scope                string
-	ID                   uuid.UUID
-	UserID               uuid.UUID
-	TaskID               *uuid.UUID
-	Title                string
-	Topic                string
-	Depth                string
-	Focuses              []string
-	SourceBriefingItemID *string
-	Status               string
-	Summary              string
-	Markdown             string
-	Sources              json.RawMessage
-	SourceCount          int32
-	WordCount            int32
-	PdfKey               *string
-	PdfStatus            string
-	CreatedAt            time.Time
-	CompletedAt          *time.Time
-	Language             string
-}
-
-// Public lookup by share token; the only query that does not take user_id.
-func (q *Queries) GetSharedReport(ctx context.Context, token string) (GetSharedReportRow, error) {
-	row := q.db.QueryRow(ctx, getSharedReport, token)
-	var i GetSharedReportRow
-	err := row.Scan(
-		&i.Scope,
-		&i.ID,
-		&i.UserID,
-		&i.TaskID,
-		&i.Title,
-		&i.Topic,
-		&i.Depth,
-		&i.Focuses,
-		&i.SourceBriefingItemID,
-		&i.Status,
-		&i.Summary,
-		&i.Markdown,
-		&i.Sources,
-		&i.SourceCount,
-		&i.WordCount,
-		&i.PdfKey,
-		&i.PdfStatus,
-		&i.CreatedAt,
-		&i.CompletedAt,
-		&i.Language,
-	)
-	return i, err
-}
-
-const incrementShareViews = `-- name: IncrementShareViews :exec
-UPDATE shares SET view_count = view_count + 1 WHERE token = $1
-`
-
-func (q *Queries) IncrementShareViews(ctx context.Context, token string) error {
-	_, err := q.db.Exec(ctx, incrementShareViews, token)
-	return err
 }
 
 const listReports = `-- name: ListReports :many
@@ -364,23 +266,6 @@ func (q *Queries) ListReports(ctx context.Context, arg ListReportsParams) ([]Rep
 		return nil, err
 	}
 	return items, nil
-}
-
-const revokeShare = `-- name: RevokeShare :execrows
-UPDATE shares SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
-`
-
-type RevokeShareParams struct {
-	ID     uuid.UUID
-	UserID uuid.UUID
-}
-
-func (q *Queries) RevokeShare(ctx context.Context, arg RevokeShareParams) (int64, error) {
-	result, err := q.db.Exec(ctx, revokeShare, arg.ID, arg.UserID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const setReportPDF = `-- name: SetReportPDF :exec

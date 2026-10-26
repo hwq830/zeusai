@@ -285,9 +285,15 @@ func (q *Queries) AdminListModerationTerms(ctx context.Context) ([]ModerationTer
 }
 
 const adminListShares = `-- name: AdminListShares :many
-SELECT s.id, s.user_id, s.report_id, s.token, s.scope, s.view_count, s.created_at, s.revoked_at, r.title AS report_title, u.nickname, u.phone
-FROM shares s JOIN reports r ON r.id = s.report_id JOIN users u ON u.id = s.user_id
-WHERE (NOT $3::bool OR s.revoked_at IS NULL)
+SELECT s.id, s.user_id, s.report_id, s.token, s.scope, s.view_count, s.created_at, s.revoked_at, s.briefing_id, s.item_id, s.expires_at, s.channel, s.show_name, s.wechat_view_count, s.cta_clicks, coalesce(r.title, b.title, '')::text AS target_title, u.nickname, u.phone
+FROM shares s
+LEFT JOIN reports r ON r.id = s.report_id
+LEFT JOIN briefings b ON b.id = s.briefing_id
+JOIN users u ON u.id = s.user_id
+WHERE (NOT $3::bool OR (s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())))
+  AND ($4::text IS NULL
+       OR ($4 = 'report' AND s.report_id IS NOT NULL)
+       OR ($4 = 'briefing' AND s.briefing_id IS NOT NULL))
 ORDER BY s.created_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -296,24 +302,37 @@ type AdminListSharesParams struct {
 	Limit      int32
 	Offset     int32
 	ActiveOnly bool
+	TargetType *string
 }
 
 type AdminListSharesRow struct {
-	ID          uuid.UUID
-	UserID      uuid.UUID
-	ReportID    uuid.UUID
-	Token       string
-	Scope       string
-	ViewCount   int32
-	CreatedAt   time.Time
-	RevokedAt   *time.Time
-	ReportTitle string
-	Nickname    string
-	Phone       *string
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	ReportID        *uuid.UUID
+	Token           string
+	Scope           string
+	ViewCount       int32
+	CreatedAt       time.Time
+	RevokedAt       *time.Time
+	BriefingID      *uuid.UUID
+	ItemID          string
+	ExpiresAt       *time.Time
+	Channel         string
+	ShowName        bool
+	WechatViewCount int32
+	CtaClicks       int32
+	TargetTitle     string
+	Nickname        string
+	Phone           *string
 }
 
 func (q *Queries) AdminListShares(ctx context.Context, arg AdminListSharesParams) ([]AdminListSharesRow, error) {
-	rows, err := q.db.Query(ctx, adminListShares, arg.Limit, arg.Offset, arg.ActiveOnly)
+	rows, err := q.db.Query(ctx, adminListShares,
+		arg.Limit,
+		arg.Offset,
+		arg.ActiveOnly,
+		arg.TargetType,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +349,14 @@ func (q *Queries) AdminListShares(ctx context.Context, arg AdminListSharesParams
 			&i.ViewCount,
 			&i.CreatedAt,
 			&i.RevokedAt,
-			&i.ReportTitle,
+			&i.BriefingID,
+			&i.ItemID,
+			&i.ExpiresAt,
+			&i.Channel,
+			&i.ShowName,
+			&i.WechatViewCount,
+			&i.CtaClicks,
+			&i.TargetTitle,
 			&i.Nickname,
 			&i.Phone,
 		); err != nil {
@@ -685,6 +711,70 @@ func (q *Queries) AdminSetUserPlan(ctx context.Context, arg AdminSetUserPlanPara
 	return i, err
 }
 
+const adminShareChannels = `-- name: AdminShareChannels :many
+SELECT channel, count(*)::int AS shares FROM shares WHERE created_at >= $1
+GROUP BY channel ORDER BY shares DESC
+`
+
+type AdminShareChannelsRow struct {
+	Channel string
+	Shares  int32
+}
+
+func (q *Queries) AdminShareChannels(ctx context.Context, createdAt time.Time) ([]AdminShareChannelsRow, error) {
+	rows, err := q.db.Query(ctx, adminShareChannels, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminShareChannelsRow{}
+	for rows.Next() {
+		var i AdminShareChannelsRow
+		if err := rows.Scan(&i.Channel, &i.Shares); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminShareTotals = `-- name: AdminShareTotals :one
+SELECT count(*)::int AS created,
+       count(*) FILTER (WHERE briefing_id IS NOT NULL)::int AS briefing_shares,
+       count(DISTINCT briefing_id)::int AS briefings_shared,
+       coalesce(sum(view_count), 0)::int AS views,
+       coalesce(sum(wechat_view_count), 0)::int AS wechat_views,
+       coalesce(sum(cta_clicks), 0)::int AS cta_clicks
+FROM shares WHERE created_at >= $1
+`
+
+type AdminShareTotalsRow struct {
+	Created         int32
+	BriefingShares  int32
+	BriefingsShared int32
+	Views           int32
+	WechatViews     int32
+	CtaClicks       int32
+}
+
+// Links created in the window and what they have collected so far.
+func (q *Queries) AdminShareTotals(ctx context.Context, createdAt time.Time) (AdminShareTotalsRow, error) {
+	row := q.db.QueryRow(ctx, adminShareTotals, createdAt)
+	var i AdminShareTotalsRow
+	err := row.Scan(
+		&i.Created,
+		&i.BriefingShares,
+		&i.BriefingsShared,
+		&i.Views,
+		&i.WechatViews,
+		&i.CtaClicks,
+	)
+	return i, err
+}
+
 const adminUpdateConnector = `-- name: AdminUpdateConnector :one
 UPDATE connectors SET
     name = coalesce($2, name),
@@ -991,6 +1081,17 @@ SELECT count(DISTINCT user_id)::int FROM tasks WHERE created_at >= $1
 // A user is active when they started a task (briefings included) in the window.
 func (q *Queries) CountActiveUsersSince(ctx context.Context, createdAt time.Time) (int32, error) {
 	row := q.db.QueryRow(ctx, countActiveUsersSince, createdAt)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countBriefingsReadySince = `-- name: CountBriefingsReadySince :one
+SELECT count(*)::int FROM briefings WHERE status = 'ready' AND generated_at >= $1
+`
+
+func (q *Queries) CountBriefingsReadySince(ctx context.Context, generatedAt *time.Time) (int32, error) {
+	row := q.db.QueryRow(ctx, countBriefingsReadySince, generatedAt)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err

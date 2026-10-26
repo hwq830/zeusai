@@ -13,12 +13,14 @@ import (
 
 	"github.com/hwq830/zeusai/prompts"
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/quota"
+	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
@@ -30,7 +32,10 @@ type Service struct {
 	Orch      orch.Client
 	LLM       llm.Provider
 	Mod       moderation.Checker
-	Now       func() time.Time
+	Blob      blob.Store // nil: PDF export unavailable
+	// Config carries the PDF kill switch; nil leaves PDF export on.
+	Config *remoteconfig.Cache
+	Now    func() time.Time
 }
 
 func (s *Service) now() time.Time {

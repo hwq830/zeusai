@@ -97,7 +97,49 @@ func (s *Server) GetDashboard(ctx context.Context, _ gen.GetDashboardRequestObje
 	if err != nil {
 		return nil, err
 	}
+	d.Shares, err = s.shareStats(ctx, today, week)
+	if err != nil {
+		return nil, err
+	}
 	return gen.GetDashboard200JSONResponse(d), nil
+}
+
+// shareStats covers links created in the last 7 days and what they have collected so far.
+func (s *Server) shareStats(ctx context.Context, today, week time.Time) (*gen.ShareStats, error) {
+	st := &gen.ShareStats{}
+	t, err := s.Q.AdminShareTotals(ctx, today)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	st.CreatedToday = int(t.Created)
+	w, err := s.Q.AdminShareTotals(ctx, week)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	st.Created7d, st.Views7d, st.WechatViews7d, st.CtaClicks7d = int(w.Created), int(w.Views), int(w.WechatViews), int(w.CtaClicks)
+	ready, err := s.Q.CountBriefingsReadySince(ctx, &week)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	if ready > 0 {
+		r := float64(w.BriefingsShared) / float64(ready)
+		st.BriefingShareRate7d = &r
+	}
+	chans, err := s.Q.AdminShareChannels(ctx, week)
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	st.Channels7d = make([]struct {
+		Channel string `json:"channel"`
+		Shares  int    `json:"shares"`
+	}, 0, len(chans))
+	for _, c := range chans {
+		st.Channels7d = append(st.Channels7d, struct {
+			Channel string `json:"channel"`
+			Shares  int    `json:"shares"`
+		}{c.Channel, int(c.Shares)})
+	}
+	return st, nil
 }
 
 // daily returns one point per day for the last n days, oldest first, with empty days filled.

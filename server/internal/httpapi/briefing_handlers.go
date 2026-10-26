@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
@@ -185,4 +186,20 @@ func (s *Server) PutBriefingFeedback(ctx context.Context, req gen.PutBriefingFee
 		return nil, err
 	}
 	return gen.PutBriefingFeedback204Response{}, nil
+}
+
+func (s *Server) GetBriefingHtml(ctx context.Context, req gen.GetBriefingHtmlRequestObject) (gen.GetBriefingHtmlResponseObject, error) {
+	b, err := s.Briefings.HTML(ctx, userID(ctx), req.BriefingId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetBriefingHtml200TexthtmlResponse{Body: bytes.NewReader(b), ContentLength: int64(len(b))}, nil
+}
+
+func (s *Server) GetBriefingPdf(ctx context.Context, req gen.GetBriefingPdfRequestObject) (gen.GetBriefingPdfResponseObject, error) {
+	link, err := s.Briefings.PDF(ctx, userID(ctx), req.BriefingId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetBriefingPdf200JSONResponse(recode[gen.FileLink](link)), nil
 }

@@ -220,11 +220,34 @@ ORDER BY e.id DESC
 LIMIT $1 OFFSET $2;
 
 -- name: AdminListShares :many
-SELECT s.*, r.title AS report_title, u.nickname, u.phone
-FROM shares s JOIN reports r ON r.id = s.report_id JOIN users u ON u.id = s.user_id
-WHERE (NOT sqlc.arg(active_only)::bool OR s.revoked_at IS NULL)
+SELECT s.*, coalesce(r.title, b.title, '')::text AS target_title, u.nickname, u.phone
+FROM shares s
+LEFT JOIN reports r ON r.id = s.report_id
+LEFT JOIN briefings b ON b.id = s.briefing_id
+JOIN users u ON u.id = s.user_id
+WHERE (NOT sqlc.arg(active_only)::bool OR (s.revoked_at IS NULL AND (s.expires_at IS NULL OR s.expires_at > now())))
+  AND (sqlc.narg(target_type)::text IS NULL
+       OR (sqlc.narg(target_type) = 'report' AND s.report_id IS NOT NULL)
+       OR (sqlc.narg(target_type) = 'briefing' AND s.briefing_id IS NOT NULL))
 ORDER BY s.created_at DESC
 LIMIT $1 OFFSET $2;
+
+-- name: AdminShareTotals :one
+-- Links created in the window and what they have collected so far.
+SELECT count(*)::int AS created,
+       count(*) FILTER (WHERE briefing_id IS NOT NULL)::int AS briefing_shares,
+       count(DISTINCT briefing_id)::int AS briefings_shared,
+       coalesce(sum(view_count), 0)::int AS views,
+       coalesce(sum(wechat_view_count), 0)::int AS wechat_views,
+       coalesce(sum(cta_clicks), 0)::int AS cta_clicks
+FROM shares WHERE created_at >= $1;
+
+-- name: AdminShareChannels :many
+SELECT channel, count(*)::int AS shares FROM shares WHERE created_at >= $1
+GROUP BY channel ORDER BY shares DESC;
+
+-- name: CountBriefingsReadySince :one
+SELECT count(*)::int FROM briefings WHERE status = 'ready' AND generated_at >= $1;
 
 -- name: AdminRevokeShare :execrows
 UPDATE shares SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL;

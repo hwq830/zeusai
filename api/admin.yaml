@@ -434,12 +434,17 @@ paths:
     get:
       tags: [moderation]
       operationId: listShares
-      summary: 公开分享的报告
+      summary: 公开分享的报告和简报
       parameters:
         - name: active
           in: query
-          description: 只看未撤销的
+          description: 只看未撤销且未过期的
           schema: { type: boolean, default: true }
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [report, briefing]
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1328,6 +1333,30 @@ components:
           description: 近 14 天
           items: { $ref: '#/components/schemas/DailyPoint' }
         satisfaction: { $ref: '#/components/schemas/Satisfaction' }
+        shares: { $ref: '#/components/schemas/ShareStats' }
+    ShareStats:
+      type: object
+      required: [createdToday, created7d, views7d, wechatViews7d, ctaClicks7d, channels7d]
+      description: 近 7 天新建的分享链接及其累计访问 / 点击
+      properties:
+        createdToday: { type: integer }
+        created7d: { type: integer }
+        views7d: { type: integer }
+        wechatViews7d: { type: integer }
+        ctaClicks7d: { type: integer }
+        briefingShareRate7d:
+          type: number
+          format: double
+          nullable: true
+          description: 被分享过的简报数 / 生成的简报数（近 7 天）
+        channels7d:
+          type: array
+          items:
+            type: object
+            required: [channel, shares]
+            properties:
+              channel: { type: string }
+              shares: { type: integer }
     TaskCount:
       type: object
       required: [kind, status, count]
@@ -1500,6 +1529,9 @@ components:
         title: { type: string }
         instruction: { type: string }
         maxItems: { type: integer }
+        private:
+          type: boolean
+          description: 本节含个人信息，用户分享简报时自动隐藏
     TemplateSource:
       type: object
       required: [type, value]
@@ -1676,18 +1708,38 @@ components:
         nextCursor: { $ref: '#/components/schemas/NextCursor' }
     AdminShare:
       type: object
-      required: [id, reportId, reportTitle, userId, nickname, phoneMasked, scope, viewCount, createdAt]
+      required: [id, targetType, targetId, title, userId, nickname, phoneMasked, scope, channel, viewCount, wechatViewCount, ctaClicks, createdAt]
       properties:
         id: { type: string }
-        reportId: { type: string }
-        reportTitle: { type: string }
+        targetType:
+          type: string
+          enum: [report, briefing]
+        targetId:
+          type: string
+          description: 报告或简报 id
+        itemId:
+          type: string
+          description: 单条分享时的条目 id
+        title: { type: string }
         userId: { type: string }
         nickname: { type: string }
         phoneMasked: { type: string }
-        scope: { type: string }
-        viewCount: { type: integer }
+        scope:
+          type: string
+          description: full / summary / item
+        channel:
+          type: string
+          description: 首次分享渠道，空表示旧版 App 或未上报
+        viewCount:
+          type: integer
+          description: 访问人数（同一访客每天计一次）
+        wechatViewCount: { type: integer }
+        ctaClicks:
+          type: integer
+          description: 分享页"生成我的"按钮点击数
         url: { type: string }
         createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, nullable: true }
         revokedAt: { type: string, format: date-time, nullable: true }
     SharePage:
       type: object
