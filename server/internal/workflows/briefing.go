@@ -79,6 +79,7 @@ type SectionPlan struct {
 	Title       string
 	Instruction string
 	MaxItems    int
+	Private     bool
 	Queries     []search.Query
 }
 
@@ -102,6 +103,7 @@ type BriefingPlan struct {
 type SectionResult struct {
 	Key     string
 	Title   string
+	Private bool
 	Items   []briefing.Item
 	Sources int
 }
@@ -207,7 +209,7 @@ func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i
 		if strings.TrimSpace(strings.Trim(text, "、 ")) == "" {
 			text = s.Title
 		}
-		out = append(out, SectionPlan{Key: s.Key, Title: s.Title, Instruction: instr, MaxItems: s.MaxItems, Queries: []search.Query{q(text, "")}})
+		out = append(out, SectionPlan{Key: s.Key, Title: s.Title, Instruction: instr, MaxItems: s.MaxItems, Private: s.Private, Queries: []search.Query{q(text, "")}})
 	}
 	// Template-level sources are spread over the sections.
 	i := 0
@@ -389,7 +391,7 @@ func (a *Activities) ResearchSection(ctx context.Context, plan BriefingPlan, i i
 		}
 	}
 
-	result := SectionResult{Key: sec.Key, Title: sec.Title, Items: []briefing.Item{}}
+	result := SectionResult{Key: sec.Key, Title: sec.Title, Private: sec.Private, Items: []briefing.Item{}}
 	if len(sources) > 0 {
 		var sys bytes.Buffer
 		if err := sectionPrompt.Execute(&sys, map[string]any{
@@ -460,7 +462,7 @@ func (a *Activities) FinalizeBriefing(ctx context.Context, plan BriefingPlan, re
 		if len(r.Items) == 0 {
 			continue
 		}
-		sections = append(sections, briefing.Section{Key: r.Key, Title: r.Title, Items: r.Items})
+		sections = append(sections, briefing.Section{Key: r.Key, Title: r.Title, Private: r.Private, Items: r.Items})
 		for _, it := range r.Items {
 			titles = append(titles, "- "+it.Title)
 		}

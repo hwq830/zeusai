@@ -23,6 +23,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/report"
+	"github.com/hwq830/zeusai/server/internal/share"
 	"github.com/hwq830/zeusai/server/internal/task"
 	"github.com/hwq830/zeusai/server/internal/template"
 )
@@ -75,10 +76,11 @@ func New(d Deps) *Server {
 			SMS: d.SMS, Apple: d.Apple, Wechat: d.Wechat, OneClick: d.OneClick,
 			FixedSMSCode: d.Config.DevSMSCode,
 		},
-		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Now: d.Now},
+		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Blob: d.Blob, Config: rc, Now: d.Now},
 		Tasks:      &task.Service{Q: q, Orch: d.Orch},
 		Connectors: &connector.Service{Q: q},
-		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, Config: rc, PublicBaseURL: d.Config.PublicBaseURL},
+		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, Config: rc},
+		Shares:     &share.Service{Q: q, Mod: d.Mod, Config: rc, PublicBaseURL: d.Config.PublicBaseURL, Now: d.Now},
 		Feedback:   &feedback.Service{Pool: d.Pool, Q: q, Blob: d.Blob, Mod: d.Mod, Now: d.Now},
 		// The api process only reads the message center; pushes are sent by the orchestrator and admin.
 		Notify:       &notify.Service{Q: q, Now: d.Now},

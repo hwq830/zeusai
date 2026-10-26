@@ -37,16 +37,3 @@ UPDATE reports SET pdf_status = $3, pdf_key = $4 WHERE id = $1 AND user_id = $2;
 -- name: DeleteReport :execrows
 DELETE FROM reports WHERE id = $1 AND user_id = $2;
 
--- name: CreateShare :one
-INSERT INTO shares (user_id, report_id, token, scope) VALUES ($1, $2, $3, $4) RETURNING *;
-
--- name: RevokeShare :execrows
-UPDATE shares SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL;
-
--- name: GetSharedReport :one
--- Public lookup by share token; the only query that does not take user_id.
-SELECT s.scope, r.* FROM shares s JOIN reports r ON r.id = s.report_id
-WHERE s.token = $1 AND s.revoked_at IS NULL AND r.status = 'done';
-
--- name: IncrementShareViews :exec
-UPDATE shares SET view_count = view_count + 1 WHERE token = $1;

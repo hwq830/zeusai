@@ -72,7 +72,12 @@ RUN_TASK=$(jq -r .id <<<"$RUN")
 status=$(wait_task "$RUN_TASK")
 [[ $status == done ]] || fail "立即生成简报：任务 $RUN_TASK 状态 $status（看 orchestrator 日志）"
 pass "立即生成简报（Temporal → orchestrator → 消息中心）"
-call GET /v1/briefings/today >/dev/null && pass "今日简报"
+TODAY=$(call GET /v1/briefings/today) && pass "今日简报"
+BRIEFING_ID=$(jq -r '[.items[] | select(.status == "ready")][0].id // empty' <<<"$TODAY")
+if [[ -n $BRIEFING_ID ]]; then
+  BSHARE=$(call POST "/v1/briefings/$BRIEFING_ID/shares" '{"scope":"full","channel":"link"}')
+  pass "简报分享链接 $(jq -r .url <<<"$BSHARE")"
+fi
 
 TASK=$(call POST /v1/tasks '{"kind":"report","topic":"2026 年国内大模型应用市场格局","depth":"quick"}')
 TASK_ID=$(jq -r .id <<<"$TASK")

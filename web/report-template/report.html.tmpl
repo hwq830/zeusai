@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{.Title}}</title>
+<meta name="ai-generated" content="true">
 {{- if .Share}}
+<meta name="robots" content="noindex, nofollow">
 <meta property="og:title" content="{{.Title}}">
 <meta property="og:description" content="{{.Summary}}">
 <meta name="description" content="{{.Summary}}">
@@ -42,13 +44,17 @@ pre code { display: block; padding: 12px; overflow-x: auto; }
 .sources ol { padding-left: 22px; }
 .sources li { word-break: break-all; }
 .footer { margin-top: 40px; font-size: 13px; color: var(--muted); text-align: center; }
+.badge { display: inline-block; font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; margin-bottom: 12px; }
 .cta { display: inline-block; margin-top: 12px; padding: 10px 20px; border-radius: 22px; background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
 <main>
+  {{- if .Share}}
+  <div class="badge">{{.L.AILabel}}</div>
+  {{- end}}
   <h1>{{.Title}}</h1>
-  <div class="meta">{{.DepthLabel}} · {{printf .L.SourceCount .SourceCount}}{{if .CompletedAt}} · {{.CompletedAt}}{{end}}</div>
+  <div class="meta">{{.DepthLabel}} · {{printf .L.SourceCount .SourceCount}}{{if .CompletedAt}} · {{.CompletedAt}}{{end}}{{if .SharedBy}} · {{printf .L.SharedBy .SharedBy}}{{end}}</div>
   {{- if .Summary}}
   <div class="summary">{{.Summary}}</div>
   {{- end}}

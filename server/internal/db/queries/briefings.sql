@@ -69,3 +69,6 @@ ON CONFLICT (briefing_id, item_id) DO UPDATE SET rating = excluded.rating, comme
 
 -- name: GetBriefingFeedback :one
 SELECT rating FROM briefing_feedback WHERE briefing_id = $1 AND user_id = $2 AND item_id = '';
+
+-- name: SetBriefingPDF :exec
+UPDATE briefings SET pdf_status = $3, pdf_key = $4 WHERE id = $1 AND user_id = $2;

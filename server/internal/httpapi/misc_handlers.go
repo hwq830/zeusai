@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -14,7 +15,9 @@ import (
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/report"
+	"github.com/hwq830/zeusai/server/internal/share"
 	"github.com/hwq830/zeusai/server/internal/task"
 )
 
@@ -166,31 +169,75 @@ func (s *Server) CreateReportFollowup(ctx context.Context, req gen.CreateReportF
 }
 
 func (s *Server) CreateShare(ctx context.Context, req gen.CreateShareRequestObject) (gen.CreateShareResponseObject, error) {
-	sh, err := s.Reports.CreateShare(ctx, userID(ctx), req.ReportId, string(req.Body.Scope))
+	sh, err := s.Shares.CreateForReport(ctx, userID(ctx), req.ReportId, recode[share.Request](req.Body))
 	if err != nil {
 		return nil, err
 	}
 	return gen.CreateShare201JSONResponse(recode[gen.Share](sh)), nil
 }
 
+func (s *Server) CreateBriefingShare(ctx context.Context, req gen.CreateBriefingShareRequestObject) (gen.CreateBriefingShareResponseObject, error) {
+	sh, err := s.Shares.CreateForBriefing(ctx, userID(ctx), req.BriefingId, recode[share.Request](req.Body))
+	if err != nil {
+		return nil, err
+	}
+	return gen.CreateBriefingShare201JSONResponse(recode[gen.Share](sh)), nil
+}
+
+func (s *Server) ListShares(ctx context.Context, req gen.ListSharesRequestObject) (gen.ListSharesResponseObject, error) {
+	lim, off := page(req.Params.Cursor, req.Params.Limit)
+	items, err := s.Shares.List(ctx, userID(ctx), lim, off)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ListShares200JSONResponse{Items: recode[[]gen.Share](items), NextCursor: nextCursor(len(items), lim, off)}, nil
+}
+
 func (s *Server) RevokeShare(ctx context.Context, req gen.RevokeShareRequestObject) (gen.RevokeShareResponseObject, error) {
-	if err := s.Reports.RevokeShare(ctx, userID(ctx), req.ShareId); err != nil {
+	if err := s.Shares.Revoke(ctx, userID(ctx), req.ShareId); err != nil {
 		return nil, err
 	}
 	return gen.RevokeShare204Response{}, nil
 }
 
+func (s *Server) RevokeAllShares(ctx context.Context, _ gen.RevokeAllSharesRequestObject) (gen.RevokeAllSharesResponseObject, error) {
+	if err := s.Shares.RevokeAll(ctx, userID(ctx)); err != nil {
+		return nil, err
+	}
+	return gen.RevokeAllShares204Response{}, nil
+}
+
 // sharePage serves the public H5 page /s/{token}. It is outside the contract on purpose.
 func (s *Server) sharePage(w http.ResponseWriter, r *http.Request) {
-	b, err := s.Reports.SharedHTML(r.Context(), chi.URLParam(r, "token"))
+	b, err := s.Shares.Page(r.Context(), chi.URLParam(r, "token"), share.Visitor{IP: clientIP(r), UserAgent: r.UserAgent()})
 	if err != nil {
 		e := apperr.As(err)
+		msg := i18n.Message(i18n.FromContext(r.Context()), e.Code, e.Message)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(e.Status)
-		fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><p style="font-family:sans-serif;text-align:center;margin-top:40vh">%s</p>`, html.EscapeString(e.Message))
+		fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="robots" content="noindex"><p style="font-family:sans-serif;text-align:center;margin-top:40vh">%s</p>`, html.EscapeString(msg))
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	// Short, private caching: a revoked or expired link must stop working quickly.
+	w.Header().Set("Cache-Control", "private, max-age=60")
 	_, _ = w.Write(b)
+}
+
+// shareCTA counts a tap on the share page's button and redirects to the landing page.
+func (s *Server) shareCTA(w http.ResponseWriter, r *http.Request) {
+	to, err := s.Shares.CTA(r.Context(), chi.URLParam(r, "token"))
+	if err != nil {
+		s.writeError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, to, http.StatusFound)
+}
+
+// clientIP is the address middleware.RealIP left in RemoteAddr, without the port.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }

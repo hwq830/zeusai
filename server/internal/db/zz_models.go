@@ -59,6 +59,8 @@ type Briefing struct {
 	GeneratedAt    *time.Time
 	CreatedAt      time.Time
 	Language       string
+	PdfStatus      string
+	PdfKey         *string
 }
 
 type BriefingFeedback struct {
@@ -356,14 +358,29 @@ type ReportFeedback struct {
 }
 
 type Share struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	ReportID  uuid.UUID
-	Token     string
-	Scope     string
-	ViewCount int32
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	ReportID        *uuid.UUID
+	Token           string
+	Scope           string
+	ViewCount       int32
+	CreatedAt       time.Time
+	RevokedAt       *time.Time
+	BriefingID      *uuid.UUID
+	ItemID          string
+	ExpiresAt       *time.Time
+	Channel         string
+	ShowName        bool
+	WechatViewCount int32
+	CtaClicks       int32
+}
+
+type ShareView struct {
+	ShareID   uuid.UUID
+	Visitor   string
+	ViewDate  time.Time
+	InWechat  bool
 	CreatedAt time.Time
-	RevokedAt *time.Time
 }
 
 type Task struct {

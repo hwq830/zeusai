@@ -1,12 +1,10 @@
 // Package report owns research reports: creating them (quota, task, workflow), reading them,
-// rendering the shared HTML template, follow-up questions and H5 share links.
+// rendering the shared HTML template and follow-up questions. Share links are in package share.
 package report
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,15 +91,6 @@ type Input struct {
 	Language string `json:"language,omitempty"`
 }
 
-type Share struct {
-	ID        string    `json:"id"`
-	URL       string    `json:"url"`
-	Title     string    `json:"title"`
-	Summary   string    `json:"summary,omitempty"`
-	Scope     string    `json:"scope"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
 type Service struct {
 	Q     *db.Queries
 	Quota *quota.Service
@@ -110,7 +99,6 @@ type Service struct {
 	Blob  blob.Store // nil: PDF export unavailable
 	// Config carries the report kill switches; nil leaves reports and PDF export on.
 	Config        *remoteconfig.Cache
-	PublicBaseURL string
 }
 
 func clip(s string, n int) string {
@@ -326,7 +314,8 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID, id string) error
 	return nil
 }
 
-func templateData(r db.Report, full bool) reporttemplate.Data {
+// TemplateData converts a report for the shared template; full=false leaves only the summary.
+func TemplateData(r db.Report, full bool) reporttemplate.Data {
 	l := i18n.Parse(r.Language)
 	d := reporttemplate.Data{Title: r.Title, Summary: r.Summary, DepthLabel: DepthLabel(l, r.Depth), SourceCount: int(r.SourceCount), Lang: string(l)}
 	if r.CompletedAt != nil {
@@ -344,7 +333,7 @@ func templateData(r db.Report, full bool) reporttemplate.Data {
 }
 
 // PrintHTML renders a report for PDF printing.
-func PrintHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(templateData(r, true)) }
+func PrintHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(TemplateData(r, true)) }
 
 // PDFKey names the stored PDF for the report's current content, so a follow-up (which
 // appends to the markdown) makes the old file stale.
@@ -403,7 +392,7 @@ func (s *Service) HTML(ctx context.Context, userID uuid.UUID, id string) ([]byte
 	if r.Status != "done" {
 		return nil, apperr.Conflict("报告还没有生成完")
 	}
-	b, err := reporttemplate.Render(templateData(r, true))
+	b, err := reporttemplate.Render(TemplateData(r, true))
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
@@ -448,63 +437,6 @@ func (s *Service) Followup(ctx context.Context, userID uuid.UUID, id, question s
 		return db.Task{}, apperr.Unavailable("任务启动失败，请稍后再试").WithCause(err)
 	}
 	return t, nil
-}
-
-func (s *Service) CreateShare(ctx context.Context, userID uuid.UUID, id, scope string) (Share, error) {
-	if scope != "full" && scope != "summary" {
-		return Share{}, apperr.Invalid("scope 应为 full / summary")
-	}
-	r, err := s.getRow(ctx, userID, id)
-	if err != nil {
-		return Share{}, err
-	}
-	if r.Status != "done" {
-		return Share{}, apperr.Conflict("报告生成完后才能分享")
-	}
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	token := base64.RawURLEncoding.EncodeToString(b)
-	sh, err := s.Q.CreateShare(ctx, db.CreateShareParams{UserID: userID, ReportID: r.ID, Token: token, Scope: scope})
-	if err != nil {
-		return Share{}, apperr.Internal(err)
-	}
-	return Share{
-		ID: sh.ID.String(), URL: strings.TrimRight(s.PublicBaseURL, "/") + "/s/" + token, Title: r.Title,
-		Summary: r.Summary, Scope: scope, CreatedAt: sh.CreatedAt,
-	}, nil
-}
-
-func (s *Service) RevokeShare(ctx context.Context, userID uuid.UUID, id string) error {
-	sid, err := uuid.Parse(id)
-	if err != nil {
-		return apperr.NotFound("分享不存在")
-	}
-	n, err := s.Q.RevokeShare(ctx, db.RevokeShareParams{ID: sid, UserID: userID})
-	if err != nil {
-		return apperr.Internal(err)
-	}
-	if n == 0 {
-		return apperr.NotFound("分享不存在")
-	}
-	return nil
-}
-
-// SharedHTML renders the public H5 page for a share token.
-func (s *Service) SharedHTML(ctx context.Context, token string) ([]byte, error) {
-	row, err := s.Q.GetSharedReport(ctx, token)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, apperr.NotFound("分享已失效")
-	}
-	if err != nil {
-		return nil, apperr.Internal(err)
-	}
-	_ = s.Q.IncrementShareViews(ctx, token)
-	r := db.Report{ID: row.ID, Title: row.Title, Depth: row.Depth, Summary: row.Summary, Markdown: row.Markdown,
-		Sources: row.Sources, SourceCount: row.SourceCount, CompletedAt: row.CompletedAt, Language: row.Language}
-	d := templateData(r, row.Scope == "full")
-	d.Share = true
-	d.AppURL = strings.TrimRight(s.PublicBaseURL, "/") + "/app"
-	return reporttemplate.Render(d)
 }
 
 func orEmpty[T any](s []T) []T {

@@ -121,6 +121,13 @@ func (c *Client) StartReportPDF(ctx context.Context, run orch.ReportPDFRun) erro
 	return err
 }
 
+func (c *Client) StartBriefingPDF(ctx context.Context, run orch.BriefingPDFRun) error {
+	_, err := c.C.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		ID: "pdf-briefing-" + run.BriefingID.String(), TaskQueue: c.TaskQueue, WorkflowExecutionTimeout: 10 * time.Minute,
+	}, BriefingPDFWorkflowName, run)
+	return err
+}
+
 func (c *Client) StartCampaign(ctx context.Context, run orch.CampaignRun) error {
 	_, err := c.C.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID: orch.CampaignWorkflowID(run.CampaignID), TaskQueue: c.TaskQueue,

@@ -344,18 +344,33 @@ func (s *Server) ListShares(ctx context.Context, req gen.ListSharesRequestObject
 	p := req.Params
 	lim, off := page(p.Cursor, p.Limit)
 	active := p.Active == nil || *p.Active
-	rows, err := s.Q.AdminListShares(ctx, db.AdminListSharesParams{ActiveOnly: active, Limit: int32(lim), Offset: int32(off)})
+	var typ *string
+	if p.Type != nil {
+		t := string(*p.Type)
+		typ = &t
+	}
+	rows, err := s.Q.AdminListShares(ctx, db.AdminListSharesParams{ActiveOnly: active, TargetType: typ, Limit: int32(lim), Offset: int32(off)})
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
 	items := make([]gen.AdminShare, 0, len(rows))
 	for _, r := range rows {
 		url := strings.TrimRight(s.PublicBaseURL, "/") + "/s/" + r.Token
-		items = append(items, gen.AdminShare{
-			Id: r.ID.String(), ReportId: r.ReportID.String(), ReportTitle: r.ReportTitle, UserId: r.UserID.String(),
-			Nickname: r.Nickname, PhoneMasked: maskPhone(r.Phone), Scope: r.Scope, ViewCount: int(r.ViewCount),
-			Url: &url, CreatedAt: r.CreatedAt, RevokedAt: r.RevokedAt,
-		})
+		sh := gen.AdminShare{
+			Id: r.ID.String(), Title: r.TargetTitle, UserId: r.UserID.String(),
+			Nickname: r.Nickname, PhoneMasked: maskPhone(r.Phone), Scope: r.Scope, Channel: r.Channel,
+			ViewCount: int(r.ViewCount), WechatViewCount: int(r.WechatViewCount), CtaClicks: int(r.CtaClicks),
+			Url: &url, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt, RevokedAt: r.RevokedAt,
+		}
+		if r.ReportID != nil {
+			sh.TargetType, sh.TargetId = gen.AdminShareTargetTypeReport, r.ReportID.String()
+		} else if r.BriefingID != nil {
+			sh.TargetType, sh.TargetId = gen.AdminShareTargetTypeBriefing, r.BriefingID.String()
+		}
+		if r.ItemID != "" {
+			sh.ItemId = &r.ItemID
+		}
+		items = append(items, sh)
 	}
 	return gen.ListShares200JSONResponse{Items: items, NextCursor: nextCursor(len(rows), lim, off)}, nil
 }

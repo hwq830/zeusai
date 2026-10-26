@@ -43,6 +43,8 @@ type Section struct {
 	Title       string `json:"title" yaml:"title"`
 	Instruction string `json:"instruction,omitempty" yaml:"instruction"`
 	MaxItems    int    `json:"maxItems,omitempty" yaml:"max_items"`
+	// Private marks personal content (location weather, calendar…) left out of shared briefings.
+	Private bool `json:"private,omitempty" yaml:"private"`
 }
 
 type Source struct {

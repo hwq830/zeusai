@@ -26,6 +26,10 @@ const (
 	KeyHomeNotice           = "home.notice"
 	KeyTemplateSharing      = "template.sharing_enabled"
 	KeyLiveBrowserView      = "task.live_browser_view"
+	KeyShareEnabled         = "share.enabled"
+	KeyShareExpiryDays      = "share.default_expiry_days"
+	KeyShareDailyLimit      = "share.daily_limit"
+	KeyShareCTAURL          = "share.cta_url"
 )
 
 // Builtin describes a key created on startup when missing. Existing keys are never touched,
@@ -63,7 +67,15 @@ var Builtins = []Builtin{
 	{Key: KeyReportCreateEnabled, Namespace: NSKillswitch, Type: TypeBool, Default: "true", ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "关闭后 App 隐藏「研究报告」入口，服务端拒绝新建报告"},
 	{Key: KeyReportPDFEnabled, Namespace: NSKillswitch, Type: TypeBool, Default: "true", ApplyMode: ApplyImmediate, ClientVisible: true,
-		Description: "关闭后 App 隐藏 PDF 导出，服务端拒绝导出"},
+		Description: "关闭后 App 隐藏报告和简报的 PDF 导出，服务端拒绝导出"},
+	{Key: KeyShareEnabled, Namespace: NSKillswitch, Type: TypeBool, Default: "true", ApplyMode: ApplyImmediate, ClientVisible: true,
+		Description: "关闭后 App 隐藏报告和简报的分享链接，服务端拒绝新建分享（已有链接仍可访问，需下架请到分享管理）"},
+	{Key: KeyShareExpiryDays, Namespace: NSFeature, Type: TypeInt, Default: "30", ApplyMode: ApplyImmediate, ClientVisible: true,
+		Description: "新建分享链接的默认有效期（天），0 表示永久；用户可在分享面板改为 7 天 / 30 天 / 永久"},
+	{Key: KeyShareDailyLimit, Namespace: NSQuota, Type: TypeInt, Default: "50", ApplyMode: ApplyImmediate, ClientVisible: false,
+		Description: "每个用户每天最多新建的分享链接数；0 表示不限"},
+	{Key: KeyShareCTAURL, Namespace: NSEndpoint, Type: TypeString, Default: `""`, ApplyMode: ApplyImmediate, ClientVisible: false,
+		Description: "分享页底部按钮跳转地址（下载页 / 落地页）；空字符串表示 {public_base_url}/app。会附加 from=share、t={token}，简报还会附加 template={模板 id}"},
 	{Key: KeyQuotaSubscriptions, Namespace: NSQuota, Type: TypeInt, Default: "2", ApplyMode: ApplyImmediate, ClientVisible: true,
 		Description: "免费用户最多同时保留的定时简报数；用户级覆盖仍在用户详情页设置"},
 	{Key: KeyQuotaTokensPerMonth, Namespace: NSQuota, Type: TypeInt, Default: "7500000", ApplyMode: ApplyImmediate, ClientVisible: true,
