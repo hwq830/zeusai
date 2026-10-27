@@ -158,24 +158,39 @@ func Identities(cfg config.Config, log *slog.Logger) Identity {
 	return id
 }
 
-// Push returns APNs when its key is configured, else a logger.
+// Push returns the configured platform senders (APNs for iOS, EMAS for Android); with none
+// configured it logs instead.
 func Push(cfg config.Config, q *db.Queries, log *slog.Logger) (push.Notifier, error) {
-	if cfg.APNsKeyFile == "" {
+	var senders push.Multi
+	if cfg.APNsKeyFile != "" {
+		b, err := os.ReadFile(cfg.APNsKeyFile)
+		if err != nil {
+			return nil, err
+		}
+		key, err := push.ParseP8(b)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.APNsKeyID == "" || cfg.APNsTeamID == "" || cfg.APNsTopic == "" {
+			return nil, fmt.Errorf("ZEUS_APNS_KEY_ID, ZEUS_APNS_TEAM_ID and ZEUS_APNS_TOPIC are required with ZEUS_APNS_KEY_FILE")
+		}
+		senders = append(senders, &push.APNs{Q: q, KeyID: cfg.APNsKeyID, TeamID: cfg.APNsTeamID, Topic: cfg.APNsTopic, Key: key, Log: log,
+			Hosts: map[string]string{"production": push.APNsProduction, "sandbox": push.APNsSandbox}})
+	}
+	if cfg.EMASAppKey != "" {
+		if cfg.AliyunAccessKeyID == "" || cfg.AliyunAccessKeySecret == "" || cfg.EMASPopupActivity == "" {
+			return nil, fmt.Errorf("ZEUS_ALIYUN_ACCESS_KEY_ID, ZEUS_ALIYUN_ACCESS_KEY_SECRET and ZEUS_EMAS_POPUP_ACTIVITY are required with ZEUS_EMAS_APP_KEY")
+		}
+		senders = append(senders, &push.EMAS{Q: q, AppKey: cfg.EMASAppKey, AccessKeyID: cfg.AliyunAccessKeyID,
+			AccessKeySecret: cfg.AliyunAccessKeySecret, PopupActivity: cfg.EMASPopupActivity, Log: log})
+	}
+	switch len(senders) {
+	case 0:
 		return &push.Log{L: log}, nil
+	case 1:
+		return senders[0], nil
 	}
-	b, err := os.ReadFile(cfg.APNsKeyFile)
-	if err != nil {
-		return nil, err
-	}
-	key, err := push.ParseP8(b)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.APNsKeyID == "" || cfg.APNsTeamID == "" || cfg.APNsTopic == "" {
-		return nil, fmt.Errorf("ZEUS_APNS_KEY_ID, ZEUS_APNS_TEAM_ID and ZEUS_APNS_TOPIC are required with ZEUS_APNS_KEY_FILE")
-	}
-	return &push.APNs{Q: q, KeyID: cfg.APNsKeyID, TeamID: cfg.APNsTeamID, Topic: cfg.APNsTopic, Key: key, Log: log,
-		Hosts: map[string]string{"production": push.APNsProduction, "sandbox": push.APNsSandbox}}, nil
+	return senders, nil
 }
 
 // Notifier wraps the push sender in the message center: every notification is saved for the

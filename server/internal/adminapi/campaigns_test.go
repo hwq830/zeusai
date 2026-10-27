@@ -40,6 +40,25 @@ func TestCampaignConsole(t *testing.T) {
 	if est.Count != 1 {
 		t.Fatalf("filter = %d", est.Count)
 	}
+	// Android 1.0.0 on users[1]: platform narrows the audience and the version check follows it.
+	if err := h.q.UpsertDevice(ctx, db.UpsertDeviceParams{PushToken: "emas-1", UserID: users[1].ID, Platform: "android", ApnsEnv: "production", AppVersion: "1.0.0"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		body map[string]any
+		want int
+	}{
+		{map[string]any{"type": "filter", "platform": "android"}, 1},
+		{map[string]any{"type": "filter", "platform": "ios"}, 1},
+		{map[string]any{"type": "filter", "platform": "android", "minAppVersion": "1.1"}, 0},
+		{map[string]any{"type": "filter", "platform": "ios", "minAppVersion": "1.1"}, 1},
+	} {
+		h.do("POST", "/admin/v1/campaigns/audience-estimate", c.body, 200, &est)
+		if est.Count != c.want {
+			t.Fatalf("%v = %d, want %d", c.body, est.Count, c.want)
+		}
+	}
+	h.do("POST", "/admin/v1/campaigns/audience-estimate", map[string]any{"type": "filter", "platform": "harmony"}, 400, nil)
 	h.do("POST", "/admin/v1/campaigns/audience-estimate", map[string]any{"type": "users", "userIds": []string{"bad"}}, 400, nil)
 
 	// An operator drafts and submits; they cannot approve.

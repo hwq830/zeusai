@@ -55,6 +55,9 @@ type Config struct {
 	APNsKeyID             string `koanf:"apns_key_id"`
 	APNsTeamID            string `koanf:"apns_team_id"`
 	APNsTopic             string `koanf:"apns_topic"` // bundle id
+	// Aliyun Mobile Push (EMAS) for Android, signed with the Aliyun AccessKey above.
+	EMASAppKey        string `koanf:"emas_app_key"`
+	EMASPopupActivity string `koanf:"emas_popup_activity"` // vendor-channel popup Activity class
 
 	// Admin console process (server/cmd/admin). Keep it on an internal address.
 	AdminHTTPAddr  string        `koanf:"admin_http_addr"`
