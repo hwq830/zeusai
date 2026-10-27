@@ -66,14 +66,18 @@ WHERE u.id > $1::uuid
   AND ($5::timestamptz IS NULL OR u.created_at < $5)
   AND ($6::timestamptz IS NULL OR u.last_seen_at >= $6)
   AND ($7::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < $7)
-  AND ($8::int[] IS NULL OR EXISTS (
-        SELECT 1 FROM devices d WHERE d.user_id = u.id AND CASE
-            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $8::int[]
+  AND ($8::text IS NULL OR EXISTS (
+        SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.platform = $8))
+  AND ($9::int[] IS NULL OR EXISTS (
+        SELECT 1 FROM devices d WHERE d.user_id = u.id
+          AND ($8::text IS NULL OR d.platform = $8)
+          AND CASE
+            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $9::int[]
             ELSE false END))
-  AND ($9::uuid IS NULL OR EXISTS (
-        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $9 AND s.status = 'active'))
+  AND ($10::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $10 AND s.status = 'active'))
 ORDER BY u.id
-LIMIT $10
+LIMIT $11
 `
 
 type CampaignAudiencePageParams struct {
@@ -84,6 +88,7 @@ type CampaignAudiencePageParams struct {
 	RegisteredBefore *time.Time
 	SeenAfter        *time.Time
 	NotSeenAfter     *time.Time
+	Platform         *string
 	MinAppVersion    []int32
 	TemplateID       *uuid.UUID
 	PageSize         int32
@@ -104,6 +109,7 @@ func (q *Queries) CampaignAudiencePage(ctx context.Context, arg CampaignAudience
 		arg.RegisteredBefore,
 		arg.SeenAfter,
 		arg.NotSeenAfter,
+		arg.Platform,
 		arg.MinAppVersion,
 		arg.TemplateID,
 		arg.PageSize,
@@ -264,12 +270,16 @@ WHERE u.disabled_at IS NULL
   AND ($4::timestamptz IS NULL OR u.created_at < $4)
   AND ($5::timestamptz IS NULL OR u.last_seen_at >= $5)
   AND ($6::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < $6)
-  AND ($7::int[] IS NULL OR EXISTS (
-        SELECT 1 FROM devices d WHERE d.user_id = u.id AND CASE
-            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $7::int[]
+  AND ($7::text IS NULL OR EXISTS (
+        SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.platform = $7))
+  AND ($8::int[] IS NULL OR EXISTS (
+        SELECT 1 FROM devices d WHERE d.user_id = u.id
+          AND ($7::text IS NULL OR d.platform = $7)
+          AND CASE
+            WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= $8::int[]
             ELSE false END))
-  AND ($8::uuid IS NULL OR EXISTS (
-        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $8 AND s.status = 'active'))
+  AND ($9::uuid IS NULL OR EXISTS (
+        SELECT 1 FROM briefing_subscriptions s WHERE s.user_id = u.id AND s.template_id = $9 AND s.status = 'active'))
 `
 
 type CountCampaignAudienceParams struct {
@@ -279,6 +289,7 @@ type CountCampaignAudienceParams struct {
 	RegisteredBefore *time.Time
 	SeenAfter        *time.Time
 	NotSeenAfter     *time.Time
+	Platform         *string
 	MinAppVersion    []int32
 	TemplateID       *uuid.UUID
 }
@@ -291,6 +302,7 @@ func (q *Queries) CountCampaignAudience(ctx context.Context, arg CountCampaignAu
 		arg.RegisteredBefore,
 		arg.SeenAfter,
 		arg.NotSeenAfter,
+		arg.Platform,
 		arg.MinAppVersion,
 		arg.TemplateID,
 	)

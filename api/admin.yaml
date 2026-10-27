@@ -2127,6 +2127,10 @@ components:
         minAppVersion: { type: string, example: '1.2.0' }
         templateId: { type: string, description: 有用该模板创建的进行中简报订阅 }
         language: { type: string, enum: [zh, en], description: App 显示语言；不填表示不限 }
+        platform:
+          type: string
+          enum: [ios, android]
+          description: 有该平台的推送设备；和 minAppVersion 同时填时，版本按该平台的设备比较。不填表示不限
     CampaignInput:
       type: object
       required: [name, category, title, body, audience]

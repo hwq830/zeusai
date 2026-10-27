@@ -40,6 +40,8 @@ config:
   ZEUS_SEARCH_PROVIDER: bocha
   ZEUS_APPLE_CLIENT_IDS: com.jasonhu.zeusai.app
   ZEUS_APNS_TOPIC: com.jasonhu.zeusai.app
+  # Android push: set ZEUS_EMAS_APP_KEY (non-secret) once the EMAS app exists; it reuses the Aliyun AccessKey secret.
+  ZEUS_EMAS_POPUP_ACTIVITY: com.jasonhu.zeus.app.push.PushPopupActivity
 
 # Model gateway routing, mounted at /etc/zeus/modelgw.yaml (ZEUS_MODELGW_CONFIG).
 # Empty = don't mount; keep it in sync with deploy/modelgw.example.yaml.

@@ -40,6 +40,8 @@ type Audience struct {
 	TemplateID string `json:"templateId,omitempty"`
 	// Display language zh or en; empty matches everyone.
 	Language string `json:"language,omitempty"`
+	// Has a push device on ios or android; MinAppVersion is then compared on that platform's devices.
+	Platform string `json:"platform,omitempty"`
 }
 
 func (a Audience) Validate() error {
@@ -70,6 +72,9 @@ func (a Audience) Validate() error {
 		}
 		if a.Language != "" && !i18n.Valid(a.Language) {
 			return apperr.Invalid("语言只能是 zh 或 en")
+		}
+		if a.Platform != "" && a.Platform != "ios" && a.Platform != "android" {
+			return apperr.Invalid("平台只能是 ios 或 android")
 		}
 	default:
 		return apperr.Invalid("目标人群类型不正确")
@@ -115,6 +120,9 @@ func (a Audience) params(now time.Time) db.CampaignAudiencePageParams {
 		if a.Language != "" {
 			p.UiLanguage = ptr(a.Language)
 		}
+		if a.Platform != "" {
+			p.Platform = ptr(a.Platform)
+		}
 	}
 	return p
 }
@@ -126,7 +134,7 @@ func (s *Service) EstimateAudience(ctx context.Context, a Audience) (int, error)
 	p := a.params(s.now())
 	n, err := s.Q.CountCampaignAudience(ctx, db.CountCampaignAudienceParams{
 		UserIds: p.UserIds, RegisteredAfter: p.RegisteredAfter, RegisteredBefore: p.RegisteredBefore, SeenAfter: p.SeenAfter,
-		NotSeenAfter: p.NotSeenAfter, MinAppVersion: p.MinAppVersion, TemplateID: p.TemplateID, UiLanguage: p.UiLanguage,
+		NotSeenAfter: p.NotSeenAfter, MinAppVersion: p.MinAppVersion, TemplateID: p.TemplateID, UiLanguage: p.UiLanguage, Platform: p.Platform,
 	})
 	if err != nil {
 		return 0, apperr.Internal(err)

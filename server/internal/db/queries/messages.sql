@@ -156,8 +156,12 @@ WHERE u.id > sqlc.arg(after_id)::uuid
   AND (sqlc.narg(registered_before)::timestamptz IS NULL OR u.created_at < sqlc.narg(registered_before))
   AND (sqlc.narg(seen_after)::timestamptz IS NULL OR u.last_seen_at >= sqlc.narg(seen_after))
   AND (sqlc.narg(not_seen_after)::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < sqlc.narg(not_seen_after))
+  AND (sqlc.narg(platform)::text IS NULL OR EXISTS (
+        SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.platform = sqlc.narg(platform)))
   AND (sqlc.narg(min_app_version)::int[] IS NULL OR EXISTS (
-        SELECT 1 FROM devices d WHERE d.user_id = u.id AND CASE
+        SELECT 1 FROM devices d WHERE d.user_id = u.id
+          AND (sqlc.narg(platform)::text IS NULL OR d.platform = sqlc.narg(platform))
+          AND CASE
             WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= sqlc.narg(min_app_version)::int[]
             ELSE false END))
   AND (sqlc.narg(template_id)::uuid IS NULL OR EXISTS (
@@ -174,8 +178,12 @@ WHERE u.disabled_at IS NULL
   AND (sqlc.narg(registered_before)::timestamptz IS NULL OR u.created_at < sqlc.narg(registered_before))
   AND (sqlc.narg(seen_after)::timestamptz IS NULL OR u.last_seen_at >= sqlc.narg(seen_after))
   AND (sqlc.narg(not_seen_after)::timestamptz IS NULL OR u.last_seen_at IS NULL OR u.last_seen_at < sqlc.narg(not_seen_after))
+  AND (sqlc.narg(platform)::text IS NULL OR EXISTS (
+        SELECT 1 FROM devices d WHERE d.user_id = u.id AND d.platform = sqlc.narg(platform)))
   AND (sqlc.narg(min_app_version)::int[] IS NULL OR EXISTS (
-        SELECT 1 FROM devices d WHERE d.user_id = u.id AND CASE
+        SELECT 1 FROM devices d WHERE d.user_id = u.id
+          AND (sqlc.narg(platform)::text IS NULL OR d.platform = sqlc.narg(platform))
+          AND CASE
             WHEN d.app_version ~ '^[0-9]+(\.[0-9]+)*$' THEN string_to_array(d.app_version, '.')::int[] >= sqlc.narg(min_app_version)::int[]
             ELSE false END))
   AND (sqlc.narg(template_id)::uuid IS NULL OR EXISTS (
