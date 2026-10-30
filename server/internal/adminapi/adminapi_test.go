@@ -87,6 +87,11 @@ type harness struct {
 }
 
 func setup(t *testing.T) *harness {
+	return setupWith(t, nil)
+}
+
+// setupWith lets a test adjust the server before it starts.
+func setupWith(t *testing.T, adjust func(*adminapi.Server)) *harness {
 	pool := testdb.New(t)
 	q := db.New(pool)
 	ctx := context.Background()
@@ -105,6 +110,9 @@ func setup(t *testing.T) *harness {
 		Quota: &quota.Service{Q: q, Config: rc}, Orch: fo, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
 		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Notify: &notify.Service{Q: q, Sender: pushes}, Region: "china",
 		Releases: &remoteconfig.Releases{Pool: pool, RequireApproval: true},
+	}
+	if adjust != nil {
+		adjust(srv)
 	}
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
@@ -190,7 +198,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 12 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 13 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

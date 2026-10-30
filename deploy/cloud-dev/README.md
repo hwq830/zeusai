@@ -78,7 +78,7 @@ ssh -L 8233:localhost:8233 root@<公网IP>                                  # �
 docker compose exec postgres psql -U zeus                                # 进数据库
 ```
 
-接真模型 / 搜索 / 推送：在 `.env` 里改 `ZEUS_LLM_PROVIDER=gateway`、`ZEUS_SEARCH_PROVIDER=bocha` 并填 key；推送把 `.p8` 放到 `secrets/apns.p8`，取消 `.env` 里 APNs 那几行的注释，然后 `docker compose up -d`。
+接真模型 / 搜索 / 推送：确认 `.env` 里有 `ZEUS_SECRETS_KEY`，在控制台“API Key”页填千问和博查的 Key 并测试通过，再在 `.env` 里改 `ZEUS_LLM_PROVIDER=gateway`、`ZEUS_SEARCH_PROVIDER=bocha`（也可以直接在 `.env` 里填 key）；推送把 `.p8` 放到 `secrets/apns.p8`，取消 `.env` 里 APNs 那几行的注释，然后 `docker compose up -d`。
 
 备份：数据都在 docker 卷 `zeus_pgdata` 里，调试环境建议开 ECS 自动快照。
 

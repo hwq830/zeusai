@@ -32,6 +32,7 @@ tags:
   - name: tasks
   - name: costs
   - name: modelgw
+  - name: providerKeys
   - name: admins
   - name: feedback
   - name: campaigns
@@ -565,6 +566,110 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelGateway' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- provider keys
+  /admin/v1/provider-keys:
+    get:
+      tags: [providerKeys]
+      operationId: listProviderKeys
+      summary: 模型和搜索服务商的 API Key（只返回末 4 位）及每个服务商当前用的是哪把
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [providerKeys]
+      operationId: createProviderKey
+      summary: 保存一把 Key（仅 owner）。activate 为 true 时同时设为该服务商的启用 Key，约 1 分钟内各进程生效
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderKeyInput' }
+      responses:
+        '201':
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/test:
+    post:
+      tags: [providerKeys]
+      operationId: testNewProviderKey
+      summary: 保存前测试一把 Key（仅 owner），模型发 1 个 token、搜索发一次查询
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, apiKey]
+              properties:
+                provider: { type: string }
+                apiKey: { type: string }
+      responses:
+        '200':
+          description: 测试结果（失败也返回 200，ok=false）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyTest' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    delete:
+      tags: [providerKeys]
+      operationId: deleteProviderKey
+      summary: 删除（仅 owner，启用中的 Key 需先停用）
+      responses:
+        '204': { description: 已删除 }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}/test:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      tags: [providerKeys]
+      operationId: testProviderKey
+      summary: 测试已保存的 Key（仅 owner），结果记在这把 Key 上
+      responses:
+        '200':
+          description: 测试结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyTest' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      tags: [providerKeys]
+      operationId: activateProviderKey
+      summary: 设为该服务商的启用 Key（仅 owner），同服务商其他 Key 自动停用
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}/deactivate:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      tags: [providerKeys]
+      operationId: deactivateProviderKey
+      summary: 停用（仅 owner），该服务商回退到环境变量里的 Key
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
         default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- admins
@@ -1169,6 +1274,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     FeedbackId:
       name: feedbackId
       in: path
@@ -1926,7 +2036,11 @@ components:
               name: { type: string }
               baseUrl: { type: string }
               apiKeyEnv: { type: string }
-              keyPresent: { type: boolean, description: admin 进程环境里是否有这个 key（不返回 key 本身） }
+              keyPresent: { type: boolean, description: 是否有可用的 key（后台启用的 Key 或环境变量，不返回 key 本身） }
+              keySource:
+                type: string
+                enum: [console, env, none]
+                description: console = 后台「API Key」页启用的 Key；env = 环境变量
               timeout: { type: string }
               models:
                 type: object
@@ -1951,6 +2065,65 @@ components:
               calls: { type: integer }
               costCny: { type: number, format: double }
               lastCallAt: { type: string, format: date-time, nullable: true }
+
+    # ------------------------------------------------------------ provider keys
+    ProviderKeyList:
+      type: object
+      required: [encryptionEnabled, providers, keys]
+      properties:
+        encryptionEnabled:
+          type: boolean
+          description: 服务端配置了 ZEUS_SECRETS_KEY；为 false 时不能在后台保存 Key
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/KeyProvider' }
+        keys:
+          type: array
+          items: { $ref: '#/components/schemas/ProviderKey' }
+    KeyProvider:
+      type: object
+      required: [id, name, kind, apiKeyEnv, envKeyPresent, keySource, inRoute]
+      properties:
+        id: { type: string, example: qwen }
+        name: { type: string, example: 通义千问 }
+        kind: { type: string, enum: [llm, search] }
+        baseUrl: { type: string }
+        apiKeyEnv: { type: string, description: 回退用的环境变量名 }
+        envKeyPresent: { type: boolean }
+        keySource:
+          type: string
+          enum: [console, env, none]
+        inRoute: { type: boolean, description: 当前是否在用（模型：在网关路由里且 ZEUS_LLM_PROVIDER=gateway；搜索：ZEUS_SEARCH_PROVIDER=bocha） }
+    ProviderKey:
+      type: object
+      required: [id, provider, label, last4, active, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        provider: { type: string }
+        label: { type: string }
+        last4: { type: string, description: Key 末 4 位，明文不返回 }
+        active: { type: boolean }
+        createdBy: { type: string, description: 创建人邮箱 }
+        createdAt: { type: string, format: date-time }
+        lastTestedAt: { type: string, format: date-time, nullable: true }
+        lastTestOk: { type: boolean, nullable: true }
+        lastTestMessage: { type: string }
+        lastTestLatencyMs: { type: integer, nullable: true }
+    ProviderKeyInput:
+      type: object
+      required: [provider, apiKey]
+      properties:
+        provider: { type: string }
+        label: { type: string, maxLength: 50 }
+        apiKey: { type: string, minLength: 8, maxLength: 512 }
+        activate: { type: boolean, default: true }
+    ProviderKeyTest:
+      type: object
+      required: [ok, message, latencyMs]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+        latencyMs: { type: integer }
 
     # ------------------------------------------------------------ feedback
     Satisfaction:

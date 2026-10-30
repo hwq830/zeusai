@@ -15,6 +15,9 @@ import (
 type OpenAICompat struct {
 	BaseURL string
 	APIKey  string
+	// KeyFunc, when set, supplies the key per call instead of APIKey (keys switched in the
+	// admin console take effect without a restart).
+	KeyFunc func(context.Context) string
 	Name    string
 	Models  map[Tier]string
 	HTTP    *http.Client
@@ -75,8 +78,8 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 		return Response{}, err
 	}
 	hreq.Header.Set("Content-Type", "application/json")
-	if c.APIKey != "" {
-		hreq.Header.Set("Authorization", "Bearer "+c.APIKey)
+	if key := c.key(ctx); key != "" {
+		hreq.Header.Set("Authorization", "Bearer "+key)
 	}
 	hc := c.HTTP
 	if hc == nil {
@@ -102,4 +105,11 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 		Content: cr.Choices[0].Message.Content, Provider: c.Name, Model: cr.Model,
 		Usage: Usage{InputTokens: cr.Usage.PromptTokens, OutputTokens: cr.Usage.CompletionTokens, CachedTokens: cr.Usage.PromptTokensDetails.CachedTokens},
 	}, nil
+}
+
+func (c OpenAICompat) key(ctx context.Context) string {
+	if c.KeyFunc != nil {
+		return c.KeyFunc(ctx)
+	}
+	return c.APIKey
 }

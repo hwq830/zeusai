@@ -84,7 +84,32 @@ func (c Config) validate() error {
 type upstream struct {
 	llm.Provider
 	prices map[string]Price
+	// hasKey reports whether a key is configured right now; nil (test providers) means yes.
+	hasKey func(context.Context) bool
 }
+
+// KeySource resolves a provider's API key per call: a key saved in the admin console, else
+// the environment variable named in the routing file.
+type KeySource interface {
+	Key(ctx context.Context, provider, envName string) string
+}
+
+type envKeys struct{}
+
+func (envKeys) Key(_ context.Context, _, envName string) string {
+	if envName == "" {
+		return ""
+	}
+	return os.Getenv(envName)
+}
+
+type Option func(*options)
+
+type options struct{ keys KeySource }
+
+// WithKeys makes the gateway look keys up through ks on every call instead of reading the
+// environment once.
+func WithKeys(ks KeySource) Option { return func(o *options) { o.keys = ks } }
 
 type Gateway struct {
 	ups     map[string]upstream
@@ -94,23 +119,31 @@ type Gateway struct {
 }
 
 // New builds a gateway. Providers can be overridden (tests) by passing them in extra.
-func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider) (*Gateway, error) {
+// Providers with no key at call time are skipped, so the route falls through to the next one.
+func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts ...Option) (*Gateway, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
+	}
+	o := options{keys: envKeys{}}
+	for _, opt := range opts {
+		opt(&o)
 	}
 	g := &Gateway{ups: map[string]upstream{}, routes: cfg.Routes, mod: mod,
 		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown)}
 	for _, pc := range cfg.Providers {
-		p, ok := extra[pc.Name]
-		if !ok {
+		up := upstream{Provider: extra[pc.Name], prices: pc.Prices}
+		if up.Provider == nil {
 			timeout := pc.Timeout
 			if timeout == 0 {
 				timeout = 120 * time.Second
 			}
-			p = llm.OpenAICompat{BaseURL: pc.BaseURL, APIKey: os.Getenv(pc.APIKeyEnv), Name: pc.Name,
+			name, env, keys := pc.Name, pc.APIKeyEnv, o.keys
+			key := func(ctx context.Context) string { return keys.Key(ctx, name, env) }
+			up.Provider = llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
 				Models: pc.Models, HTTP: &http.Client{Timeout: timeout}}
+			up.hasKey = func(ctx context.Context) bool { return key(ctx) != "" }
 		}
-		g.ups[pc.Name] = upstream{Provider: p, prices: pc.Prices}
+		g.ups[pc.Name] = up
 	}
 	return g, nil
 }
@@ -126,6 +159,12 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 			continue
 		}
 		up := g.ups[name]
+		if up.hasKey != nil && !up.hasKey(ctx) {
+			if lastErr == nil {
+				lastErr = fmt.Errorf("%s: no API key configured", name)
+			}
+			continue
+		}
 		resp, err := up.Complete(ctx, req)
 		if err != nil {
 			if ctx.Err() != nil {

@@ -61,7 +61,11 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	rc := &remoteconfig.Cache{Q: db.New(pool), Redis: rdb, Log: log, Region: cfg.Region}
-	model, err := providers.LLM(cfg, db.New(pool), mod, rc)
+	keys, err := providers.Keys(cfg, db.New(pool), log)
+	if err != nil {
+		return err
+	}
+	model, err := providers.LLM(cfg, db.New(pool), mod, rc, keys)
 	if err != nil {
 		return err
 	}

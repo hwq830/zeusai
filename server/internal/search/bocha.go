@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +14,9 @@ import (
 // Bocha calls the 博查 Web Search API. Field names follow its public docs
 // (https://open.bochaai.com); re-check them when the account is opened.
 type Bocha struct {
-	APIKey  string
+	APIKey string
+	// KeyFunc, when set, supplies the key per call instead of APIKey.
+	KeyFunc func(context.Context) string
 	BaseURL string // default https://api.bochaai.com
 	HTTP    *http.Client
 }
@@ -74,7 +77,14 @@ func (b Bocha) Search(ctx context.Context, q Query) ([]Result, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+b.APIKey)
+	key := b.APIKey
+	if b.KeyFunc != nil {
+		key = b.KeyFunc(ctx)
+	}
+	if key == "" {
+		return nil, errors.New("bocha: API key is not configured")
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
 	hc := b.HTTP
 	if hc == nil {
 		hc = &http.Client{Timeout: 20 * time.Second}
