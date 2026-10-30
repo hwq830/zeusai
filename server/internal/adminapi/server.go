@@ -30,6 +30,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
+	"github.com/hwq830/zeusai/server/internal/secrets"
 )
 
 type Server struct {
@@ -49,6 +50,11 @@ type Server struct {
 	// LLMProvider and ModelGWConfig mirror the api process settings for the gateway page.
 	LLMProvider   string
 	ModelGWConfig string
+	// SearchProvider mirrors ZEUS_SEARCH_PROVIDER; BochaBaseURL overrides the search endpoint (tests).
+	SearchProvider string
+	BochaBaseURL   string
+	// Keys resolves and seals provider API keys (nil Box: saving keys is disabled).
+	Keys *secrets.Keys
 	// PublicBaseURL builds share links.
 	PublicBaseURL string
 	// StaticDir serves the built console; empty serves only the API.
@@ -174,10 +180,12 @@ const (
 	PermConfigManage = "config.manage"
 	// Approve or reject pending releases.
 	PermConfigApprove = "config.approve"
+	// Model and search provider API keys: owners only.
+	PermProviderKeys = "provider_keys.write"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys},
 	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig},
 	"moderator": {PermModeration, PermFeedback},
 	"viewer":    {},

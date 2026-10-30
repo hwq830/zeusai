@@ -70,6 +70,10 @@ func run(log *slog.Logger) error {
 	if _, err := remoteconfig.SeedBuiltins(ctx, q); err != nil {
 		return err
 	}
+	keys, err := providers.Keys(cfg, q, log)
+	if err != nil {
+		return err
+	}
 	rc := &remoteconfig.Cache{Q: q, Redis: rdb, Log: log, Region: cfg.Region}
 	if err := rc.Load(ctx); err != nil {
 		log.Warn("remote config not loaded yet", "err", err)
@@ -81,6 +85,7 @@ func run(log *slog.Logger) error {
 		Releases:    &remoteconfig.Releases{Pool: pool, Redis: rdb, Log: log, RequireApproval: cfg.Env == "prod"},
 		Region:      cfg.Region,
 		LLMProvider: cfg.LLMProvider, ModelGWConfig: cfg.ModelGWConfig, PublicBaseURL: cfg.PublicBaseURL,
+		SearchProvider: cfg.SearchProvider, Keys: keys,
 		StaticDir: cfg.AdminStaticDir, Blob: providers.Blob(cfg), Push: notifier, Notify: notifier,
 	}
 	hs := &http.Server{Addr: cfg.AdminHTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}

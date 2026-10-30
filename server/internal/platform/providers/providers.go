@@ -3,6 +3,7 @@
 package providers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
@@ -25,7 +26,21 @@ import (
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/search"
+	"github.com/hwq830/zeusai/server/internal/secrets"
 )
+
+// BochaProvider names the search provider's keys in the admin console.
+const BochaProvider = "bocha"
+
+// Keys resolves provider API keys: the active key saved in the admin console, else the
+// environment. Without ZEUS_SECRETS_KEY only the environment is used.
+func Keys(cfg config.Config, q *db.Queries, log *slog.Logger) (*secrets.Keys, error) {
+	box, err := secrets.NewBox(cfg.SecretsKey)
+	if err != nil {
+		return nil, err
+	}
+	return &secrets.Keys{Q: q, Box: box, Log: log}, nil
+}
 
 // Moderation returns the input/output checker: the keyword file (if any) plus the terms
 // operators add in the admin console, with every block logged for review.
@@ -48,7 +63,7 @@ func Moderation(cfg config.Config, q *db.Queries, log *slog.Logger) (moderation.
 }
 
 // LLM returns the metered model provider; rc supplies the billed-token weights (nil: weight 1).
-func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remoteconfig.Cache) (llm.Provider, error) {
+func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remoteconfig.Cache, keys *secrets.Keys) (llm.Provider, error) {
 	var p llm.Provider
 	switch cfg.LLMProvider {
 	case "", "mock":
@@ -58,7 +73,7 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 		if err != nil {
 			return nil, err
 		}
-		gw, err := modelgw.New(gc, mod, nil)
+		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys))
 		if err != nil {
 			return nil, err
 		}
@@ -69,12 +84,17 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 	return llm.Metered{Provider: p, Q: q, Billing: &billing.Policy{Config: rc}}, nil
 }
 
-func Search(cfg config.Config) (search.Searcher, error) {
+func Search(cfg config.Config, keys *secrets.Keys) (search.Searcher, error) {
 	switch cfg.SearchProvider {
 	case "", "mock":
 		return search.Mock{}, nil
 	case "bocha":
-		return search.Bocha{APIKey: cfg.BochaAPIKey}, nil
+		return search.Bocha{KeyFunc: func(ctx context.Context) string {
+			if k := keys.Key(ctx, BochaProvider, ""); k != "" {
+				return k
+			}
+			return cfg.BochaAPIKey
+		}}, nil
 	default:
 		return nil, fmt.Errorf("unknown ZEUS_SEARCH_PROVIDER %q", cfg.SearchProvider)
 	}

@@ -2,7 +2,6 @@ package adminapi
 
 import (
 	"context"
-	"os"
 	"sort"
 	"time"
 
@@ -447,6 +446,7 @@ type gwProvider struct {
 	BaseURL    string            `json:"baseUrl"`
 	APIKeyEnv  string            `json:"apiKeyEnv"`
 	KeyPresent bool              `json:"keyPresent"`
+	KeySource  string            `json:"keySource"`
 	Timeout    string            `json:"timeout,omitempty"`
 	Models     map[string]string `json:"models"`
 	Prices     []gwPrice         `json:"prices"`
@@ -490,8 +490,8 @@ func (s *Server) GetModelGateway(ctx context.Context, _ gen.GetModelGatewayReque
 				out.Routes[string(tier)] = names
 			}
 			for _, p := range cfg.Providers {
-				gp := gwProvider{Name: p.Name, BaseURL: p.BaseURL, APIKeyEnv: p.APIKeyEnv,
-					KeyPresent: p.APIKeyEnv != "" && os.Getenv(p.APIKeyEnv) != "", Models: map[string]string{}, Prices: []gwPrice{}}
+				gp := gwProvider{Name: p.Name, BaseURL: p.BaseURL, APIKeyEnv: p.APIKeyEnv, Models: map[string]string{}, Prices: []gwPrice{}}
+				gp.KeyPresent, gp.KeySource = s.keySourceFor(ctx, p.Name, p.APIKeyEnv)
 				if p.Timeout > 0 {
 					gp.Timeout = p.Timeout.String()
 				}

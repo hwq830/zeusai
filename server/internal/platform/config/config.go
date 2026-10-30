@@ -31,6 +31,9 @@ type Config struct {
 	ModerationKeywordsFile string `koanf:"moderation_keywords_file"`
 	SearchProvider         string `koanf:"search_provider"` // mock | bocha
 	BochaAPIKey            string `koanf:"bocha_api_key"`
+	// SecretsKey seals provider API keys saved from the admin console (openssl rand -hex 32).
+	// Empty disables saving keys there; keys then come only from the environment.
+	SecretsKey string `koanf:"secrets_key"`
 	// EgressProxy is the outbound proxy for page reads (http://host:port); empty = direct.
 	EgressProxy string `koanf:"egress_proxy"`
 	// BlobDir stores generated files on local disk (dev, single host); empty disables PDF.
@@ -111,8 +114,8 @@ func Load() (Config, error) {
 	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.LLMProvider == "mock" || cfg.SearchProvider == "mock") {
 		return Config{}, errors.New("dev-only settings (DEV_SMS_CODE, mock LLM or search) are not allowed outside dev")
 	}
-	if cfg.SearchProvider == "bocha" && cfg.BochaAPIKey == "" {
-		return Config{}, errors.New("ZEUS_BOCHA_API_KEY is required when ZEUS_SEARCH_PROVIDER=bocha")
+	if cfg.SearchProvider == "bocha" && cfg.BochaAPIKey == "" && cfg.SecretsKey == "" {
+		return Config{}, errors.New("ZEUS_BOCHA_API_KEY (or ZEUS_SECRETS_KEY, to set it in the admin console) is required when ZEUS_SEARCH_PROVIDER=bocha")
 	}
 	if !cfg.IsDev() && cfg.ModerationKeywordsFile == "" {
 		return Config{}, errors.New("ZEUS_MODERATION_KEYWORDS_FILE is required outside dev")

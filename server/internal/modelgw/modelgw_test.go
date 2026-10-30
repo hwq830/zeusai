@@ -44,6 +44,11 @@ func upstreamServer(t *testing.T, status int, content string, calls *atomic.Int3
 
 func gateway(t *testing.T, mod moderation.Checker, urls ...string) *Gateway {
 	t.Helper()
+	return gatewayWith(t, mod, nil, urls...)
+}
+
+func gatewayWith(t *testing.T, mod moderation.Checker, opts []Option, urls ...string) *Gateway {
+	t.Helper()
 	t.Setenv("TEST_KEY", "k")
 	cfg := Config{Routes: map[llm.Tier][]string{}, BreakerFailures: 2, BreakerCooldown: time.Minute}
 	for i, u := range urls {
@@ -56,11 +61,44 @@ func gateway(t *testing.T, mod moderation.Checker, urls ...string) *Gateway {
 		cfg.Routes[llm.TierStrong] = append(cfg.Routes[llm.TierStrong], name)
 		cfg.Routes[llm.TierFast] = append(cfg.Routes[llm.TierFast], name)
 	}
-	g, err := New(cfg, mod, nil)
+	g, err := New(cfg, mod, nil, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return g
+}
+
+type mapKeys map[string]string
+
+func (m mapKeys) Key(_ context.Context, provider, _ string) string { return m[provider] }
+
+func TestKeysPerCall(t *testing.T) {
+	var ca, cb atomic.Int32
+	a := upstreamServer(t, http.StatusOK, "from a", &ca)
+	b := upstreamServer(t, http.StatusOK, "from b", &cb)
+	keys := mapKeys{"b": "k"}
+	g := gatewayWith(t, nil, []Option{WithKeys(keys)}, a.URL, b.URL)
+
+	// a has no key: skipped without a request.
+	resp, err := g.Complete(context.Background(), llm.Request{Tier: llm.TierStrong})
+	if err != nil || resp.Provider != "b" || ca.Load() != 0 {
+		t.Fatalf("resp %+v err %v calls a=%d", resp, err, ca.Load())
+	}
+	// A key added later is used on the next call, no rebuild.
+	keys["a"] = "k"
+	resp, err = g.Complete(context.Background(), llm.Request{Tier: llm.TierStrong})
+	if err != nil || resp.Provider != "a" {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	// No keys at all: unavailable, nothing sent.
+	delete(keys, "a")
+	delete(keys, "b")
+	if _, err := g.Complete(context.Background(), llm.Request{Tier: llm.TierStrong}); apperr.As(err).Code != apperr.Unavailable("").Code {
+		t.Fatalf("err %v", err)
+	}
+	if ca.Load() != 1 || cb.Load() != 1 {
+		t.Fatalf("calls a=%d b=%d", ca.Load(), cb.Load())
+	}
 }
 
 func TestFallbackOnServerError(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hwq830/zeusai/server/internal/adminapi"
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
@@ -76,6 +77,7 @@ func (f *fakeOrch) CancelTask(_ context.Context, id uuid.UUID) error {
 
 type harness struct {
 	t      *testing.T
+	pool   *pgxpool.Pool
 	q      *db.Queries
 	orch   *fakeOrch
 	url    string
@@ -87,6 +89,11 @@ type harness struct {
 }
 
 func setup(t *testing.T) *harness {
+	return setupWith(t, nil)
+}
+
+// setupWith lets a test adjust the server before it starts.
+func setupWith(t *testing.T, adjust func(*adminapi.Server)) *harness {
 	pool := testdb.New(t)
 	q := db.New(pool)
 	ctx := context.Background()
@@ -106,6 +113,9 @@ func setup(t *testing.T) *harness {
 		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Notify: &notify.Service{Q: q, Sender: pushes}, Region: "china",
 		Releases: &remoteconfig.Releases{Pool: pool, RequireApproval: true},
 	}
+	if adjust != nil {
+		adjust(srv)
+	}
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
 	spec, err := gen.GetSwagger()
@@ -117,7 +127,7 @@ func setup(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, q: q, orch: fo, url: hs.URL, router: router, blob: files, pushes: pushes, config: rc}
+	return &harness{t: t, pool: pool, q: q, orch: fo, url: hs.URL, router: router, blob: files, pushes: pushes, config: rc}
 }
 
 func (h *harness) do(method, path string, body any, wantStatus int, out any) {
@@ -190,7 +200,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 12 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 13 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

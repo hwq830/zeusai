@@ -23,7 +23,8 @@ publicBaseURL: https://api.zeus.example.com   # ZEUS_PUBLIC_BASE_URL: share link
 # Secret holding the secret ZEUS_* variables, loaded with envFrom into every process.
 # Create it yourself (kubectl, or External Secrets from KMS); the chart never writes secrets.
 # Required: ZEUS_DATABASE_URL, ZEUS_REDIS_URL, ZEUS_JWT_SECRET, ZEUS_ADMIN_JWT_SECRET,
-# ZEUS_FILES_SECRET, model keys named in modelgw (e.g. ZEUS_QWEN_API_KEY), ZEUS_BOCHA_API_KEY.
+# ZEUS_FILES_SECRET, and either ZEUS_SECRETS_KEY (model / search keys entered in the admin
+# console) or the model keys named in modelgw (e.g. ZEUS_QWEN_API_KEY) plus ZEUS_BOCHA_API_KEY.
 # Optional: ZEUS_ALIYUN_ACCESS_KEY_ID/SECRET, ZEUS_SMS_SIGN_NAME, ZEUS_SMS_TEMPLATE_CODE,
 # ZEUS_WECHAT_APP_ID/SECRET, ZEUS_APNS_KEY_ID, ZEUS_APNS_TEAM_ID, ZEUS_MCP_AMAP_URL.
 existingSecret: zeus-secrets

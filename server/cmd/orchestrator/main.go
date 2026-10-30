@@ -68,11 +68,15 @@ func run(log *slog.Logger) error {
 		log.Warn("remote config not loaded yet", "err", err)
 	}
 	go rc.Run(ctx)
-	model, err := providers.LLM(cfg, q, mod, rc)
+	keys, err := providers.Keys(cfg, q, log)
 	if err != nil {
 		return err
 	}
-	searcher, err := providers.Search(cfg)
+	model, err := providers.LLM(cfg, q, mod, rc, keys)
+	if err != nil {
+		return err
+	}
+	searcher, err := providers.Search(cfg, keys)
 	if err != nil {
 		return err
 	}

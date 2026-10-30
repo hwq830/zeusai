@@ -32,6 +32,8 @@ tags:
   - name: tasks
   - name: costs
   - name: modelgw
+  - name: providerKeys
+  - name: analytics
   - name: admins
   - name: feedback
   - name: campaigns
@@ -565,6 +567,205 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelGateway' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- analytics
+  /admin/v1/analytics/overview:
+    get:
+      tags: [analytics]
+      operationId: getAnalyticsOverview
+      summary: 核心指标：门槛 B 三项、DAU/WAU/MAU（较前一周期）、待办、近 30 天活跃与新增、流失预警
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsPlatform'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsOverview' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/analytics/growth:
+    get:
+      tags: [analytics]
+      operationId: getAnalyticsGrowth
+      summary: 用户增长：每日新增（按登录方式）和活跃、平台/版本/语言分布、激活漏斗
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsFrom'
+        - $ref: '#/components/parameters/AnalyticsTo'
+        - $ref: '#/components/parameters/AnalyticsPlatform'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsGrowth' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/analytics/retention:
+    get:
+      tags: [analytics]
+      operationId: getAnalyticsRetention
+      summary: 留存：按注册周的同期群（from/to 是注册日期范围，默认近 12 周）
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsFrom'
+        - $ref: '#/components/parameters/AnalyticsTo'
+        - $ref: '#/components/parameters/AnalyticsPlatform'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsRetention' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/analytics/engagement:
+    get:
+      tags: [analytics]
+      operationId: getAnalyticsEngagement
+      summary: 功能使用：简报、模板排行、报告、推送触达
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsFrom'
+        - $ref: '#/components/parameters/AnalyticsTo'
+        - $ref: '#/components/parameters/AnalyticsPlatform'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsEngagement' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/analytics/costs:
+    get:
+      tags: [analytics]
+      operationId: getAnalyticsCosts
+      summary: 成本与额度：总成本和每活跃用户成本、单次任务成本分布、本月额度用量
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsFrom'
+        - $ref: '#/components/parameters/AnalyticsTo'
+        - $ref: '#/components/parameters/AnalyticsPlatform'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsCosts' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/analytics/quality:
+    get:
+      tags: [analytics]
+      operationId: getAnalyticsQuality
+      summary: 任务质量：按类型的失败率和耗时、失败原因 Top 10
+      parameters:
+        - $ref: '#/components/parameters/AnalyticsFrom'
+        - $ref: '#/components/parameters/AnalyticsTo'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsQuality' }
+        default: { $ref: '#/components/responses/Error' }
+
+  # ---------------------------------------------------------------- provider keys
+  /admin/v1/provider-keys:
+    get:
+      tags: [providerKeys]
+      operationId: listProviderKeys
+      summary: 模型和搜索服务商的 API Key（只返回末 4 位）及每个服务商当前用的是哪把
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [providerKeys]
+      operationId: createProviderKey
+      summary: 保存一把 Key（仅 owner）。activate 为 true 时同时设为该服务商的启用 Key，约 1 分钟内各进程生效
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProviderKeyInput' }
+      responses:
+        '201':
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/test:
+    post:
+      tags: [providerKeys]
+      operationId: testNewProviderKey
+      summary: 保存前测试一把 Key（仅 owner），模型发 1 个 token、搜索发一次查询
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, apiKey]
+              properties:
+                provider: { type: string }
+                apiKey: { type: string }
+      responses:
+        '200':
+          description: 测试结果（失败也返回 200，ok=false）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyTest' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    delete:
+      tags: [providerKeys]
+      operationId: deleteProviderKey
+      summary: 删除（仅 owner，启用中的 Key 需先停用）
+      responses:
+        '204': { description: 已删除 }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}/test:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      tags: [providerKeys]
+      operationId: testProviderKey
+      summary: 测试已保存的 Key（仅 owner），结果记在这把 Key 上
+      responses:
+        '200':
+          description: 测试结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyTest' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}/activate:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      tags: [providerKeys]
+      operationId: activateProviderKey
+      summary: 设为该服务商的启用 Key（仅 owner），同服务商其他 Key 自动停用
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/provider-keys/{keyId}/deactivate:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    post:
+      tags: [providerKeys]
+      operationId: deactivateProviderKey
+      summary: 停用（仅 owner），该服务商回退到环境变量里的 Key
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
         default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- admins
@@ -1169,6 +1370,26 @@ components:
       in: path
       required: true
       schema: { type: string }
+    AnalyticsFrom:
+      name: from
+      in: query
+      description: 起始日（北京时间，含），默认近 30 天
+      schema: { type: string, format: date }
+    AnalyticsTo:
+      name: to
+      in: query
+      description: 截止日（含），默认今天；范围最长 366 天
+      schema: { type: string, format: date }
+    AnalyticsPlatform:
+      name: platform
+      in: query
+      description: 按用户最近使用的平台筛选，不传为全部
+      schema: { type: string, enum: [ios, android] }
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     FeedbackId:
       name: feedbackId
       in: path
@@ -1926,7 +2147,11 @@ components:
               name: { type: string }
               baseUrl: { type: string }
               apiKeyEnv: { type: string }
-              keyPresent: { type: boolean, description: admin 进程环境里是否有这个 key（不返回 key 本身） }
+              keyPresent: { type: boolean, description: 是否有可用的 key（后台启用的 Key 或环境变量，不返回 key 本身） }
+              keySource:
+                type: string
+                enum: [console, env, none]
+                description: console = 后台「API Key」页启用的 Key；env = 环境变量
               timeout: { type: string }
               models:
                 type: object
@@ -1951,6 +2176,424 @@ components:
               calls: { type: integer }
               costCny: { type: number, format: double }
               lastCallAt: { type: string, format: date-time, nullable: true }
+
+    # ------------------------------------------------------------ analytics
+    # 口径：按北京时间计日；活跃 = 当天打开过 App（带登录态调用过接口），定时简报不算。
+    # 2026-10-30 之前的活跃数据由注册日、用户主动发起任务的日子和最后在线日近似回填。
+    Kpi:
+      type: object
+      required: [value]
+      properties:
+        value: { type: number, format: double }
+        previous: { type: number, format: double, nullable: true, description: 上一周期（日指标为昨天，周/月指标为前一个 7/30 天） }
+    KeyCount:
+      type: object
+      required: [key, count]
+      properties:
+        key: { type: string }
+        count: { type: integer }
+    RetentionCell:
+      type: object
+      required: [eligible, retained]
+      properties:
+        eligible: { type: integer, description: 这一天已经过完的用户数 }
+        retained: { type: integer }
+    AtRisk:
+      type: object
+      description: 有定时简报在跑、但近 7 天没打开 App 的用户，以及这 7 天花在他们身上的简报和成本
+      required: [users, briefings, costCny]
+      properties:
+        users: { type: integer }
+        briefings: { type: integer }
+        costCny: { type: number, format: double }
+    AnalyticsOverview:
+      type: object
+      required: [gateB, kpis, todo, daily, atRisk]
+      properties:
+        gateB:
+          type: object
+          required: [d30Retention, reportSatisfaction, reportCost]
+          properties:
+            d30Retention:
+              type: object
+              description: 注册后第 29–31 天打开过 App 的比例，取注册日在 31–60 天前的用户（目标 ≥ 20%）
+              required: [eligible, retained, cohortFrom, cohortTo, weekly]
+              properties:
+                rate: { type: number, format: double, nullable: true }
+                eligible: { type: integer }
+                retained: { type: integer }
+                cohortFrom: { type: string, format: date }
+                cohortTo: { type: string, format: date }
+                weekly:
+                  type: array
+                  description: 按注册周，最近 8 个已能观察到第 31 天的周
+                  items:
+                    type: object
+                    required: [week, eligible, retained]
+                    properties:
+                      week: { type: string, format: date }
+                      rate: { type: number, format: double, nullable: true }
+                      eligible: { type: integer }
+                      retained: { type: integer }
+            reportSatisfaction:
+              type: object
+              description: 近 30 天创建的报告（目标 ≥ 70%，评分率 < 25% 时无效）
+              required: [satisfied, unsatisfied, completed, weekly]
+              properties:
+                rate: { type: number, format: double, nullable: true }
+                ratingRate: { type: number, format: double, nullable: true }
+                satisfied: { type: integer }
+                unsatisfied: { type: integer }
+                completed: { type: integer }
+                weekly:
+                  type: array
+                  items:
+                    type: object
+                    required: [week, satisfied, unsatisfied, completed]
+                    properties:
+                      week: { type: string, format: date }
+                      rate: { type: number, format: double, nullable: true }
+                      satisfied: { type: integer }
+                      unsatisfied: { type: integer }
+                      completed: { type: integer }
+            reportCost:
+              type: object
+              description: 近 30 天完成的报告任务的模型成本（目标 ≤ ¥3）
+              required: [reports, weekly]
+              properties:
+                avgCny: { type: number, format: double, nullable: true }
+                p90Cny: { type: number, format: double, nullable: true }
+                reports: { type: integer }
+                weekly:
+                  type: array
+                  items:
+                    type: object
+                    required: [week, reports]
+                    properties:
+                      week: { type: string, format: date }
+                      avgCny: { type: number, format: double, nullable: true }
+                      reports: { type: integer }
+        kpis:
+          type: object
+          required: [dau, wau, mau, stickiness, newUsers, briefingsRead, reports]
+          properties:
+            dau: { $ref: '#/components/schemas/Kpi' }
+            wau: { $ref: '#/components/schemas/Kpi' }
+            mau: { $ref: '#/components/schemas/Kpi' }
+            stickiness: { $ref: '#/components/schemas/Kpi' }
+            newUsers: { $ref: '#/components/schemas/Kpi' }
+            briefingsRead: { $ref: '#/components/schemas/Kpi' }
+            reports: { $ref: '#/components/schemas/Kpi' }
+        todo:
+          type: object
+          required: [openFeedback, pendingCampaigns, pendingReleases, failedTasks24h]
+          properties:
+            openFeedback: { type: integer }
+            pendingCampaigns: { type: integer }
+            pendingReleases: { type: integer }
+            failedTasks24h: { type: integer }
+        daily:
+          type: array
+          description: 近 30 天
+          items:
+            type: object
+            required: [date, activeUsers, newUsers]
+            properties:
+              date: { type: string, format: date }
+              activeUsers: { type: integer }
+              newUsers: { type: integer }
+        atRisk: { $ref: '#/components/schemas/AtRisk' }
+    GrowthSummary:
+      type: object
+      required: [newUsers, activeUsers, avgDailyActive]
+      properties:
+        newUsers: { type: integer }
+        activeUsers: { type: integer, description: 范围内打开过 App 的去重用户 }
+        avgDailyActive: { type: number, format: double }
+    AnalyticsGrowth:
+      type: object
+      required: [from, to, current, previous, daily, platforms, versions, languages, funnel]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        current: { $ref: '#/components/schemas/GrowthSummary' }
+        previous: { $ref: '#/components/schemas/GrowthSummary' }
+        daily:
+          type: array
+          items:
+            type: object
+            required: [date, activeUsers, newUsers, newPhone, newApple, newWechat, newOther, totalUsers]
+            properties:
+              date: { type: string, format: date }
+              activeUsers: { type: integer }
+              newUsers: { type: integer }
+              newPhone: { type: integer }
+              newApple: { type: integer }
+              newWechat: { type: integer }
+              newOther: { type: integer }
+              totalUsers: { type: integer }
+        platforms: { type: array, items: { $ref: '#/components/schemas/KeyCount' } }
+        versions: { type: array, items: { $ref: '#/components/schemas/KeyCount' } }
+        languages: { type: array, items: { $ref: '#/components/schemas/KeyCount' } }
+        funnel:
+          type: object
+          description: 范围内注册的用户；第二周活跃 = 注册后第 7–13 天打开过 App，只算第 13 天已过完的用户
+          required: [registered, subscribed, readBriefing, startedReport, week2Eligible, week2Active]
+          properties:
+            registered: { type: integer }
+            subscribed: { type: integer }
+            readBriefing: { type: integer }
+            startedReport: { type: integer }
+            week2Eligible: { type: integer }
+            week2Active: { type: integer }
+    AnalyticsRetention:
+      type: object
+      required: [from, to, cohorts, atRisk]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        cohorts:
+          type: array
+          items:
+            type: object
+            required: [week, users, d1, d3, d7, d14, d30]
+            properties:
+              week: { type: string, format: date, description: 注册周的周一 }
+              users: { type: integer }
+              d1: { $ref: '#/components/schemas/RetentionCell' }
+              d3: { $ref: '#/components/schemas/RetentionCell' }
+              d7: { $ref: '#/components/schemas/RetentionCell' }
+              d14: { $ref: '#/components/schemas/RetentionCell' }
+              d30: { $ref: '#/components/schemas/RetentionCell' }
+        atRisk: { $ref: '#/components/schemas/AtRisk' }
+    BriefingStats:
+      type: object
+      required: [activeSubscriptions, pausedSubscriptions, newSubscriptions, generated, ready, failed, read, medianReadDelayMinutes, useful, meh, shared]
+      properties:
+        activeSubscriptions: { type: integer, description: 当前数，不随范围变化 }
+        pausedSubscriptions: { type: integer }
+        newSubscriptions: { type: integer }
+        generated: { type: integer }
+        ready: { type: integer }
+        failed: { type: integer }
+        read: { type: integer }
+        medianReadDelayMinutes: { type: number, format: double }
+        useful: { type: integer }
+        meh: { type: integer }
+        shared: { type: integer }
+    ReportStats:
+      type: object
+      required: [started, completed, failed, cancelled, avgDurationSeconds, avgSources, followups, reportsWithFollowup, pdfExports, shared, satisfied, unsatisfied]
+      properties:
+        started: { type: integer }
+        completed: { type: integer }
+        failed: { type: integer }
+        cancelled: { type: integer }
+        avgDurationSeconds: { type: number, format: double }
+        avgSources: { type: number, format: double }
+        followups: { type: integer }
+        reportsWithFollowup: { type: integer }
+        pdfExports: { type: integer }
+        shared: { type: integer }
+        satisfied: { type: integer }
+        unsatisfied: { type: integer }
+    AnalyticsEngagement:
+      type: object
+      required: [from, to, briefings, previousBriefings, briefingsDaily, templates, reports, previousReports, reportsDaily, depths, unsatisfiedReasons, push]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        briefings: { $ref: '#/components/schemas/BriefingStats' }
+        previousBriefings: { $ref: '#/components/schemas/BriefingStats' }
+        briefingsDaily:
+          type: array
+          items:
+            type: object
+            required: [date, generated, read]
+            properties:
+              date: { type: string, format: date }
+              generated: { type: integer }
+              read: { type: integer }
+        templates:
+          type: array
+          description: 官方模板，按当前订阅数排序
+          items:
+            type: object
+            required: [id, name, activeSubscriptions, newSubscriptions, briefings, read, useful, meh]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              activeSubscriptions: { type: integer }
+              newSubscriptions: { type: integer }
+              briefings: { type: integer }
+              read: { type: integer }
+              useful: { type: integer }
+              meh: { type: integer }
+        reports: { $ref: '#/components/schemas/ReportStats' }
+        previousReports: { $ref: '#/components/schemas/ReportStats' }
+        reportsDaily:
+          type: array
+          items:
+            type: object
+            required: [date, started, completed]
+            properties:
+              date: { type: string, format: date }
+              started: { type: integer }
+              completed: { type: integer }
+        depths: { type: array, items: { $ref: '#/components/schemas/KeyCount' } }
+        unsatisfiedReasons: { type: array, items: { $ref: '#/components/schemas/KeyCount' } }
+        push:
+          type: object
+          required: [activeUsers, withDevice, briefingPushOn, marketingOptIn, messages, pushed, opened, categories]
+          properties:
+            activeUsers: { type: integer }
+            withDevice: { type: integer, description: 活跃用户中登记了推送设备的 }
+            briefingPushOn: { type: integer, description: 其中简报通知开着的 }
+            marketingOptIn: { type: integer }
+            messages: { type: integer, description: 这些用户在范围内收到的站内消息 }
+            pushed: { type: integer }
+            opened: { type: integer }
+            categories:
+              type: array
+              items:
+                type: object
+                required: [category, messages, pushed, opened, read]
+                properties:
+                  category: { type: string }
+                  messages: { type: integer }
+                  pushed: { type: integer }
+                  opened: { type: integer }
+                  read: { type: integer }
+    CostSummary:
+      type: object
+      required: [costCny, billedTokens, activeUsers]
+      properties:
+        costCny: { type: number, format: double }
+        billedTokens: { type: integer, format: int64 }
+        activeUsers: { type: integer }
+        costPerActiveUserCny: { type: number, format: double, nullable: true }
+    AnalyticsCosts:
+      type: object
+      required: [from, to, current, previous, unitCosts, quota]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        current: { $ref: '#/components/schemas/CostSummary' }
+        previous: { $ref: '#/components/schemas/CostSummary' }
+        unitCosts:
+          type: array
+          description: 范围内完成的任务，按类型的单次模型成本
+          items:
+            type: object
+            required: [kind, tasks, costCny, medianCny, p90Cny]
+            properties:
+              kind: { type: string }
+              tasks: { type: integer }
+              costCny: { type: number, format: double }
+              medianCny: { type: number, format: double }
+              p90Cny: { type: number, format: double }
+        quota:
+          type: object
+          description: 本月（北京时间自然月）有用量的用户，用到额度的比例；额度 = 用户覆盖值或默认值 + 本月加赠
+          required: [monthStart, defaultLimit, users, over50, over80, exhausted, medianUsed, grantedTokens, grantedUsers]
+          properties:
+            monthStart: { type: string, format: date }
+            defaultLimit: { type: integer, format: int64 }
+            users: { type: integer }
+            over50: { type: integer }
+            over80: { type: integer }
+            exhausted: { type: integer }
+            medianUsed: { type: number, format: double }
+            grantedTokens: { type: integer, format: int64 }
+            grantedUsers: { type: integer }
+    AnalyticsQuality:
+      type: object
+      required: [from, to, kinds, errors]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        kinds:
+          type: array
+          items:
+            type: object
+            required: [kind, total, done, failed, cancelled, p50Seconds, p90Seconds]
+            properties:
+              kind: { type: string }
+              total: { type: integer }
+              done: { type: integer }
+              failed: { type: integer }
+              cancelled: { type: integer }
+              p50Seconds: { type: number, format: double }
+              p90Seconds: { type: number, format: double }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [kind, code, message, count]
+            properties:
+              kind: { type: string }
+              code: { type: string }
+              message: { type: string }
+              count: { type: integer }
+
+    # ------------------------------------------------------------ provider keys
+    ProviderKeyList:
+      type: object
+      required: [encryptionEnabled, providers, keys]
+      properties:
+        encryptionEnabled:
+          type: boolean
+          description: 服务端配置了 ZEUS_SECRETS_KEY；为 false 时不能在后台保存 Key
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/KeyProvider' }
+        keys:
+          type: array
+          items: { $ref: '#/components/schemas/ProviderKey' }
+    KeyProvider:
+      type: object
+      required: [id, name, kind, apiKeyEnv, envKeyPresent, keySource, inRoute]
+      properties:
+        id: { type: string, example: qwen }
+        name: { type: string, example: 通义千问 }
+        kind: { type: string, enum: [llm, search] }
+        baseUrl: { type: string }
+        apiKeyEnv: { type: string, description: 回退用的环境变量名 }
+        envKeyPresent: { type: boolean }
+        keySource:
+          type: string
+          enum: [console, env, none]
+        inRoute: { type: boolean, description: 当前是否在用（模型：在网关路由里且 ZEUS_LLM_PROVIDER=gateway；搜索：ZEUS_SEARCH_PROVIDER=bocha） }
+    ProviderKey:
+      type: object
+      required: [id, provider, label, last4, active, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        provider: { type: string }
+        label: { type: string }
+        last4: { type: string, description: Key 末 4 位，明文不返回 }
+        active: { type: boolean }
+        createdBy: { type: string, description: 创建人邮箱 }
+        createdAt: { type: string, format: date-time }
+        lastTestedAt: { type: string, format: date-time, nullable: true }
+        lastTestOk: { type: boolean, nullable: true }
+        lastTestMessage: { type: string }
+        lastTestLatencyMs: { type: integer, nullable: true }
+    ProviderKeyInput:
+      type: object
+      required: [provider, apiKey]
+      properties:
+        provider: { type: string }
+        label: { type: string, maxLength: 50 }
+        apiKey: { type: string, minLength: 8, maxLength: 512 }
+        activate: { type: boolean, default: true }
+    ProviderKeyTest:
+      type: object
+      required: [ok, message, latencyMs]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+        latencyMs: { type: integer }
 
     # ------------------------------------------------------------ feedback
     Satisfaction:

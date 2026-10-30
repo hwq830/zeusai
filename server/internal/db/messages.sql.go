@@ -1005,6 +1005,34 @@ func (q *Queries) SubmitCampaign(ctx context.Context, arg SubmitCampaignParams) 
 	return i, err
 }
 
+const touchUserActivity = `-- name: TouchUserActivity :exec
+INSERT INTO user_daily_activity (user_id, date, platform, app_version, first_seen_at, last_seen_at)
+VALUES ($1, $2::date, $3, $4, $5, $5)
+ON CONFLICT (user_id, date) DO UPDATE SET
+    platform = CASE WHEN excluded.platform <> '' THEN excluded.platform ELSE user_daily_activity.platform END,
+    app_version = CASE WHEN excluded.app_version <> '' THEN excluded.app_version ELSE user_daily_activity.app_version END,
+    last_seen_at = greatest(user_daily_activity.last_seen_at, excluded.last_seen_at)
+`
+
+type TouchUserActivityParams struct {
+	UserID     uuid.UUID
+	Date       time.Time
+	Platform   string
+	AppVersion string
+	SeenAt     time.Time
+}
+
+func (q *Queries) TouchUserActivity(ctx context.Context, arg TouchUserActivityParams) error {
+	_, err := q.db.Exec(ctx, touchUserActivity,
+		arg.UserID,
+		arg.Date,
+		arg.Platform,
+		arg.AppVersion,
+		arg.SeenAt,
+	)
+	return err
+}
+
 const touchUserSeen = `-- name: TouchUserSeen :exec
 UPDATE users SET last_seen_at = $2 WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < $2)
 `

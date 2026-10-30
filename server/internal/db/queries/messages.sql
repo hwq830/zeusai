@@ -193,3 +193,11 @@ WHERE u.disabled_at IS NULL
 -- The workflow could not be started; the campaign goes back to waiting for approval.
 UPDATE campaigns SET status = 'pending_approval', approved_by = NULL, approved_at = NULL, updated_at = now()
 WHERE id = $1 AND status = 'scheduled';
+
+-- name: TouchUserActivity :exec
+INSERT INTO user_daily_activity (user_id, date, platform, app_version, first_seen_at, last_seen_at)
+VALUES (@user_id, @date::date, @platform, @app_version, @seen_at, @seen_at)
+ON CONFLICT (user_id, date) DO UPDATE SET
+    platform = CASE WHEN excluded.platform <> '' THEN excluded.platform ELSE user_daily_activity.platform END,
+    app_version = CASE WHEN excluded.app_version <> '' THEN excluded.app_version ELSE user_daily_activity.app_version END,
+    last_seen_at = greatest(user_daily_activity.last_seen_at, excluded.last_seen_at);

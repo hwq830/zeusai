@@ -38,6 +38,10 @@ func TestMessageCenter(t *testing.T) {
 	if u, _ := h.q.GetUser(ctx, uid); u.LastSeenAt == nil {
 		t.Fatal("last_seen_at not recorded")
 	}
+	today := time.Now().In(time.FixedZone("CST", 8*3600))
+	if n, err := h.q.AnalyticsActiveUsers(ctx, db.AnalyticsActiveUsersParams{FromDate: today, ToDate: today}); err != nil || n < 1 {
+		t.Fatalf("daily activity not recorded: %d %v", n, err)
+	}
 
 	// Preferences: defaults, then opt into marketing.
 	var p map[string]any
