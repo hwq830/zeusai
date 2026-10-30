@@ -70,6 +70,8 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 
 角色：`owner` 全部权限；`operator` 用户、额度、模板、连接器、任务、用户反馈；`moderator` 内容审核、停用用户、用户反馈；`viewer` 只读。所有写操作进 `admin_audit_log`。在控制台改过的官方模板和连接器标记为 `admin_managed`，之后 `zeusctl seed` 不再覆盖它们的运营字段。控制台添加的屏蔽词与 `ZEUS_MODERATION_KEYWORDS_FILE` 合并，各进程约 1 分钟内生效，拦截记录写入 `moderation_events`。
 
+运营数据：控制台“数据”分组（`/admin/v1/analytics/*`）只用服务端已有的表实时汇总。活跃 = 当天 App 带登录态调用过接口（api 进程每人每 10 分钟最多写一次 `user_daily_activity`，按北京时间计日，记录 `X-Zeus-Platform` / `X-Zeus-App-Version`），定时简报不算；迁移 00011 用注册日、主动发起任务的日子和最后在线日回填了历史。平台筛选按用户最近使用的平台（视图 `user_platform`）。
+
 API Key：owner 在控制台“API Key”页为路由文件里的每个模型服务商和博查搜索保存 Key（AES-256-GCM 加密存 `provider_keys`，只显示末 4 位），可先测试再保存。每个服务商最多一把启用；启用的 Key 优先于环境变量，各进程约 1 分钟内生效、不用重启；停用后回退到环境变量。网关路由里没有 Key 的服务商会被跳过。换 `ZEUS_SECRETS_KEY` 会让已保存的 Key 无法解密，需要重新添加。
 
 ### 配置中心

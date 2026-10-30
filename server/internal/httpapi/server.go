@@ -142,12 +142,13 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 		ctx := moderation.WithUser(context.WithValue(r.Context(), ctxKey{}, uid), uid)
-		s.touchSeen(ctx, uid)
+		s.touchSeen(ctx, uid, r.Header.Get("X-Zeus-Platform"), r.Header.Get("X-Zeus-App-Version"))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// seenTracker throttles users.last_seen_at writes (campaign "active within N days" targeting).
+// seenTracker throttles users.last_seen_at and user_daily_activity writes (campaign
+// "active within N days" targeting, daily actives and retention in the console).
 type seenTracker struct {
 	mu   sync.Mutex
 	last map[uuid.UUID]time.Time
@@ -155,21 +156,52 @@ type seenTracker struct {
 
 const seenEvery = 10 * time.Minute
 
-func (s *Server) touchSeen(ctx context.Context, uid uuid.UUID) {
+// activityTZ is the zone whose calendar days the console counts actives in.
+var activityTZ = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
+
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.In(activityTZ).Date()
+	by, bm, bd := b.In(activityTZ).Date()
+	return ay == by && am == bm && ad == bd
+}
+
+func (s *Server) touchSeen(ctx context.Context, uid uuid.UUID, platform, appVersion string) {
 	now := time.Now()
 	s.seen.mu.Lock()
 	if s.seen.last == nil || len(s.seen.last) > 100_000 {
 		s.seen.last = map[uuid.UUID]time.Time{}
 	}
-	due := now.Sub(s.seen.last[uid]) >= seenEvery
+	prev := s.seen.last[uid]
+	due := now.Sub(prev) >= seenEvery || !sameDay(prev, now)
 	if due {
 		s.seen.last[uid] = now
 	}
 	s.seen.mu.Unlock()
-	if due {
-		if err := s.Q.TouchUserSeen(ctx, db.TouchUserSeenParams{ID: uid, LastSeenAt: &now}); err != nil && s.Log != nil {
-			s.Log.Warn("touch last_seen_at", "user", uid, "err", err)
-		}
+	if !due {
+		return
+	}
+	if err := s.Q.TouchUserSeen(ctx, db.TouchUserSeenParams{ID: uid, LastSeenAt: &now}); err != nil && s.Log != nil {
+		s.Log.Warn("touch last_seen_at", "user", uid, "err", err)
+	}
+	switch platform {
+	case "ios", "android":
+	default:
+		platform = ""
+	}
+	if len(appVersion) > 32 {
+		appVersion = appVersion[:32]
+	}
+	day := now.In(activityTZ)
+	if err := s.Q.TouchUserActivity(ctx, db.TouchUserActivityParams{UserID: uid,
+		Date: time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC), Platform: platform,
+		AppVersion: appVersion, SeenAt: now}); err != nil && s.Log != nil {
+		s.Log.Warn("touch user activity", "user", uid, "err", err)
 	}
 }
 

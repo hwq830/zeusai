@@ -471,6 +471,20 @@ type UserConnector struct {
 	UpdatedAt   time.Time
 }
 
+type UserDailyActivity struct {
+	UserID      uuid.UUID
+	Date        time.Time
+	Platform    string
+	AppVersion  string
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
+}
+
+type UserPlatform struct {
+	UserID   uuid.UUID
+	Platform string
+}
+
 type UserQuotaOverride struct {
 	UserID         uuid.UUID
 	Subscriptions  *int32

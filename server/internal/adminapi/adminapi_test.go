@@ -18,6 +18,7 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hwq830/zeusai/server/internal/adminapi"
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
@@ -76,6 +77,7 @@ func (f *fakeOrch) CancelTask(_ context.Context, id uuid.UUID) error {
 
 type harness struct {
 	t      *testing.T
+	pool   *pgxpool.Pool
 	q      *db.Queries
 	orch   *fakeOrch
 	url    string
@@ -125,7 +127,7 @@ func setupWith(t *testing.T, adjust func(*adminapi.Server)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, q: q, orch: fo, url: hs.URL, router: router, blob: files, pushes: pushes, config: rc}
+	return &harness{t: t, pool: pool, q: q, orch: fo, url: hs.URL, router: router, blob: files, pushes: pushes, config: rc}
 }
 
 func (h *harness) do(method, path string, body any, wantStatus int, out any) {
