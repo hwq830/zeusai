@@ -18,7 +18,9 @@ type Bocha struct {
 	// KeyFunc, when set, supplies the key per call instead of APIKey.
 	KeyFunc func(context.Context) string
 	BaseURL string // default https://api.bochaai.com
-	HTTP    *http.Client
+	// BaseURLFunc, when set and non-empty, overrides BaseURL per call.
+	BaseURLFunc func(context.Context) string
+	HTTP        *http.Client
 }
 
 type bochaRequest struct {
@@ -69,6 +71,11 @@ func (b Bocha) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	body, _ := json.Marshal(bochaRequest{Query: q.Q, Freshness: freshness(q.FreshDays), Summary: true, Count: n, Include: q.Site})
 	base := b.BaseURL
+	if b.BaseURLFunc != nil {
+		if u := b.BaseURLFunc(ctx); u != "" {
+			base = u
+		}
+	}
 	if base == "" {
 		base = "https://api.bochaai.com"
 	}

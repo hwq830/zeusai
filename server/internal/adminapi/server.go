@@ -182,10 +182,12 @@ const (
 	PermConfigApprove = "config.approve"
 	// Model and search provider API keys: owners only.
 	PermProviderKeys = "provider_keys.write"
+	// Choose which model each tier and call site uses: owners only.
+	PermModels = "models.write"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys, PermModels},
 	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig},
 	"moderator": {PermModeration, PermFeedback},
 	"viewer":    {},

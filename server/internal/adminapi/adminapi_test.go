@@ -200,7 +200,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 13 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 14 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

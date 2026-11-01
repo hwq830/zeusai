@@ -73,7 +73,8 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 		if err != nil {
 			return nil, err
 		}
-		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys))
+		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys),
+			modelgw.WithOverrides(&modelgw.DBOverrides{Q: q, Log: slog.Default()}))
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +95,7 @@ func Search(cfg config.Config, keys *secrets.Keys) (search.Searcher, error) {
 				return k
 			}
 			return cfg.BochaAPIKey
-		}}, nil
+		}, BaseURLFunc: func(ctx context.Context) string { return keys.BaseURL(ctx, BochaProvider) }}, nil
 	default:
 		return nil, fmt.Errorf("unknown ZEUS_SEARCH_PROVIDER %q", cfg.SearchProvider)
 	}

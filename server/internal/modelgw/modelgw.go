@@ -94,6 +94,12 @@ type KeySource interface {
 	Key(ctx context.Context, provider, envName string) string
 }
 
+// BaseURLSource is implemented by key sources that can also supply an API address saved with
+// the key; "" means the routing file's base_url.
+type BaseURLSource interface {
+	BaseURL(ctx context.Context, provider string) string
+}
+
 type envKeys struct{}
 
 func (envKeys) Key(_ context.Context, _, envName string) string {
@@ -105,17 +111,21 @@ func (envKeys) Key(_ context.Context, _, envName string) string {
 
 type Option func(*options)
 
-type options struct{ keys KeySource }
+type options struct {
+	keys      KeySource
+	overrides OverrideSource
+}
 
 // WithKeys makes the gateway look keys up through ks on every call instead of reading the
 // environment once.
 func WithKeys(ks KeySource) Option { return func(o *options) { o.keys = ks } }
 
 type Gateway struct {
-	ups     map[string]upstream
-	routes  map[llm.Tier][]string
-	mod     moderation.Checker
-	breaker *breaker
+	ups       map[string]upstream
+	routes    map[llm.Tier][]string
+	overrides OverrideSource
+	mod       moderation.Checker
+	breaker   *breaker
 }
 
 // New builds a gateway. Providers can be overridden (tests) by passing them in extra.
@@ -128,7 +138,7 @@ func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts
 	for _, opt := range opts {
 		opt(&o)
 	}
-	g := &Gateway{ups: map[string]upstream{}, routes: cfg.Routes, mod: mod,
+	g := &Gateway{ups: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
 		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown)}
 	for _, pc := range cfg.Providers {
 		up := upstream{Provider: extra[pc.Name], prices: pc.Prices}
@@ -139,8 +149,12 @@ func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts
 			}
 			name, env, keys := pc.Name, pc.APIKeyEnv, o.keys
 			key := func(ctx context.Context) string { return keys.Key(ctx, name, env) }
-			up.Provider = llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
+			oc := llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
 				Models: pc.Models, HTTP: &http.Client{Timeout: timeout}}
+			if bs, ok := keys.(BaseURLSource); ok {
+				oc.BaseURLFunc = func(ctx context.Context) string { return bs.BaseURL(ctx, name) }
+			}
+			up.Provider = oc
 			up.hasKey = func(ctx context.Context) bool { return key(ctx) != "" }
 		}
 		g.ups[pc.Name] = up
@@ -154,7 +168,8 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 		tier = llm.TierStrong
 	}
 	var lastErr error
-	for _, name := range g.routes[tier] {
+	for _, a := range g.chain(ctx, tier, req.Purpose) {
+		name := a.provider
 		if !g.breaker.allow(name) {
 			continue
 		}
@@ -165,7 +180,9 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 			}
 			continue
 		}
-		resp, err := up.Complete(ctx, req)
+		call := req
+		call.Model = a.model
+		resp, err := up.Complete(ctx, call)
 		if err != nil {
 			if ctx.Err() != nil {
 				return llm.Response{}, ctx.Err()
@@ -178,7 +195,7 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 			continue
 		}
 		g.breaker.success(name)
-		resp.CostMicros = cost(up.prices[resp.Model], resp.Usage)
+		resp.CostMicros = cost(a.priceFor(up.prices, resp.Model), resp.Usage)
 		if g.mod != nil {
 			verdict, err := g.mod.Check(ctx, moderation.Output, resp.Content)
 			if err != nil {
@@ -194,6 +211,18 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 		lastErr = errors.New("all providers are cooling down")
 	}
 	return llm.Response{}, apperr.Unavailable("模型服务繁忙，请稍后再试").WithCause(lastErr)
+}
+
+// priceFor prefers the routing file's price for the model that answered, then the price set
+// with an override, then the file's price for the model asked for.
+func (a attempt) priceFor(prices map[string]Price, answered string) Price {
+	if p, ok := prices[answered]; ok {
+		return p
+	}
+	if a.price != nil {
+		return *a.price
+	}
+	return prices[a.model]
 }
 
 func retryable(err error) bool {

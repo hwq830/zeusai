@@ -33,6 +33,7 @@ tags:
   - name: costs
   - name: modelgw
   - name: providerKeys
+  - name: modelRouting
   - name: analytics
   - name: admins
   - name: feedback
@@ -665,6 +666,66 @@ paths:
         default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- provider keys
+  /admin/v1/model-routing:
+    get:
+      tags: [modelRouting]
+      operationId: getModelRouting
+      summary: 各档位和各环节用哪个模型（路由文件默认值 + 后台指定）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelRouting' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/model-routing/test:
+    post:
+      tags: [modelRouting]
+      operationId: testModel
+      summary: 用当前 Key 调一次指定模型（仅 owner），输出 1 个 token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, model]
+              properties:
+                provider: { type: string }
+                model: { type: string }
+      responses:
+        '200':
+          description: 测试结果（失败也返回 200，ok=false）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKeyTest' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/model-routing/{scope}:
+    parameters:
+      - $ref: '#/components/parameters/ModelScope'
+    put:
+      tags: [modelRouting]
+      operationId: setModelOverride
+      summary: 指定档位或环节的模型（仅 owner），约 1 分钟内生效
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelOverrideInput' }
+      responses:
+        '200':
+          description: 更新后的这一项
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelRoute' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [modelRouting]
+      operationId: deleteModelOverride
+      summary: 恢复路由文件的默认值（仅 owner）
+      responses:
+        '204': { description: 已恢复 }
+        default: { $ref: '#/components/responses/Error' }
   /admin/v1/provider-keys:
     get:
       tags: [providerKeys]
@@ -708,6 +769,7 @@ paths:
               properties:
                 provider: { type: string }
                 apiKey: { type: string }
+                baseUrl: { type: string, description: 不填用默认地址 }
       responses:
         '200':
           description: 测试结果（失败也返回 200，ok=false）
@@ -718,6 +780,26 @@ paths:
   /admin/v1/provider-keys/{keyId}:
     parameters:
       - $ref: '#/components/parameters/KeyId'
+    patch:
+      tags: [providerKeys]
+      operationId: updateProviderKey
+      summary: 改备注或 API 地址（仅 owner），启用中的 Key 约 1 分钟内生效
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label: { type: string, maxLength: 50 }
+                baseUrl: { type: string, maxLength: 300, description: 空字符串表示恢复默认地址 }
+      responses:
+        '200':
+          description: 更新后的 Key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderKey' }
+        default: { $ref: '#/components/responses/Error' }
     delete:
       tags: [providerKeys]
       operationId: deleteProviderKey
@@ -1385,6 +1467,12 @@ components:
       in: query
       description: 按用户最近使用的平台筛选，不传为全部
       schema: { type: string, enum: [ios, android] }
+    ModelScope:
+      name: scope
+      in: path
+      required: true
+      description: 档位（strong / fast）或环节（如 report.write）
+      schema: { type: string }
     KeyId:
       name: keyId
       in: path
@@ -2566,12 +2654,13 @@ components:
         inRoute: { type: boolean, description: 当前是否在用（模型：在网关路由里且 ZEUS_LLM_PROVIDER=gateway；搜索：ZEUS_SEARCH_PROVIDER=bocha） }
     ProviderKey:
       type: object
-      required: [id, provider, label, last4, active, createdAt]
+      required: [id, provider, label, last4, baseUrl, active, createdAt]
       properties:
         id: { type: string, format: uuid }
         provider: { type: string }
         label: { type: string }
         last4: { type: string, description: Key 末 4 位，明文不返回 }
+        baseUrl: { type: string, description: 和这把 Key 一起保存的 API 地址；空表示用服务商默认地址 }
         active: { type: boolean }
         createdBy: { type: string, description: 创建人邮箱 }
         createdAt: { type: string, format: date-time }
@@ -2586,6 +2675,7 @@ components:
         provider: { type: string }
         label: { type: string, maxLength: 50 }
         apiKey: { type: string, minLength: 8, maxLength: 512 }
+        baseUrl: { type: string, maxLength: 300, description: 'API 地址，如百炼业务空间专属地址；不填用默认地址' }
         activate: { type: boolean, default: true }
     ProviderKeyTest:
       type: object
@@ -2594,6 +2684,98 @@ components:
         ok: { type: boolean }
         message: { type: string }
         latencyMs: { type: integer }
+
+    # ------------------------------------------------------------ model routing
+    ModelRouting:
+      type: object
+      description: |
+        模型网关没开（llmProvider 不是 gateway）或路由文件读不到时，configured=false，指定的模型不会生效。
+      required: [llmProvider, configured, providers, tiers, purposes]
+      properties:
+        llmProvider: { type: string }
+        configured: { type: boolean }
+        configError: { type: string }
+        providers:
+          type: array
+          items: { $ref: '#/components/schemas/ModelProviderOption' }
+        tiers:
+          type: array
+          items: { $ref: '#/components/schemas/ModelRoute' }
+        purposes:
+          type: array
+          items: { $ref: '#/components/schemas/ModelRoute' }
+    ModelProviderOption:
+      type: object
+      required: [name, displayName, keyPresent, models, pricedModels]
+      properties:
+        name: { type: string }
+        displayName: { type: string }
+        keyPresent: { type: boolean }
+        models:
+          type: object
+          description: 路由文件里各档位的默认模型
+          additionalProperties: { type: string }
+        pricedModels:
+          type: array
+          description: 路由文件里有价格的模型
+          items: { type: string }
+    ModelChoice:
+      type: object
+      required: [provider, model, fallbacks]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        fallbacks:
+          type: array
+          description: 首选失败后依次尝试的服务商（各用自己这一档的默认模型）
+          items: { type: string }
+    ModelRoute:
+      type: object
+      required: [scope, kind, tier, default, effective]
+      properties:
+        scope: { type: string, description: '档位名或环节名' }
+        kind: { type: string, enum: [tier, purpose] }
+        tier: { type: string, enum: [strong, fast] }
+        default:
+          allOf: [{ $ref: '#/components/schemas/ModelChoice' }]
+          description: 不指定时用什么：档位取路由文件，环节跟随所在档位（含档位的指定）
+        effective:
+          allOf: [{ $ref: '#/components/schemas/ModelChoice' }]
+          description: 现在实际生效的首选和备用顺序
+        override: { $ref: '#/components/schemas/ModelOverride' }
+    ModelPrice:
+      type: object
+      description: 元 / 百万 token
+      required: [input, output, cached]
+      properties:
+        input: { type: number, minimum: 0 }
+        output: { type: number, minimum: 0 }
+        cached: { type: number, minimum: 0 }
+    ModelOverride:
+      type: object
+      required: [provider, model, priced, updatedAt]
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        fallbacks:
+          type: array
+          description: 仅档位；不填表示沿用路由文件的顺序
+          items: { type: string }
+        price: { $ref: '#/components/schemas/ModelPrice' }
+        priced: { type: boolean, description: '成本能算出来（路由文件有价格或填了价格）' }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ModelOverrideInput:
+      type: object
+      required: [provider, model]
+      properties:
+        provider: { type: string }
+        model: { type: string, minLength: 1, maxLength: 100 }
+        fallbacks:
+          type: array
+          description: 仅档位可填；不填沿用路由文件的顺序，空数组表示不要备用
+          items: { type: string }
+        price: { $ref: '#/components/schemas/ModelPrice' }
 
     # ------------------------------------------------------------ feedback
     Satisfaction:

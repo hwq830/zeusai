@@ -83,14 +83,16 @@ type Keys struct {
 	Every time.Duration
 
 	mu     sync.Mutex
-	keys   map[string]string
+	keys   map[string]activeKey
 	loaded time.Time
 }
+
+type activeKey struct{ key, baseURL string }
 
 // Key returns the console key for provider, else the value of envName.
 func (k *Keys) Key(ctx context.Context, provider, envName string) string {
 	if k != nil && k.Box != nil && k.Q != nil {
-		if v := k.current(ctx)[provider]; v != "" {
+		if v := k.current(ctx)[provider].key; v != "" {
 			return v
 		}
 	}
@@ -102,13 +104,22 @@ func (k *Keys) Key(ctx context.Context, provider, envName string) string {
 
 // Source reports where Key would take provider's key from: "console", "env" or "".
 func (k *Keys) Source(ctx context.Context, provider, envName string) string {
-	if k != nil && k.Box != nil && k.Q != nil && k.current(ctx)[provider] != "" {
+	if k != nil && k.Box != nil && k.Q != nil && k.current(ctx)[provider].key != "" {
 		return "console"
 	}
 	if envName != "" && os.Getenv(envName) != "" {
 		return "env"
 	}
 	return ""
+}
+
+// BaseURL returns the API address saved with provider's active console key, or "" to use
+// the provider's default address.
+func (k *Keys) BaseURL(ctx context.Context, provider string) string {
+	if k == nil || k.Box == nil || k.Q == nil {
+		return ""
+	}
+	return k.current(ctx)[provider].baseURL
 }
 
 // Invalidate forces the next Key call to reload (the admin process calls it after a change).
@@ -121,7 +132,7 @@ func (k *Keys) Invalidate() {
 	k.mu.Unlock()
 }
 
-func (k *Keys) current(ctx context.Context) map[string]string {
+func (k *Keys) current(ctx context.Context) map[string]activeKey {
 	every := k.Every
 	if every <= 0 {
 		every = time.Minute
@@ -137,11 +148,11 @@ func (k *Keys) current(ctx context.Context) map[string]string {
 			k.Log.Warn("provider keys reload failed", "err", err)
 		}
 		if k.keys == nil {
-			return map[string]string{}
+			return map[string]activeKey{}
 		}
 		return k.keys
 	}
-	keys := make(map[string]string, len(rows))
+	keys := make(map[string]activeKey, len(rows))
 	for _, r := range rows {
 		v, err := k.Box.Open(r.Provider, r.Ciphertext)
 		if err != nil {
@@ -150,7 +161,7 @@ func (k *Keys) current(ctx context.Context) map[string]string {
 			}
 			continue
 		}
-		keys[r.Provider] = v
+		keys[r.Provider] = activeKey{key: v, baseURL: r.BaseUrl}
 	}
 	k.keys, k.loaded = keys, time.Now()
 	return k.keys
