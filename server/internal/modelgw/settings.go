@@ -90,6 +90,9 @@ func Bootstrap(ctx context.Context, q *db.Queries, cfg Config, log *slog.Logger)
 		}
 		name := p.DisplayName
 		if name == "" {
+			name = KnownNames[p.Name]
+		}
+		if name == "" {
 			name = p.Name
 		}
 		n, err := q.ImportModelProvider(ctx, db.ImportModelProviderParams{Name: p.Name, DisplayName: name, BaseUrl: p.BaseURL,
@@ -152,6 +155,9 @@ func Bootstrap(ctx context.Context, q *db.Queries, cfg Config, log *slog.Logger)
 	_, err = q.InsertRoutingVersion(ctx, db.InsertRoutingVersionParams{Snapshot: snap, Action: "import"})
 	return err
 }
+
+// KnownNames are display names for providers the routing file usually names.
+var KnownNames = map[string]string{"qwen": "通义千问", "deepseek": "DeepSeek"}
 
 // Snapshot is a routing version: the settings and the per-purpose choices.
 type Snapshot struct {

@@ -90,6 +90,9 @@ func providerDisplayName(p modelgw.ProviderConfig) string {
 }
 
 func displayName(id string) string {
+	if n, ok := modelgw.KnownNames[id]; ok {
+		return n
+	}
 	if n, ok := providerNames[id]; ok {
 		return n
 	}
