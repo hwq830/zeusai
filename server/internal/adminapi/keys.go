@@ -23,10 +23,13 @@ import (
 )
 
 // keyProvider is a provider whose key can be set in the console: every provider in the
-// routing file, plus the search provider.
+// routing file, the ones added in the console, and the search provider.
 type keyProvider struct {
 	ID, Name, Kind, BaseURL, EnvName string
+	Source                           string // file, console or builtin
+	Enabled                          bool
 	Models                           map[llm.Tier]string
+	Timeout                          time.Duration
 	InRoute                          bool
 }
 
@@ -36,10 +39,22 @@ var providerNames = map[string]string{
 	providers.BochaProvider: "博查搜索",
 }
 
-func (s *Server) keyProviders() []keyProvider {
+func (s *Server) keyProviders(ctx context.Context) []keyProvider {
 	var out []keyProvider
+	used := map[string]bool{}
+	if ovs, err := s.Q.ListModelOverrides(ctx); err == nil {
+		for _, o := range ovs {
+			used[o.Provider] = true
+			for _, f := range o.Fallbacks {
+				used[f] = true
+			}
+		}
+	}
+	gateway := s.LLMProvider == "gateway"
+	var file modelgw.Config
 	if s.ModelGWConfig != "" {
 		if cfg, err := modelgw.LoadConfig(s.ModelGWConfig); err == nil {
+			file = cfg
 			routed := map[string]bool{}
 			for _, names := range cfg.Routes {
 				for _, n := range names {
@@ -47,13 +62,32 @@ func (s *Server) keyProviders() []keyProvider {
 				}
 			}
 			for _, p := range cfg.Providers {
-				out = append(out, keyProvider{ID: p.Name, Name: displayName(p.Name), Kind: "llm", BaseURL: p.BaseURL,
-					EnvName: p.APIKeyEnv, Models: p.Models, InRoute: s.LLMProvider == "gateway" && routed[p.Name]})
+				out = append(out, keyProvider{ID: p.Name, Name: providerDisplayName(p), Kind: "llm", BaseURL: p.BaseURL,
+					EnvName: p.APIKeyEnv, Source: "file", Enabled: true, Models: p.Models, Timeout: p.Timeout,
+					InRoute: gateway && (routed[p.Name] || used[p.Name])})
 			}
 		}
 	}
+	if rows, err := s.Q.ListModelProviders(ctx); err == nil {
+		for _, r := range rows {
+			if file.Has(r.ModelProvider.Name) {
+				continue
+			}
+			pc := modelgw.ConsoleProvider(r.ModelProvider)
+			out = append(out, keyProvider{ID: pc.Name, Name: pc.DisplayName, Kind: "llm", BaseURL: pc.BaseURL,
+				Source: "console", Enabled: r.ModelProvider.Enabled, Models: pc.Models, Timeout: pc.Timeout,
+				InRoute: gateway && r.ModelProvider.Enabled && used[pc.Name]})
+		}
+	}
 	return append(out, keyProvider{ID: providers.BochaProvider, Name: displayName(providers.BochaProvider), Kind: "search",
-		BaseURL: s.bochaBaseURL(), EnvName: "ZEUS_BOCHA_API_KEY", InRoute: s.SearchProvider == "bocha"})
+		BaseURL: s.bochaBaseURL(), EnvName: "ZEUS_BOCHA_API_KEY", Source: "builtin", Enabled: true, InRoute: s.SearchProvider == "bocha"})
+}
+
+func providerDisplayName(p modelgw.ProviderConfig) string {
+	if p.DisplayName != "" {
+		return p.DisplayName
+	}
+	return displayName(p.Name)
 }
 
 func displayName(id string) string {
@@ -70,8 +104,8 @@ func (s *Server) bochaBaseURL() string {
 	return "https://api.bochaai.com"
 }
 
-func (s *Server) keyProvider(id string) (keyProvider, bool) {
-	for _, p := range s.keyProviders() {
+func (s *Server) keyProvider(ctx context.Context, id string) (keyProvider, bool) {
+	for _, p := range s.keyProviders(ctx) {
 		if p.ID == id {
 			return p, true
 		}
@@ -84,6 +118,23 @@ func (s *Server) box() *secrets.Box {
 		return nil
 	}
 	return s.Keys.Box
+}
+
+func (s *Server) toKeyProvider(ctx context.Context, p keyProvider) gen.KeyProvider {
+	base := p.BaseURL
+	kp := gen.KeyProvider{Id: p.ID, Name: p.Name, Kind: gen.KeyProviderKind(p.Kind), BaseUrl: &base, ApiKeyEnv: p.EnvName,
+		EnvKeyPresent: p.EnvName != "" && os.Getenv(p.EnvName) != "", KeySource: keySource(s.Keys.Source(ctx, p.ID, p.EnvName)),
+		InRoute: p.InRoute, Source: gen.KeyProviderSource(p.Source), Enabled: p.Enabled}
+	if p.Kind == "llm" {
+		strong, fast := p.Models[llm.TierStrong], p.Models[llm.TierFast]
+		kp.Models = &gen.ProviderTierModels{Strong: &strong, Fast: &fast}
+		secs := int(p.Timeout / time.Second)
+		if secs == 0 {
+			secs = 120
+		}
+		kp.TimeoutSeconds = &secs
+	}
+	return kp
 }
 
 func keySource(src string) gen.KeyProviderKeySource {
@@ -112,11 +163,8 @@ func (s *Server) ListProviderKeys(ctx context.Context, _ gen.ListProviderKeysReq
 	}
 	out := gen.ListProviderKeys200JSONResponse{EncryptionEnabled: s.box() != nil,
 		Providers: []gen.KeyProvider{}, Keys: make([]gen.ProviderKey, 0, len(rows))}
-	for _, p := range s.keyProviders() {
-		base := p.BaseURL
-		out.Providers = append(out.Providers, gen.KeyProvider{Id: p.ID, Name: p.Name, Kind: gen.KeyProviderKind(p.Kind),
-			BaseUrl: &base, ApiKeyEnv: p.EnvName, EnvKeyPresent: p.EnvName != "" && os.Getenv(p.EnvName) != "",
-			KeySource: keySource(s.Keys.Source(ctx, p.ID, p.EnvName)), InRoute: p.InRoute})
+	for _, p := range s.keyProviders(ctx) {
+		out.Providers = append(out.Providers, s.toKeyProvider(ctx, p))
 	}
 	for _, r := range rows {
 		out.Keys = append(out.Keys, toProviderKey(db.ProviderKey{ID: r.ID, Provider: r.Provider, Label: r.Label, Last4: r.Last4, BaseUrl: r.BaseUrl,
@@ -135,7 +183,7 @@ func (s *Server) CreateProviderKey(ctx context.Context, req gen.CreateProviderKe
 	if box == nil {
 		return nil, apperr.Invalid("服务端没有配置 ZEUS_SECRETS_KEY，不能在后台保存 Key")
 	}
-	p, ok := s.keyProvider(req.Body.Provider)
+	p, ok := s.keyProvider(ctx, req.Body.Provider)
 	if !ok {
 		return nil, apperr.Invalid("未知的服务商")
 	}
@@ -248,7 +296,7 @@ func (s *Server) TestNewProviderKey(ctx context.Context, req gen.TestNewProvider
 	if _, err := require(ctx, PermProviderKeys); err != nil {
 		return nil, err
 	}
-	p, ok := s.keyProvider(req.Body.Provider)
+	p, ok := s.keyProvider(ctx, req.Body.Provider)
 	if !ok {
 		return nil, apperr.Invalid("未知的服务商")
 	}
@@ -276,9 +324,9 @@ func (s *Server) TestProviderKey(ctx context.Context, req gen.TestProviderKeyReq
 	if err != nil {
 		return nil, err
 	}
-	p, ok := s.keyProvider(k.Provider)
+	p, ok := s.keyProvider(ctx, k.Provider)
 	if !ok {
-		return nil, apperr.Invalid("这个服务商已不在路由文件里")
+		return nil, apperr.Invalid("这个服务商已删除")
 	}
 	if s.box() == nil {
 		return nil, apperr.Invalid("服务端没有配置 ZEUS_SECRETS_KEY")

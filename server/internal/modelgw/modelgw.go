@@ -29,8 +29,10 @@ type Price struct {
 }
 
 type ProviderConfig struct {
-	Name    string `yaml:"name"`
-	BaseURL string `yaml:"base_url"`
+	Name string `yaml:"name"`
+	// DisplayName is what the console shows; empty means a built-in name or Name.
+	DisplayName string `yaml:"display_name"`
+	BaseURL     string `yaml:"base_url"`
 	// APIKeyEnv names the environment variable holding the key; keys never live in the file.
 	APIKeyEnv string              `yaml:"api_key_env"`
 	Models    map[llm.Tier]string `yaml:"models"`
@@ -90,6 +92,29 @@ type upstream struct {
 	hasKey func(context.Context) bool
 }
 
+// WithProviders merges extra into the routing file's providers; a name the file already
+// has keeps the file's settings.
+func (c Config) WithProviders(extra []ProviderConfig) Config {
+	out := c
+	out.Providers = append([]ProviderConfig(nil), c.Providers...)
+	for _, p := range extra {
+		if !c.Has(p.Name) {
+			out.Providers = append(out.Providers, p)
+		}
+	}
+	return out
+}
+
+// Has reports whether the config names provider.
+func (c Config) Has(provider string) bool {
+	for _, p := range c.Providers {
+		if p.Name == provider {
+			return true
+		}
+	}
+	return false
+}
+
 // KeySource resolves a provider's API key per call: a key saved in the admin console, else
 // the environment variable named in the routing file.
 type KeySource interface {
@@ -128,6 +153,16 @@ type Gateway struct {
 	overrides OverrideSource
 	mod       moderation.Checker
 	breaker   *breaker
+	keys      KeySource
+
+	// dyn caches upstreams for providers added in the console, rebuilt when their settings change.
+	dynMu sync.Mutex
+	dyn   map[string]dynUpstream
+}
+
+type dynUpstream struct {
+	pc ProviderConfig
+	up upstream
 }
 
 // New builds a gateway. Providers can be overridden (tests) by passing them in extra.
@@ -141,27 +176,57 @@ func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts
 		opt(&o)
 	}
 	g := &Gateway{ups: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
-		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown)}
+		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown), keys: o.keys, dyn: map[string]dynUpstream{}}
 	for _, pc := range cfg.Providers {
-		up := upstream{Provider: extra[pc.Name], prices: pc.Prices, bailian: IsBailian(pc.BaseURL)}
-		if up.Provider == nil {
-			timeout := pc.Timeout
-			if timeout == 0 {
-				timeout = 120 * time.Second
-			}
-			name, env, keys := pc.Name, pc.APIKeyEnv, o.keys
-			key := func(ctx context.Context) string { return keys.Key(ctx, name, env) }
-			oc := llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
-				Models: pc.Models, HTTP: &http.Client{Timeout: timeout}}
-			if bs, ok := keys.(BaseURLSource); ok {
-				oc.BaseURLFunc = func(ctx context.Context) string { return bs.BaseURL(ctx, name) }
-			}
-			up.Provider = oc
-			up.hasKey = func(ctx context.Context) bool { return key(ctx) != "" }
+		if p := extra[pc.Name]; p != nil {
+			g.ups[pc.Name] = upstream{Provider: p, prices: pc.Prices, bailian: IsBailian(pc.BaseURL)}
+			continue
 		}
-		g.ups[pc.Name] = up
+		g.ups[pc.Name] = g.newUpstream(pc)
 	}
 	return g, nil
+}
+
+func (g *Gateway) newUpstream(pc ProviderConfig) upstream {
+	timeout := pc.Timeout
+	if timeout == 0 {
+		timeout = 120 * time.Second
+	}
+	name, env, keys := pc.Name, pc.APIKeyEnv, g.keys
+	key := func(ctx context.Context) string { return keys.Key(ctx, name, env) }
+	oc := llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
+		Models: pc.Models, HTTP: &http.Client{Timeout: timeout}}
+	if bs, ok := keys.(BaseURLSource); ok {
+		oc.BaseURLFunc = func(ctx context.Context) string { return bs.BaseURL(ctx, name) }
+	}
+	return upstream{Provider: oc, prices: pc.Prices, bailian: IsBailian(pc.BaseURL),
+		hasKey: func(ctx context.Context) bool { return key(ctx) != "" }}
+}
+
+// upstreamFor finds a provider: the routing file's first, then the console's current list.
+func (g *Gateway) upstreamFor(ov Overrides, name string) (upstream, bool) {
+	if up, ok := g.ups[name]; ok {
+		return up, true
+	}
+	for _, pc := range ov.Providers {
+		if pc.Name != name {
+			continue
+		}
+		g.dynMu.Lock()
+		defer g.dynMu.Unlock()
+		if d, ok := g.dyn[name]; ok && sameProvider(d.pc, pc) {
+			return d.up, true
+		}
+		up := g.newUpstream(pc)
+		g.dyn[name] = dynUpstream{pc: pc, up: up}
+		return up, true
+	}
+	return upstream{}, false
+}
+
+func sameProvider(a, b ProviderConfig) bool {
+	return a.BaseURL == b.BaseURL && a.Timeout == b.Timeout && a.APIKeyEnv == b.APIKeyEnv &&
+		a.Models[llm.TierStrong] == b.Models[llm.TierStrong] && a.Models[llm.TierFast] == b.Models[llm.TierFast]
 }
 
 func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, error) {
@@ -171,11 +236,10 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 	}
 	var lastErr error
 	for _, a := range g.chain(ctx, tier, req.Purpose) {
-		name := a.provider
+		name, up := a.provider, a.up
 		if !g.breaker.allow(name) {
 			continue
 		}
-		up := g.ups[name]
 		if up.hasKey != nil && !up.hasKey(ctx) {
 			if lastErr == nil {
 				lastErr = fmt.Errorf("%s: no API key configured", name)

@@ -31,3 +31,6 @@ DELETE FROM provider_keys WHERE id = $1;
 -- name: UpdateProviderKey :one
 UPDATE provider_keys SET label = $2, base_url = $3, updated_at = now() WHERE id = $1
 RETURNING *;
+
+-- name: DeleteProviderKeysFor :execrows
+DELETE FROM provider_keys WHERE provider = $1;

@@ -49,6 +49,8 @@ type Overrides struct {
 	Purposes map[string]Override
 	// Prices are the pricing page's Bailian prices by model, used on Bailian endpoints.
 	Prices map[string]Price
+	// Providers are the enabled providers added in the console.
+	Providers []ProviderConfig
 }
 
 // OverrideSource supplies the current overrides per call.
@@ -122,8 +124,31 @@ func (d *DBOverrides) Overrides(ctx context.Context) Overrides {
 			}
 		}
 	}
+	provs, err := d.Q.ListModelProviders(ctx)
+	if err != nil {
+		if d.Log != nil {
+			d.Log.Warn("model providers reload failed", "err", err)
+		}
+		if d.cur != nil {
+			o.Providers = d.cur.Providers
+		}
+	} else {
+		for _, r := range provs {
+			if r.ModelProvider.Enabled {
+				o.Providers = append(o.Providers, ConsoleProvider(r.ModelProvider))
+			}
+		}
+	}
 	d.cur, d.loaded = &o, time.Now()
 	return o
+}
+
+// ConsoleProvider turns a provider added in the console into routing config; its key comes
+// only from the console (no environment variable).
+func ConsoleProvider(r db.ModelProvider) ProviderConfig {
+	return ProviderConfig{Name: r.Name, DisplayName: r.DisplayName, BaseURL: r.BaseUrl,
+		Models:  map[llm.Tier]string{llm.TierStrong: r.ModelStrong, llm.TierFast: r.ModelFast},
+		Timeout: time.Duration(r.TimeoutSeconds) * time.Second}
 }
 
 // StoredPrice is the metered price of a pricing-page row: the admin's price, else the first
@@ -149,6 +174,7 @@ func deref(f *float64) float64 {
 // attempt is one provider call in a chain; model "" means the provider's model for the tier.
 type attempt struct {
 	provider, model string
+	up              upstream
 	price           *Price
 	// bailian holds the pricing page's prices, consulted on Bailian endpoints.
 	bailian map[string]Price
@@ -165,9 +191,11 @@ func (g *Gateway) chain(ctx context.Context, tier llm.Tier, purpose string) []at
 	var out []attempt
 	seen := map[string]bool{}
 	add := func(a attempt) {
-		if _, ok := g.ups[a.provider]; !ok || seen[a.provider] {
+		up, ok := g.upstreamFor(ov, a.provider)
+		if !ok || seen[a.provider] {
 			return
 		}
+		a.up = up
 		seen[a.provider] = true
 		a.bailian = ov.Prices
 		out = append(out, a)

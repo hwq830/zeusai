@@ -58,6 +58,26 @@ func (s *Server) modelGWConfig() (modelgw.Config, error) {
 	return cfg, nil
 }
 
+// gatewayConfig is the routing file plus the enabled providers added in the console, as the
+// gateway sees them.
+func (s *Server) gatewayConfig(ctx context.Context) (modelgw.Config, error) {
+	cfg, err := s.modelGWConfig()
+	if err != nil {
+		return cfg, err
+	}
+	rows, err := s.Q.ListModelProviders(ctx)
+	if err != nil {
+		return cfg, apperr.Internal(err)
+	}
+	var extra []modelgw.ProviderConfig
+	for _, r := range rows {
+		if r.ModelProvider.Enabled {
+			extra = append(extra, modelgw.ConsoleProvider(r.ModelProvider))
+		}
+	}
+	return cfg.WithProviders(extra), nil
+}
+
 func providerConfig(cfg modelgw.Config, name string) (modelgw.ProviderConfig, bool) {
 	for _, p := range cfg.Providers {
 		if p.Name == name {
@@ -157,7 +177,7 @@ func (s *Server) GetModelRouting(ctx context.Context, _ gen.GetModelRoutingReque
 	if s.LLMProvider == "" {
 		out["llmProvider"] = "mock"
 	}
-	cfg, err := s.modelGWConfig()
+	cfg, err := s.gatewayConfig(ctx)
 	if err != nil {
 		out["configError"] = apperr.As(err).Message
 		return gen.GetModelRouting200JSONResponse(recode[gen.ModelRouting](out)), nil
@@ -178,7 +198,7 @@ func (s *Server) GetModelRouting(ctx context.Context, _ gen.GetModelRoutingReque
 		}
 		slices.Sort(priced)
 		present, _ := s.keySourceFor(ctx, p.Name, p.APIKeyEnv)
-		providers = append(providers, map[string]any{"name": p.Name, "displayName": displayName(p.Name),
+		providers = append(providers, map[string]any{"name": p.Name, "displayName": providerDisplayName(p),
 			"keyPresent": present, "models": models, "pricedModels": priced, "bailian": modelgw.IsBailian(p.BaseURL)})
 	}
 	pl, err := s.prices(ctx)
@@ -214,14 +234,14 @@ func (s *Server) SetModelOverride(ctx context.Context, req gen.SetModelOverrideR
 	if !isTier(scope) && !isPurpose {
 		return nil, apperr.NotFound("没有这个档位或环节")
 	}
-	cfg, err := s.modelGWConfig()
+	cfg, err := s.gatewayConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
 	b := req.Body
 	p, ok := providerConfig(cfg, b.Provider)
 	if !ok {
-		return nil, apperr.Invalid("路由文件里没有这个服务商")
+		return nil, apperr.Invalid("没有这个服务商，或已停用")
 	}
 	model := strings.TrimSpace(b.Model)
 	if model == "" {
@@ -296,13 +316,13 @@ func (s *Server) ListProviderModels(ctx context.Context, req gen.ListProviderMod
 	if _, err := require(ctx, PermModels); err != nil {
 		return nil, err
 	}
-	cfg, err := s.modelGWConfig()
+	cfg, err := s.gatewayConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
 	p, ok := providerConfig(cfg, req.Provider)
 	if !ok {
-		return nil, apperr.NotFound("路由文件里没有这个服务商")
+		return nil, apperr.NotFound("没有这个服务商，或已停用")
 	}
 	none := func(msg string) (gen.ListProviderModelsResponseObject, error) {
 		return gen.ListProviderModels200JSONResponse{Models: []string{}, Error: &msg}, nil
@@ -330,13 +350,13 @@ func (s *Server) TestModel(ctx context.Context, req gen.TestModelRequestObject) 
 	if _, err := require(ctx, PermModels); err != nil {
 		return nil, err
 	}
-	cfg, err := s.modelGWConfig()
+	cfg, err := s.gatewayConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
 	p, ok := providerConfig(cfg, req.Body.Provider)
 	if !ok {
-		return nil, apperr.Invalid("路由文件里没有这个服务商")
+		return nil, apperr.Invalid("没有这个服务商，或已停用")
 	}
 	model := strings.TrimSpace(req.Body.Model)
 	if model == "" {
