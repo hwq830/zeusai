@@ -82,7 +82,7 @@ func TestContentManagement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.q.UpdateTaskProgress(ctx, db.UpdateTaskProgressParams{ID: btk.ID, UserID: u.ID, Status: "done"}); err != nil {
+	if err := h.q.UpdateTaskProgress(ctx, db.UpdateTaskProgressParams{ID: btk.ID, UserID: u.ID, Status: "done", Plan: []byte(`[{"index":1,"title":"要闻","tool":"search"}]`)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.q.RecordModelUsage(ctx, db.RecordModelUsageParams{UserID: &u.ID, TaskID: &btk.ID, Provider: "qwen", Model: "qwen-plus",
@@ -238,7 +238,7 @@ func TestContentManagement(t *testing.T) {
 	var bd gen.AdminBriefingDetail
 	h.do("GET", "/admin/v1/briefings/"+b.ID.String(), nil, 200, &bd)
 	if len(bd.Sections) != 2 || !bd.Sections[1].Masked || len(bd.Sections[1].Items) != 0 || bd.PrivateRevealed ||
-		bd.Sections[0].Items[1].Meh != 1 || bd.Sections[0].Items[1].Comments[0] != "太旧了" || bd.Task == nil || bd.Subscription == nil {
+		bd.Sections[0].Items[1].Meh != 1 || bd.Sections[0].Items[1].Comments[0] != "太旧了" || bd.Task == nil || bd.Task.Steps == nil || len(*bd.Task.Steps) != 1 || bd.Subscription == nil {
 		t.Fatalf("briefing detail = %+v", bd)
 	}
 	h.do("GET", "/admin/v1/briefings/"+b.ID.String()+"?revealReason=工单123", nil, 200, &bd)

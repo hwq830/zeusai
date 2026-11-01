@@ -238,29 +238,15 @@ func (s *Server) GetTask(ctx context.Context, req gen.GetTaskRequestObject) (gen
 	if err != nil {
 		return nil, err
 	}
-	usage, err := s.Q.ListTaskUsage(ctx, &t.ID)
+	d, err := s.taskDetail(ctx, t)
 	if err != nil {
-		return nil, apperr.Internal(err)
-	}
-	var total int64
-	calls := make([]gen.ModelCall, 0, len(usage))
-	for _, u := range usage {
-		total += u.CostMicros
-		calls = append(calls, gen.ModelCall{
-			Provider: u.Provider, Model: u.Model, Tier: u.Tier, InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens),
-			CachedTokens: int(u.CachedTokens), CostCny: cny(u.CostMicros), CreatedAt: u.CreatedAt,
-		})
+		return nil, err
 	}
 	u, err := s.Q.GetUser(ctx, t.UserID)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
-	at := toAdminTask(t, total)
-	at.Nickname, at.PhoneMasked = u.Nickname, maskPhone(u.Phone)
-	d := gen.TaskDetail{Task: at, Input: orEmptyMap(jsonObject(t.Input)), Calls: calls}
-	if m := jsonObject(t.Plan); m != nil {
-		d.Plan = &m
-	}
+	d.Task.Nickname, d.Task.PhoneMasked = u.Nickname, maskPhone(u.Phone)
 	return gen.GetTask200JSONResponse(d), nil
 }
 

@@ -116,6 +116,21 @@ func (s *Server) taskDetail(ctx context.Context, t db.Task) (gen.TaskDetail, err
 	if m := jsonObject(t.Plan); m != nil {
 		d.Plan = &m
 	}
+	var steps []events.Step
+	if json.Unmarshal(t.Plan, &steps) == nil && len(steps) > 0 {
+		out := make([]gen.TaskStep, 0, len(steps))
+		for _, st := range steps {
+			gs := gen.TaskStep{Index: st.Index, Title: st.Title}
+			if st.Detail != "" {
+				gs.Detail = &st.Detail
+			}
+			if st.Tool != "" {
+				gs.Tool = &st.Tool
+			}
+			out = append(out, gs)
+		}
+		d.Steps = &out
+	}
 	return d, nil
 }
 

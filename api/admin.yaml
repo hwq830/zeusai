@@ -3015,9 +3015,21 @@ components:
           type: object
           nullable: true
           additionalProperties: true
+        steps:
+          type: array
+          description: 任务计划的步骤（简报为各区块，报告为调研步骤）
+          items: { $ref: '#/components/schemas/TaskStep' }
         calls:
           type: array
           items: { $ref: '#/components/schemas/ModelCall' }
+    TaskStep:
+      type: object
+      required: [index, title]
+      properties:
+        index: { type: integer }
+        title: { type: string }
+        detail: { type: string }
+        tool: { type: string }
 
     # ------------------------------------------------------------ costs
     CostReport:
