@@ -226,6 +226,16 @@ type FeedbackReply struct {
 	CreatedAt  time.Time
 }
 
+type GatewaySetting struct {
+	ID                     bool
+	Routes                 json.RawMessage
+	BreakerFailures        int32
+	BreakerCooldownSeconds int32
+	ImportedFromFile       bool
+	UpdatedBy              *uuid.UUID
+	UpdatedAt              time.Time
+}
+
 type Memory struct {
 	ID           uuid.UUID
 	UserID       uuid.UUID
@@ -293,6 +303,8 @@ type ModelProvider struct {
 	CreatedBy      *uuid.UUID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	ApiKeyEnv      string
+	Imported       bool
 }
 
 type ModelUsage struct {
@@ -411,6 +423,14 @@ type ReportFeedback struct {
 	Comment   string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type RoutingVersion struct {
+	ID        int64
+	Snapshot  json.RawMessage
+	Action    string
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
 }
 
 type Share struct {

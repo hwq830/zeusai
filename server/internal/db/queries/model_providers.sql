@@ -16,6 +16,3 @@ RETURNING *;
 
 -- name: DeleteModelProvider :execrows
 DELETE FROM model_providers WHERE name = $1;
-
--- name: ModelOverridesUsingProvider :many
-SELECT scope FROM model_overrides WHERE provider = $1 OR $1 = ANY(fallbacks) ORDER BY scope;

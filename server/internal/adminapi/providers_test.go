@@ -67,7 +67,8 @@ providers:
 	h.do("POST", "/admin/v1/providers", base, 409, nil)
 	var list gen.ProviderKeyList
 	h.do("GET", "/admin/v1/provider-keys", nil, 200, &list)
-	if len(list.Providers) != 3 || list.Providers[0].Name != "千问（文件）" || list.Providers[0].Source != "file" ||
+	if len(list.Providers) != 3 || list.Providers[0].Name != "千问（文件）" || list.Providers[0].Source != "console" ||
+		list.Providers[0].Imported == nil || !*list.Providers[0].Imported || *list.Providers[1].Imported ||
 		list.Providers[1].Id != "moonshot" || list.Providers[2].Source != "builtin" || list.Providers[2].Kind != "search" {
 		t.Fatalf("providers %+v", list.Providers)
 	}
@@ -85,14 +86,13 @@ providers:
 	if len(rt.Providers) != 2 || rt.Providers[1].Name != "moonshot" || rt.Providers[1].DisplayName != "月之暗面" {
 		t.Fatalf("routing providers %+v", rt.Providers)
 	}
-	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "moonshot", "model": "kimi-k3",
-		"price": map[string]any{"input": 4, "output": 16, "cached": 1}}, 200, nil)
+	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "moonshot", "model": "kimi-k3"}, 200, nil)
 	h.do("GET", "/admin/v1/provider-keys", nil, 200, &list)
 	if !list.Providers[1].InRoute {
 		t.Fatalf("should be in route %+v", list.Providers[1])
 	}
 	ov := (&modelgw.DBOverrides{Q: h.q}).Overrides(context.Background())
-	if len(ov.Providers) != 1 || ov.Providers[0].BaseURL != up.URL || ov.Providers[0].Models["strong"] != "kimi-k3" {
+	if len(ov.Providers) != 2 || ov.Providers[1].BaseURL != up.URL || ov.Providers[1].Models["strong"] != "kimi-k3" {
 		t.Fatalf("gateway providers %+v", ov.Providers)
 	}
 
@@ -104,7 +104,9 @@ providers:
 	}
 	h.do("PATCH", "/admin/v1/providers/moonshot", map[string]any{"enabled": false}, 409, nil)
 	h.do("DELETE", "/admin/v1/providers/moonshot", nil, 409, nil)
-	h.do("PATCH", "/admin/v1/providers/qwen", map[string]any{"name": "x"}, 400, nil)
+	h.do("PATCH", "/admin/v1/providers/bocha", map[string]any{"name": "x"}, 400, nil)
+	// The imported provider is in the tier routes, so it cannot be disabled either.
+	h.do("PATCH", "/admin/v1/providers/qwen", map[string]any{"enabled": false}, 409, nil)
 	h.do("DELETE", "/admin/v1/providers/nope", nil, 404, nil)
 
 	// Once unused: disable (gone from routing choices), then delete with its keys.
@@ -114,8 +116,7 @@ providers:
 	if len(rt.Providers) != 1 {
 		t.Fatalf("disabled provider still offered %+v", rt.Providers)
 	}
-	h.do("PUT", "/admin/v1/model-routing/strong", map[string]any{"provider": "moonshot", "model": "kimi-k3",
-		"price": map[string]any{"input": 4, "output": 16, "cached": 1}}, 400, nil)
+	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "moonshot", "model": "kimi-k3"}, 400, nil)
 	h.do("DELETE", "/admin/v1/providers/moonshot", nil, 204, nil)
 	h.do("GET", "/admin/v1/provider-keys", nil, 200, &list)
 	if len(list.Providers) != 2 || len(list.Keys) != 0 {

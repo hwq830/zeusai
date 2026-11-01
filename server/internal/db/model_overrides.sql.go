@@ -74,6 +74,71 @@ func (q *Queries) ListModelOverrides(ctx context.Context) ([]ListModelOverridesR
 	return items, nil
 }
 
+const listPurposeOverrides = `-- name: ListPurposeOverrides :many
+SELECT o.scope, o.provider, o.model, o.updated_at, a.email AS updated_by_email
+FROM model_overrides o LEFT JOIN admin_users a ON a.id = o.updated_by
+WHERE o.scope NOT IN ('strong', 'fast')
+ORDER BY o.scope
+`
+
+type ListPurposeOverridesRow struct {
+	Scope          string
+	Provider       string
+	Model          string
+	UpdatedAt      time.Time
+	UpdatedByEmail *string
+}
+
+func (q *Queries) ListPurposeOverrides(ctx context.Context) ([]ListPurposeOverridesRow, error) {
+	rows, err := q.db.Query(ctx, listPurposeOverrides)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPurposeOverridesRow{}
+	for rows.Next() {
+		var i ListPurposeOverridesRow
+		if err := rows.Scan(
+			&i.Scope,
+			&i.Provider,
+			&i.Model,
+			&i.UpdatedAt,
+			&i.UpdatedByEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setPurposeOverride = `-- name: SetPurposeOverride :exec
+INSERT INTO model_overrides (scope, provider, model, updated_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (scope) DO UPDATE SET provider = EXCLUDED.provider, model = EXCLUDED.model, fallbacks = NULL,
+    price_input = NULL, price_output = NULL, price_cached = NULL, updated_by = EXCLUDED.updated_by, updated_at = now()
+`
+
+type SetPurposeOverrideParams struct {
+	Scope     string
+	Provider  string
+	Model     string
+	UpdatedBy *uuid.UUID
+}
+
+func (q *Queries) SetPurposeOverride(ctx context.Context, arg SetPurposeOverrideParams) error {
+	_, err := q.db.Exec(ctx, setPurposeOverride,
+		arg.Scope,
+		arg.Provider,
+		arg.Model,
+		arg.UpdatedBy,
+	)
+	return err
+}
+
 const upsertModelOverride = `-- name: UpsertModelOverride :one
 INSERT INTO model_overrides (scope, provider, model, fallbacks, price_input, price_output, price_cached, updated_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

@@ -3,15 +3,19 @@ package adminapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
 )
 
@@ -56,13 +60,9 @@ func (s *Server) prices(ctx context.Context) (priceList, error) {
 	if err != nil {
 		return priceList{}, apperr.Internal(err)
 	}
-	ovs, err := s.Q.ListModelOverrides(ctx)
+	usedBy, err := s.routingModels(ctx)
 	if err != nil {
 		return priceList{}, apperr.Internal(err)
-	}
-	usedBy := map[string][]string{}
-	for _, o := range ovs {
-		usedBy[o.Model] = append(usedBy[o.Model], o.Scope)
 	}
 	builtin, updated := modelgw.BailianCatalog()
 	out := priceList{Source: "builtin", BuiltinUpdated: updated}
@@ -133,6 +133,46 @@ func (s *Server) prices(ctx context.Context) (priceList, error) {
 		}
 	}
 	slices.SortStableFunc(out.Models, func(a, b priceRow) int { return strings.Compare(a.Model, b.Model) })
+	return out, nil
+}
+
+// routingModels maps each model the routing calls to where: tiers (a step's model, or its
+// provider's default) and purposes.
+func (s *Server) routingModels(ctx context.Context) (map[string][]string, error) {
+	out := map[string][]string{}
+	row, err := s.Q.GetGatewaySettings(ctx)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if err == nil {
+		defaults := map[string]map[llm.Tier]string{}
+		provs, err := s.Q.ListModelProviders(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range provs {
+			defaults[p.ModelProvider.Name] = modelgw.ConsoleProvider(p.ModelProvider).Models
+		}
+		st := modelgw.ParseSettings(row.GatewaySetting)
+		for _, t := range modelgw.Tiers {
+			for _, step := range st.Routes[t] {
+				m := step.Model
+				if m == "" {
+					m = defaults[step.Provider][t]
+				}
+				if m != "" && !slices.Contains(out[m], string(t)) {
+					out[m] = append(out[m], string(t))
+				}
+			}
+		}
+	}
+	ovs, err := s.Q.ListPurposeOverrides(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range ovs {
+		out[o.Model] = append(out[o.Model], o.Scope)
+	}
 	return out, nil
 }
 

@@ -22,12 +22,12 @@ import (
 	"github.com/hwq830/zeusai/server/internal/secrets"
 )
 
-// keyProvider is a provider whose key can be set in the console: every provider in the
-// routing file, the ones added in the console, and the search provider.
+// keyProvider is a provider whose key can be set in the console: the model providers (added
+// in the console or imported from the routing file) and the search provider.
 type keyProvider struct {
 	ID, Name, Kind, BaseURL, EnvName string
-	Source                           string // file, console or builtin
-	Enabled                          bool
+	Source                           string // console or builtin
+	Imported, Enabled                bool
 	Models                           map[llm.Tier]string
 	Timeout                          time.Duration
 	InRoute                          bool
@@ -39,44 +39,43 @@ var providerNames = map[string]string{
 	providers.BochaProvider: "博查搜索",
 }
 
+// routingUses maps each provider to where the routing uses it: tier routes ("strong", "fast")
+// and purpose choices.
+func (s *Server) routingUses(ctx context.Context) (map[string][]string, error) {
+	used := map[string][]string{}
+	row, err := s.Q.GetGatewaySettings(ctx)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if err == nil {
+		st := modelgw.ParseSettings(row.GatewaySetting)
+		for _, t := range modelgw.Tiers {
+			for _, step := range st.Routes[t] {
+				used[step.Provider] = append(used[step.Provider], string(t))
+			}
+		}
+	}
+	ovs, err := s.Q.ListPurposeOverrides(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range ovs {
+		used[o.Provider] = append(used[o.Provider], o.Scope)
+	}
+	return used, nil
+}
+
 func (s *Server) keyProviders(ctx context.Context) []keyProvider {
+	s.ensureRouting(ctx)
 	var out []keyProvider
-	used := map[string]bool{}
-	if ovs, err := s.Q.ListModelOverrides(ctx); err == nil {
-		for _, o := range ovs {
-			used[o.Provider] = true
-			for _, f := range o.Fallbacks {
-				used[f] = true
-			}
-		}
-	}
+	used, _ := s.routingUses(ctx)
 	gateway := s.LLMProvider == "gateway"
-	var file modelgw.Config
-	if s.ModelGWConfig != "" {
-		if cfg, err := modelgw.LoadConfig(s.ModelGWConfig); err == nil {
-			file = cfg
-			routed := map[string]bool{}
-			for _, names := range cfg.Routes {
-				for _, n := range names {
-					routed[n] = true
-				}
-			}
-			for _, p := range cfg.Providers {
-				out = append(out, keyProvider{ID: p.Name, Name: providerDisplayName(p), Kind: "llm", BaseURL: p.BaseURL,
-					EnvName: p.APIKeyEnv, Source: "file", Enabled: true, Models: p.Models, Timeout: p.Timeout,
-					InRoute: gateway && (routed[p.Name] || used[p.Name])})
-			}
-		}
-	}
 	if rows, err := s.Q.ListModelProviders(ctx); err == nil {
 		for _, r := range rows {
-			if file.Has(r.ModelProvider.Name) {
-				continue
-			}
 			pc := modelgw.ConsoleProvider(r.ModelProvider)
-			out = append(out, keyProvider{ID: pc.Name, Name: pc.DisplayName, Kind: "llm", BaseURL: pc.BaseURL,
-				Source: "console", Enabled: r.ModelProvider.Enabled, Models: pc.Models, Timeout: pc.Timeout,
-				InRoute: gateway && r.ModelProvider.Enabled && used[pc.Name]})
+			out = append(out, keyProvider{ID: pc.Name, Name: providerDisplayName(pc), Kind: "llm", BaseURL: pc.BaseURL,
+				EnvName: pc.APIKeyEnv, Source: "console", Imported: r.ModelProvider.Imported, Enabled: r.ModelProvider.Enabled,
+				Models: pc.Models, Timeout: pc.Timeout, InRoute: gateway && r.ModelProvider.Enabled && len(used[pc.Name]) > 0})
 		}
 	}
 	return append(out, keyProvider{ID: providers.BochaProvider, Name: displayName(providers.BochaProvider), Kind: "search",
@@ -124,7 +123,7 @@ func (s *Server) toKeyProvider(ctx context.Context, p keyProvider) gen.KeyProvid
 	base := p.BaseURL
 	kp := gen.KeyProvider{Id: p.ID, Name: p.Name, Kind: gen.KeyProviderKind(p.Kind), BaseUrl: &base, ApiKeyEnv: p.EnvName,
 		EnvKeyPresent: p.EnvName != "" && os.Getenv(p.EnvName) != "", KeySource: keySource(s.Keys.Source(ctx, p.ID, p.EnvName)),
-		InRoute: p.InRoute, Source: gen.KeyProviderSource(p.Source), Enabled: p.Enabled}
+		InRoute: p.InRoute, Source: gen.KeyProviderSource(p.Source), Enabled: p.Enabled, Imported: &p.Imported}
 	if p.Kind == "llm" {
 		strong, fast := p.Models[llm.TierStrong], p.Models[llm.TierFast]
 		kp.Models = &gen.ProviderTierModels{Strong: &strong, Fast: &fast}

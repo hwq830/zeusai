@@ -412,10 +412,11 @@ func TestAdminConsole(t *testing.T) {
 	if cr.TotalCny != 2.5 || len(cr.Daily) != 7 || len(cr.ByModel) != 1 || len(cr.TopUsers) != 1 {
 		t.Fatalf("costs = %+v", cr)
 	}
-	var gw gen.ModelGateway
-	h.do("GET", "/admin/v1/modelgw", nil, 200, &gw)
-	if !gw.Configured || len(gw.Providers) != 2 || len(gw.Routes["strong"]) != 2 || len(gw.Usage24h) != 1 {
-		t.Fatalf("modelgw = %+v", gw)
+	// The routing file is imported into the database on first read.
+	var gw gen.ModelRouting
+	h.do("GET", "/admin/v1/model-routing", nil, 200, &gw)
+	if !gw.Configured || !gw.ImportedFromFile || len(gw.Providers) != 2 || len(gw.Tiers[0].Steps) != 2 || len(gw.Usage24h) != 1 || len(gw.Versions) != 1 {
+		t.Fatalf("model-routing = %+v", gw)
 	}
 	h.do("GET", "/admin/v1/plans", nil, 200, nil)
 
