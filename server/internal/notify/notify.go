@@ -82,14 +82,11 @@ func (s *Service) Notify(ctx context.Context, userID uuid.UUID, n push.Notificat
 		return errors.New("notify: unknown category " + cat)
 	}
 	title, body := n.Title, n.Body
-	if n.TitleEn != "" || n.BodyEn != "" {
-		u, err := s.Q.GetUser(ctx, userID)
-		if err != nil {
-			return err
-		}
-		if l := i18n.Parse(u.UiLanguage); l == i18n.EN {
-			title, body = l.Pick(n.Title, n.TitleEn), l.Pick(n.Body, n.BodyEn)
-		}
+	if u, err := s.Q.GetUser(ctx, userID); err == nil {
+		l := i18n.Parse(u.UiLanguage)
+		title, body = l.Pick(n.Title, n.TitleEn), l.Pick(n.Body, n.BodyEn)
+	} else if n.TitleEn != "" || n.BodyEn != "" {
+		return err
 	}
 	m, err := s.Q.CreateMessage(ctx, db.CreateMessageParams{
 		UserID: userID, Category: cat, Title: title, Body: body, ImageUrl: n.Image, Deeplink: n.DeepLink,

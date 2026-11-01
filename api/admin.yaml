@@ -120,7 +120,7 @@ paths:
         - name: uiLanguage
           in: query
           description: 按 App 显示语言筛选
-          schema: { type: string, enum: [zh, en] }
+          schema: { type: string, enum: [zh, zh-Hant, en] }
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1697,8 +1697,8 @@ components:
         planCode: { type: string }
         planExpiresAt: { type: string, format: date-time, nullable: true }
         timezone: { type: string }
-        uiLanguage: { type: string, enum: [zh, en], description: App 显示语言，简报和推送跟随它 }
-        reportLanguage: { type: string, enum: [auto, zh, en], description: 报告生成语言，auto 跟随显示语言 }
+        uiLanguage: { type: string, enum: [zh, zh-Hant, en], description: App 显示语言，简报和推送跟随它 }
+        reportLanguage: { type: string, enum: [auto, zh, zh-Hant, en], description: 报告生成语言，auto 跟随显示语言 }
         disabled: { type: boolean }
         disabledReason: { type: string }
         disabledAt: { type: string, format: date-time, nullable: true }
@@ -2951,7 +2951,7 @@ components:
         inactiveForDays: { type: integer, minimum: 0, maximum: 365, description: 超过 N 天没打开 App }
         minAppVersion: { type: string, example: '1.2.0' }
         templateId: { type: string, description: 有用该模板创建的进行中简报订阅 }
-        language: { type: string, enum: [zh, en], description: App 显示语言；不填表示不限 }
+        language: { type: string, enum: [zh, zh-Hant, en], description: App 显示语言；不填表示不限 }
         platform:
           type: string
           enum: [ios, android]

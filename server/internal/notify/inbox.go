@@ -198,9 +198,16 @@ func (s *Service) UpdatePrefs(ctx context.Context, userID uuid.UUID, in Prefs) (
 
 // TestSend pushes a preview straight to the user's devices, without a message-center entry.
 func (s *Service) TestSend(ctx context.Context, userID uuid.UUID, n push.Notification) error {
-	if u, err := s.Q.GetUser(ctx, userID); err == nil && i18n.Parse(u.UiLanguage) == i18n.EN && n.TitleEn != "" {
+	l := i18n.ZH
+	if u, err := s.Q.GetUser(ctx, userID); err == nil {
+		l = i18n.Parse(u.UiLanguage)
+	}
+	switch {
+	case l == i18n.EN && n.TitleEn != "":
 		n.Title, n.Body = "[Test] "+n.TitleEn, n.BodyEn
-	} else {
+	case l == i18n.ZHHant:
+		n.Title, n.Body = "[測試] "+i18n.Hant(n.Title), i18n.Hant(n.Body)
+	default:
 		n.Title = "[测试] " + n.Title
 	}
 	return s.Sender.Notify(ctx, userID, n)

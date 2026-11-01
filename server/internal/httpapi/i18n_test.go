@@ -1,12 +1,14 @@
 package httpapi_test
 
 import (
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hwq830/zeusai/server/internal/events"
+	"github.com/hwq830/zeusai/server/internal/i18n"
 )
 
 var han = regexp.MustCompile(`\p{Han}`)
@@ -164,5 +166,73 @@ func TestEnglishUser(t *testing.T) {
 		if han.MatchString(sec.Title) {
 			t.Errorf("section title %q", sec.Title)
 		}
+	}
+}
+
+// A Traditional Chinese user (Accept-Language: zh-Hant-TW): errors, official templates and
+// progress texts come back converted from the Simplified source.
+func TestTraditionalChineseUser(t *testing.T) {
+	h := setup(t)
+	h.lang = "zh-Hant-TW"
+	h.login(randomPhone())
+
+	var me struct {
+		User struct {
+			UILanguage     string `json:"uiLanguage"`
+			ReportLanguage string `json:"reportLanguage"`
+		} `json:"user"`
+	}
+	h.do("GET", "/v1/me", nil, 200, &me)
+	if me.User.UILanguage != "zh-Hant" || me.User.ReportLanguage != "auto" {
+		t.Fatalf("new Traditional Chinese user: %+v", me)
+	}
+
+	var e apiError
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": ""}, 400, &e)
+	if e.Message != "調研題目不能為空且不超過 500 字" {
+		t.Fatalf("error message: %+v", e)
+	}
+
+	var tl struct {
+		Items []struct {
+			Name     string `json:"name"`
+			Category string `json:"category"`
+		} `json:"items"`
+		Categories []string `json:"categories"`
+	}
+	h.do("GET", "/v1/templates", nil, 200, &tl)
+	if len(tl.Items) == 0 || len(tl.Categories) == 0 {
+		t.Fatalf("templates: %+v", tl)
+	}
+	if got := strings.Join(tl.Categories, ","); got != i18n.Hant(got) {
+		t.Errorf("categories not converted: %s", got)
+	}
+	for _, it := range tl.Items {
+		if it.Name != i18n.Hant(it.Name) {
+			t.Errorf("template name not converted: %q", it.Name)
+		}
+	}
+	var byCat struct {
+		Items []struct{ Name string } `json:"items"`
+	}
+	h.do("GET", "/v1/templates?category="+url.QueryEscape(tl.Categories[0]), nil, 200, &byCat)
+	if len(byCat.Items) == 0 {
+		t.Fatalf("filter by Traditional category %q: no items", tl.Categories[0])
+	}
+
+	h.do("PATCH", "/v1/me", map[string]any{"uiLanguage": "zh", "reportLanguage": "zh-Hant"}, 200, &me)
+	if me.User.UILanguage != "zh" || me.User.ReportLanguage != "zh-Hant" {
+		t.Fatalf("switch languages: %+v", me)
+	}
+	h.lang = "zh-Hans"
+	var tk struct{ ID, ReportID string }
+	h.do("POST", "/v1/tasks", map[string]any{"kind": "report", "topic": "2026 年电动车出口", "depth": "quick"}, 202, &tk)
+	h.streamEvents(tk.ID, 0)
+	var rep struct {
+		Language string `json:"language"`
+	}
+	h.do("GET", "/v1/reports/"+tk.ReportID, nil, 200, &rep)
+	if rep.Language != "zh-Hant" {
+		t.Fatalf("report language %q", rep.Language)
 	}
 }

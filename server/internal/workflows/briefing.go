@@ -428,7 +428,7 @@ func (a *Activities) ResearchSection(ctx context.Context, plan BriefingPlan, i i
 			if n >= sec.MaxItems || strings.TrimSpace(it.Title) == "" {
 				break
 			}
-			item := briefing.Item{ID: fmt.Sprintf("%s-%d", sec.Key, n+1), Title: it.Title, Summary: it.Summary, Sources: []events.Source{}, DeepDivable: true}
+			item := briefing.Item{ID: fmt.Sprintf("%s-%d", sec.Key, n+1), Title: plan.Lang.Model(it.Title), Summary: plan.Lang.Model(it.Summary), Sources: []events.Source{}, DeepDivable: true}
 			for _, idx := range it.SourceIndexes {
 				if idx >= 0 && idx < len(sources) {
 					r := sources[idx]
@@ -485,7 +485,7 @@ func (a *Activities) FinalizeBriefing(ctx context.Context, plan BriefingPlan, re
 		}, &out); err != nil {
 			return err
 		}
-		headline = clip(out.Headline, plan.Lang.ClipLen(60))
+		headline = clip(plan.Lang.Model(out.Headline), plan.Lang.ClipLen(60))
 	} else {
 		headline = plan.Lang.Pick("这期没有找到值得推送的新内容", "Nothing new worth sending this time")
 	}

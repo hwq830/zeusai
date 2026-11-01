@@ -170,11 +170,11 @@ var exactEN, patternsEN = func() (map[string]string, []pattern) {
 	return exact, pats
 }()
 
-// Message translates a user-facing error message. Chinese passes through; English falls back
-// to the error code's generic text.
+// Message translates a user-facing error message. Chinese passes through (converted for
+// Traditional Chinese); English falls back to the error code's generic text.
 func Message(l Lang, code, zh string) string {
 	if l != EN {
-		return zh
+		return l.Zh(zh)
 	}
 	if en, ok := exactEN[zh]; ok {
 		return en
