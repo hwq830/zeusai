@@ -46,7 +46,7 @@ func TestFetchBailianCatalog(t *testing.T) {
 	}
 	qp := byName["qwen-plus"]
 	if len(qp.Tiers) != 2 || qp.Tiers[0].Price != (Price{Input: 0.8, Output: 2, Cached: 0.16}) || qp.Tiers[0].MaxTokens != 131072 ||
-		qp.Tiers[0].Name != "<=128k" || qp.Tiers[1].Price.Output != 20 {
+		qp.Tiers[0].Name != "≤128K" || qp.Tiers[1].Name != "128K–256K" || qp.Tiers[1].Price.Output != 20 {
 		t.Fatalf("qwen-plus tiers %+v", qp.Tiers)
 	}
 

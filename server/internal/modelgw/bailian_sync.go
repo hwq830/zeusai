@@ -141,9 +141,10 @@ type bailianItem struct {
 	ContextWindow flexNum        `json:"contextWindow"`
 	Prices        []bailianPrice `json:"prices"`
 	MultiPrices   []struct {
-		RangeEnd  flexNum        `json:"rangeEnd"`
-		RangeName string         `json:"rangeName"`
-		Prices    []bailianPrice `json:"prices"`
+		RangeStart flexNum        `json:"rangeStart"`
+		RangeEnd   flexNum        `json:"rangeEnd"`
+		RangeName  string         `json:"rangeName"`
+		Prices     []bailianPrice `json:"prices"`
 	} `json:"multiPrices"`
 }
 
@@ -160,10 +161,29 @@ func (it bailianItem) catalogModel() CatalogModel {
 	}
 	for _, r := range it.MultiPrices {
 		if p, ok := standardPrice(r.Prices); ok {
-			m.Tiers = append(m.Tiers, PriceTier{Name: strings.TrimPrefix(r.RangeName, "输入"), MaxTokens: int(r.RangeEnd), Price: p})
+			m.Tiers = append(m.Tiers, PriceTier{Name: tierName(int(r.RangeStart), int(r.RangeEnd), r.RangeName), MaxTokens: int(r.RangeEnd), Price: p})
 		}
 	}
 	return m
+}
+
+// tierName labels a prompt-length band as ≤128K or 128K–256K, falling back to Bailian's name.
+func tierName(start, end int, name string) string {
+	if end <= 0 {
+		return name
+	}
+	if start <= 0 {
+		return "≤" + tokenSize(end)
+	}
+	return tokenSize(start) + "–" + tokenSize(end)
+}
+
+// tokenSize writes 131072 as 128K and 1000000 as 1M.
+func tokenSize(n int) string {
+	if n >= 1_000_000 && n%1_000_000 < 50_000 {
+		return strconv.Itoa(n/1_000_000) + "M"
+	}
+	return strconv.Itoa((n+512)/1024) + "K"
 }
 
 // standardPrice picks the non-batch, standard-hours input, output and cache-hit prices; a
