@@ -77,6 +77,18 @@ func (q *Queries) DeleteProviderKey(ctx context.Context, id uuid.UUID) (int64, e
 	return result.RowsAffected(), nil
 }
 
+const deleteProviderKeysFor = `-- name: DeleteProviderKeysFor :execrows
+DELETE FROM provider_keys WHERE provider = $1
+`
+
+func (q *Queries) DeleteProviderKeysFor(ctx context.Context, provider string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProviderKeysFor, provider)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getProviderKey = `-- name: GetProviderKey :one
 SELECT id, provider, label, ciphertext, last4, active, created_by, last_tested_at, last_test_ok, last_test_message, last_test_latency_ms, created_at, updated_at, base_url FROM provider_keys WHERE id = $1
 `

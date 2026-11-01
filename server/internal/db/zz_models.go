@@ -282,6 +282,19 @@ type ModelPrice struct {
 	UpdatedAt     time.Time
 }
 
+type ModelProvider struct {
+	Name           string
+	DisplayName    string
+	BaseUrl        string
+	ModelStrong    string
+	ModelFast      string
+	TimeoutSeconds int32
+	Enabled        bool
+	CreatedBy      *uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 type ModelUsage struct {
 	ID           int64
 	UserID       *uuid.UUID
