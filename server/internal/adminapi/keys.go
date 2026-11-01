@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -99,7 +100,7 @@ func toProviderKey(k db.ProviderKey, by *string) gen.ProviderKey {
 		latency = &v
 	}
 	msg := k.LastTestMessage
-	return gen.ProviderKey{Id: k.ID, Provider: k.Provider, Label: k.Label, Last4: k.Last4, Active: k.Active,
+	return gen.ProviderKey{Id: k.ID, Provider: k.Provider, Label: k.Label, Last4: k.Last4, BaseUrl: k.BaseUrl, Active: k.Active,
 		CreatedBy: by, CreatedAt: k.CreatedAt, LastTestedAt: k.LastTestedAt, LastTestOk: k.LastTestOk,
 		LastTestMessage: &msg, LastTestLatencyMs: latency}
 }
@@ -146,12 +147,16 @@ func (s *Server) CreateProviderKey(ctx context.Context, req gen.CreateProviderKe
 	if len([]rune(label)) > 50 {
 		return nil, apperr.Invalid("备注不超过 50 字")
 	}
+	base, err := cleanBaseURL(deref(req.Body.BaseUrl))
+	if err != nil {
+		return nil, err
+	}
 	k, err := s.Q.CreateProviderKey(ctx, db.CreateProviderKeyParams{Provider: p.ID, Label: label,
-		Ciphertext: box.Seal(p.ID, key), Last4: secrets.Last4(key), CreatedBy: &a.ID})
+		Ciphertext: box.Seal(p.ID, key), Last4: secrets.Last4(key), CreatedBy: &a.ID, BaseUrl: base})
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
-	s.audit(ctx, "provider_key.create", "provider_key", k.ID.String(), map[string]any{"provider": p.ID, "label": label, "last4": k.Last4})
+	s.audit(ctx, "provider_key.create", "provider_key", k.ID.String(), map[string]any{"provider": p.ID, "label": label, "last4": k.Last4, "baseUrl": base})
 	if req.Body.Activate == nil || *req.Body.Activate {
 		if k, err = s.activateKey(ctx, k); err != nil {
 			return nil, err
@@ -247,6 +252,13 @@ func (s *Server) TestNewProviderKey(ctx context.Context, req gen.TestNewProvider
 	if !ok {
 		return nil, apperr.Invalid("未知的服务商")
 	}
+	base, err := cleanBaseURL(deref(req.Body.BaseUrl))
+	if err != nil {
+		return nil, err
+	}
+	if base != "" {
+		p.BaseURL = base
+	}
 	return gen.TestNewProviderKey200JSONResponse(s.testKey(ctx, p, strings.TrimSpace(req.Body.ApiKey))), nil
 }
 
@@ -269,6 +281,9 @@ func (s *Server) TestProviderKey(ctx context.Context, req gen.TestProviderKeyReq
 	if key, err := s.box().Open(k.Provider, k.Ciphertext); err != nil {
 		res = gen.ProviderKeyTest{Message: "无法解密（ZEUS_SECRETS_KEY 可能换过），请重新添加"}
 	} else {
+		if k.BaseUrl != "" {
+			p.BaseURL = k.BaseUrl
+		}
 		res = s.testKey(ctx, p, key)
 	}
 	latency := int32(res.LatencyMs)
@@ -277,6 +292,53 @@ func (s *Server) TestProviderKey(ctx context.Context, req gen.TestProviderKeyReq
 		return nil, apperr.Internal(err)
 	}
 	return gen.TestProviderKey200JSONResponse(res), nil
+}
+
+func (s *Server) UpdateProviderKey(ctx context.Context, req gen.UpdateProviderKeyRequestObject) (gen.UpdateProviderKeyResponseObject, error) {
+	_, err := require(ctx, PermProviderKeys)
+	if err != nil {
+		return nil, err
+	}
+	k, err := s.getKey(ctx, req.KeyId)
+	if err != nil {
+		return nil, err
+	}
+	label, base := k.Label, k.BaseUrl
+	if req.Body.Label != nil {
+		label = strings.TrimSpace(*req.Body.Label)
+		if len([]rune(label)) > 50 {
+			return nil, apperr.Invalid("备注不超过 50 字")
+		}
+	}
+	if req.Body.BaseUrl != nil {
+		if base, err = cleanBaseURL(*req.Body.BaseUrl); err != nil {
+			return nil, err
+		}
+	}
+	k, err = s.Q.UpdateProviderKey(ctx, db.UpdateProviderKeyParams{ID: k.ID, Label: label, BaseUrl: base})
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	s.Keys.Invalidate()
+	s.audit(ctx, "provider_key.update", "provider_key", k.ID.String(), map[string]any{"provider": k.Provider, "label": label, "baseUrl": base})
+	return gen.UpdateProviderKey200JSONResponse(toProviderKey(k, nil)), nil
+}
+
+// cleanBaseURL accepts an http(s) address without query or fragment and drops a trailing
+// slash; "" means the provider's default address.
+func cleanBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", apperr.Invalid("API 地址格式不正确，应以 https:// 开头，例如 https://dashscope.aliyuncs.com/compatible-mode/v1")
+	}
+	if len(raw) > 300 {
+		return "", apperr.Invalid("API 地址太长")
+	}
+	return strings.TrimRight(raw, "/"), nil
 }
 
 // testKey sends the smallest real request: one output token from the fast model, or a

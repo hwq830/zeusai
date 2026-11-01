@@ -183,3 +183,28 @@ func TestLoadConfigValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type addrKeys struct {
+	mapKeys
+	addr map[string]string
+}
+
+func (a addrKeys) BaseURL(_ context.Context, provider string) string { return a.addr[provider] }
+
+func TestBaseURLPerCall(t *testing.T) {
+	var ca, cb atomic.Int32
+	a := upstreamServer(t, http.StatusOK, "from file address", &ca)
+	b := upstreamServer(t, http.StatusOK, "from key address", &cb)
+	keys := addrKeys{mapKeys{"a": "k"}, map[string]string{}}
+	g := gatewayWith(t, nil, []Option{WithKeys(keys)}, a.URL)
+	if resp, err := g.Complete(context.Background(), llm.Request{Tier: llm.TierStrong}); err != nil || resp.Content != "from file address" {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	keys.addr["a"] = b.URL
+	if resp, err := g.Complete(context.Background(), llm.Request{Tier: llm.TierStrong}); err != nil || resp.Content != "from key address" {
+		t.Fatalf("resp %+v err %v", resp, err)
+	}
+	if ca.Load() != 1 || cb.Load() != 1 {
+		t.Fatalf("calls a=%d b=%d", ca.Load(), cb.Load())
+	}
+}

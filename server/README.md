@@ -72,7 +72,7 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 
 运营数据：控制台“数据”分组（`/admin/v1/analytics/*`）只用服务端已有的表实时汇总。活跃 = 当天 App 带登录态调用过接口（api 进程每人每 10 分钟最多写一次 `user_daily_activity`，按北京时间计日，记录 `X-Zeus-Platform` / `X-Zeus-App-Version`），定时简报不算；迁移 00011 用注册日、主动发起任务的日子和最后在线日回填了历史。平台筛选按用户最近使用的平台（视图 `user_platform`）。
 
-API Key：owner 在控制台“API Key”页为路由文件里的每个模型服务商和博查搜索保存 Key（AES-256-GCM 加密存 `provider_keys`，只显示末 4 位），可先测试再保存。每个服务商最多一把启用；启用的 Key 优先于环境变量，各进程约 1 分钟内生效、不用重启；停用后回退到环境变量。网关路由里没有 Key 的服务商会被跳过。换 `ZEUS_SECRETS_KEY` 会让已保存的 Key 无法解密，需要重新添加。
+API Key：owner 在控制台“API Key”页为路由文件里的每个模型服务商和博查搜索保存 Key（AES-256-GCM 加密存 `provider_keys`，只显示末 4 位），可先测试再保存。每个服务商最多一把启用；启用的 Key 优先于环境变量，各进程约 1 分钟内生效、不用重启；停用后回退到环境变量。网关路由里没有 Key 的服务商会被跳过。保存 Key 时可以同时填 API 地址（如百炼业务空间专属地址，存 `provider_keys.base_url`），这把 Key 启用时调用和测试都走这个地址，不填用路由文件的 `base_url`（博查用默认地址）；地址可以在控制台随时修改。换 `ZEUS_SECRETS_KEY` 会让已保存的 Key 无法解密，需要重新添加。
 
 模型指定：owner 在控制台“模型指定”页给每个档位（strong / fast）选服务商和模型、调整备用顺序，也可以给单个环节（如 `report.write`）单独指定；存 `model_overrides`，叠加在路由文件之上，各进程约 1 分钟内生效。环节的指定先试，失败后按所在档位的顺序继续；指定里写了路由文件已删除的服务商会被忽略。路由文件里没价格的模型保存时必须填价格（元 / 百万 token），否则成本统计会按 0 计；额度折算权重另在配置中心 `quota.token_weights` 里配。
 

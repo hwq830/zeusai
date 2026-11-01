@@ -18,9 +18,12 @@ type OpenAICompat struct {
 	// KeyFunc, when set, supplies the key per call instead of APIKey (keys switched in the
 	// admin console take effect without a restart).
 	KeyFunc func(context.Context) string
-	Name    string
-	Models  map[Tier]string
-	HTTP    *http.Client
+	// BaseURLFunc, when set and non-empty, overrides BaseURL per call (an address saved with
+	// the console key).
+	BaseURLFunc func(context.Context) string
+	Name        string
+	Models      map[Tier]string
+	HTTP        *http.Client
 }
 
 type chatRequest struct {
@@ -76,7 +79,13 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 		body.ResponseFormat = map[string]string{"type": "json_object"}
 	}
 	b, _ := json.Marshal(body)
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(b))
+	base := c.BaseURL
+	if c.BaseURLFunc != nil {
+		if u := c.BaseURLFunc(ctx); u != "" {
+			base = u
+		}
+	}
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))
 	if err != nil {
 		return Response{}, err
 	}

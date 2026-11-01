@@ -326,6 +326,7 @@ type ProviderKey struct {
 	LastTestLatencyMs *int32
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	BaseUrl           string
 }
 
 type QuotaGrant struct {

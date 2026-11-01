@@ -94,6 +94,12 @@ type KeySource interface {
 	Key(ctx context.Context, provider, envName string) string
 }
 
+// BaseURLSource is implemented by key sources that can also supply an API address saved with
+// the key; "" means the routing file's base_url.
+type BaseURLSource interface {
+	BaseURL(ctx context.Context, provider string) string
+}
+
 type envKeys struct{}
 
 func (envKeys) Key(_ context.Context, _, envName string) string {
@@ -143,8 +149,12 @@ func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts
 			}
 			name, env, keys := pc.Name, pc.APIKeyEnv, o.keys
 			key := func(ctx context.Context) string { return keys.Key(ctx, name, env) }
-			up.Provider = llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
+			oc := llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
 				Models: pc.Models, HTTP: &http.Client{Timeout: timeout}}
+			if bs, ok := keys.(BaseURLSource); ok {
+				oc.BaseURLFunc = func(ctx context.Context) string { return bs.BaseURL(ctx, name) }
+			}
+			up.Provider = oc
 			up.hasKey = func(ctx context.Context) bool { return key(ctx) != "" }
 		}
 		g.ups[pc.Name] = up

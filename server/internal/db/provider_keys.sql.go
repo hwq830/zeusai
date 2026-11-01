@@ -13,9 +13,9 @@ import (
 )
 
 const createProviderKey = `-- name: CreateProviderKey :one
-INSERT INTO provider_keys (provider, label, ciphertext, last4, created_by)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, provider, label, ciphertext, last4, active, created_by, last_tested_at, last_test_ok, last_test_message, last_test_latency_ms, created_at, updated_at
+INSERT INTO provider_keys (provider, label, ciphertext, last4, created_by, base_url)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, provider, label, ciphertext, last4, active, created_by, last_tested_at, last_test_ok, last_test_message, last_test_latency_ms, created_at, updated_at, base_url
 `
 
 type CreateProviderKeyParams struct {
@@ -24,6 +24,7 @@ type CreateProviderKeyParams struct {
 	Ciphertext []byte
 	Last4      string
 	CreatedBy  *uuid.UUID
+	BaseUrl    string
 }
 
 func (q *Queries) CreateProviderKey(ctx context.Context, arg CreateProviderKeyParams) (ProviderKey, error) {
@@ -33,6 +34,7 @@ func (q *Queries) CreateProviderKey(ctx context.Context, arg CreateProviderKeyPa
 		arg.Ciphertext,
 		arg.Last4,
 		arg.CreatedBy,
+		arg.BaseUrl,
 	)
 	var i ProviderKey
 	err := row.Scan(
@@ -49,6 +51,7 @@ func (q *Queries) CreateProviderKey(ctx context.Context, arg CreateProviderKeyPa
 		&i.LastTestLatencyMs,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BaseUrl,
 	)
 	return i, err
 }
@@ -75,7 +78,7 @@ func (q *Queries) DeleteProviderKey(ctx context.Context, id uuid.UUID) (int64, e
 }
 
 const getProviderKey = `-- name: GetProviderKey :one
-SELECT id, provider, label, ciphertext, last4, active, created_by, last_tested_at, last_test_ok, last_test_message, last_test_latency_ms, created_at, updated_at FROM provider_keys WHERE id = $1
+SELECT id, provider, label, ciphertext, last4, active, created_by, last_tested_at, last_test_ok, last_test_message, last_test_latency_ms, created_at, updated_at, base_url FROM provider_keys WHERE id = $1
 `
 
 func (q *Queries) GetProviderKey(ctx context.Context, id uuid.UUID) (ProviderKey, error) {
@@ -95,17 +98,19 @@ func (q *Queries) GetProviderKey(ctx context.Context, id uuid.UUID) (ProviderKey
 		&i.LastTestLatencyMs,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BaseUrl,
 	)
 	return i, err
 }
 
 const listActiveProviderKeys = `-- name: ListActiveProviderKeys :many
-SELECT provider, ciphertext FROM provider_keys WHERE active
+SELECT provider, ciphertext, base_url FROM provider_keys WHERE active
 `
 
 type ListActiveProviderKeysRow struct {
 	Provider   string
 	Ciphertext []byte
+	BaseUrl    string
 }
 
 func (q *Queries) ListActiveProviderKeys(ctx context.Context) ([]ListActiveProviderKeysRow, error) {
@@ -117,7 +122,7 @@ func (q *Queries) ListActiveProviderKeys(ctx context.Context) ([]ListActiveProvi
 	items := []ListActiveProviderKeysRow{}
 	for rows.Next() {
 		var i ListActiveProviderKeysRow
-		if err := rows.Scan(&i.Provider, &i.Ciphertext); err != nil {
+		if err := rows.Scan(&i.Provider, &i.Ciphertext, &i.BaseUrl); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -129,7 +134,7 @@ func (q *Queries) ListActiveProviderKeys(ctx context.Context) ([]ListActiveProvi
 }
 
 const listProviderKeys = `-- name: ListProviderKeys :many
-SELECT k.id, k.provider, k.label, k.ciphertext, k.last4, k.active, k.created_by, k.last_tested_at, k.last_test_ok, k.last_test_message, k.last_test_latency_ms, k.created_at, k.updated_at, a.email AS created_by_email
+SELECT k.id, k.provider, k.label, k.ciphertext, k.last4, k.active, k.created_by, k.last_tested_at, k.last_test_ok, k.last_test_message, k.last_test_latency_ms, k.created_at, k.updated_at, k.base_url, a.email AS created_by_email
 FROM provider_keys k LEFT JOIN admin_users a ON a.id = k.created_by
 ORDER BY k.provider, k.created_at DESC
 `
@@ -148,6 +153,7 @@ type ListProviderKeysRow struct {
 	LastTestLatencyMs *int32
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	BaseUrl           string
 	CreatedByEmail    *string
 }
 
@@ -174,6 +180,7 @@ func (q *Queries) ListProviderKeys(ctx context.Context) ([]ListProviderKeysRow, 
 			&i.LastTestLatencyMs,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BaseUrl,
 			&i.CreatedByEmail,
 		); err != nil {
 			return nil, err
@@ -224,4 +231,37 @@ func (q *Queries) SetProviderKeyActive(ctx context.Context, arg SetProviderKeyAc
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateProviderKey = `-- name: UpdateProviderKey :one
+UPDATE provider_keys SET label = $2, base_url = $3, updated_at = now() WHERE id = $1
+RETURNING id, provider, label, ciphertext, last4, active, created_by, last_tested_at, last_test_ok, last_test_message, last_test_latency_ms, created_at, updated_at, base_url
+`
+
+type UpdateProviderKeyParams struct {
+	ID      uuid.UUID
+	Label   string
+	BaseUrl string
+}
+
+func (q *Queries) UpdateProviderKey(ctx context.Context, arg UpdateProviderKeyParams) (ProviderKey, error) {
+	row := q.db.QueryRow(ctx, updateProviderKey, arg.ID, arg.Label, arg.BaseUrl)
+	var i ProviderKey
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.Label,
+		&i.Ciphertext,
+		&i.Last4,
+		&i.Active,
+		&i.CreatedBy,
+		&i.LastTestedAt,
+		&i.LastTestOk,
+		&i.LastTestMessage,
+		&i.LastTestLatencyMs,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BaseUrl,
+	)
+	return i, err
 }

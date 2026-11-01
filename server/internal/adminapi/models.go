@@ -277,7 +277,11 @@ func (s *Server) TestModel(ctx context.Context, req gen.TestModelRequestObject) 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	start := time.Now()
-	resp, err := llm.OpenAICompat{BaseURL: p.BaseURL, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.Complete(ctx,
+	base := p.BaseURL
+	if u := s.Keys.BaseURL(ctx, p.Name); u != "" {
+		base = u
+	}
+	resp, err := llm.OpenAICompat{BaseURL: base, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.Complete(ctx,
 		llm.Request{Purpose: "model_test", Model: model, MaxTokens: 1, Messages: []llm.Message{{Role: "user", Content: "ping"}}})
 	res := gen.ProviderKeyTest{LatencyMs: int(time.Since(start).Milliseconds())}
 	if err != nil {

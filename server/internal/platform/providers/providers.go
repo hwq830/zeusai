@@ -95,7 +95,7 @@ func Search(cfg config.Config, keys *secrets.Keys) (search.Searcher, error) {
 				return k
 			}
 			return cfg.BochaAPIKey
-		}}, nil
+		}, BaseURLFunc: func(ctx context.Context) string { return keys.BaseURL(ctx, BochaProvider) }}, nil
 	default:
 		return nil, fmt.Errorf("unknown ZEUS_SEARCH_PROVIDER %q", cfg.SearchProvider)
 	}

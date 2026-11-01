@@ -107,6 +107,31 @@ providers:
 		t.Fatalf("saved key test = %+v", res)
 	}
 
+	// An API address saved with the key is used for tests and by the api processes.
+	var calls2 atomic.Int32
+	up2 := fakeUpstream(t, &calls2)
+	h.do("POST", "/admin/v1/provider-keys/test", map[string]string{"provider": "qwen", "apiKey": "good-key-1234", "baseUrl": up2.URL + "/"}, 200, &res)
+	if !res.Ok || calls2.Load() != 1 {
+		t.Fatalf("test with address = %+v, calls %d", res, calls2.Load())
+	}
+	h.do("PATCH", "/admin/v1/provider-keys/"+k1.Id.String(), map[string]string{"baseUrl": "ftp://x"}, 400, nil)
+	var k1u gen.ProviderKey
+	h.do("PATCH", "/admin/v1/provider-keys/"+k1.Id.String(), map[string]string{"baseUrl": up2.URL + "/"}, 200, &k1u)
+	if k1u.BaseUrl != up2.URL || k1u.Label != "主账号" {
+		t.Fatalf("updated = %+v", k1u)
+	}
+	if got := (&secrets.Keys{Q: h.q, Box: box}).BaseURL(ctx, "qwen"); got != up2.URL {
+		t.Fatalf("resolved address = %q", got)
+	}
+	h.do("POST", "/admin/v1/provider-keys/"+k1.Id.String()+"/test", nil, 200, &res)
+	if !res.Ok || calls2.Load() != 2 {
+		t.Fatalf("saved key test with address = %+v, calls %d", res, calls2.Load())
+	}
+	h.do("PATCH", "/admin/v1/provider-keys/"+k1.Id.String(), map[string]string{"baseUrl": ""}, 200, &k1u)
+	if k1u.BaseUrl != "" {
+		t.Fatalf("cleared = %+v", k1u)
+	}
+
 	// A second key takes over; the first is deactivated, then can be deleted.
 	var k2 gen.ProviderKey
 	h.do("POST", "/admin/v1/provider-keys", map[string]any{"provider": "qwen", "apiKey": "other-key-5678"}, 201, &k2)
