@@ -74,6 +74,8 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 
 API Key：owner 在控制台“API Key”页为路由文件里的每个模型服务商和博查搜索保存 Key（AES-256-GCM 加密存 `provider_keys`，只显示末 4 位），可先测试再保存。每个服务商最多一把启用；启用的 Key 优先于环境变量，各进程约 1 分钟内生效、不用重启；停用后回退到环境变量。网关路由里没有 Key 的服务商会被跳过。换 `ZEUS_SECRETS_KEY` 会让已保存的 Key 无法解密，需要重新添加。
 
+模型指定：owner 在控制台“模型指定”页给每个档位（strong / fast）选服务商和模型、调整备用顺序，也可以给单个环节（如 `report.write`）单独指定；存 `model_overrides`，叠加在路由文件之上，各进程约 1 分钟内生效。环节的指定先试，失败后按所在档位的顺序继续；指定里写了路由文件已删除的服务商会被忽略。路由文件里没价格的模型保存时必须填价格（元 / 百万 token），否则成本统计会按 0 计；额度折算权重另在配置中心 `quota.token_weights` 里配。
+
 ### 配置中心
 
 远程配置（功能开关、灰度、熔断、文案、额度、最低版本）在 `server/internal/remoteconfig`：

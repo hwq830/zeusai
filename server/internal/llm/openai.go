@@ -65,7 +65,10 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 	if req.System != "" {
 		msgs = append([]Message{{Role: "system", Content: req.System}}, msgs...)
 	}
-	body := chatRequest{Model: c.Models[req.Tier], Messages: msgs, MaxTokens: req.MaxTokens}
+	body := chatRequest{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens}
+	if body.Model == "" {
+		body.Model = c.Models[req.Tier]
+	}
 	if body.Model == "" {
 		body.Model = c.Models[TierStrong]
 	}

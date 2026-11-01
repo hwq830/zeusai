@@ -32,8 +32,11 @@ type Message struct {
 
 type Request struct {
 	// Purpose names the call site ("briefing.section"); used for metering, routing and mocks.
-	Purpose   string
-	Tier      Tier
+	Purpose string
+	Tier    Tier
+	// Model, when set, names the exact upstream model (the gateway sets it from console
+	// overrides); otherwise the provider's model for Tier is used.
+	Model     string
 	System    string
 	Messages  []Message
 	JSON      bool

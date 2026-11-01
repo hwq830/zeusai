@@ -73,7 +73,8 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 		if err != nil {
 			return nil, err
 		}
-		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys))
+		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys),
+			modelgw.WithOverrides(&modelgw.DBOverrides{Q: q, Log: slog.Default()}))
 		if err != nil {
 			return nil, err
 		}

@@ -256,6 +256,18 @@ type Message struct {
 	CreatedAt  time.Time
 }
 
+type ModelOverride struct {
+	Scope       string
+	Provider    string
+	Model       string
+	Fallbacks   []string
+	PriceInput  *float64
+	PriceOutput *float64
+	PriceCached *float64
+	UpdatedBy   *uuid.UUID
+	UpdatedAt   time.Time
+}
+
 type ModelUsage struct {
 	ID           int64
 	UserID       *uuid.UUID
