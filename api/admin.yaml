@@ -31,7 +31,6 @@ tags:
   - name: moderation
   - name: tasks
   - name: costs
-  - name: modelgw
   - name: providerKeys
   - name: modelRouting
   - name: modelPrices
@@ -557,20 +556,6 @@ paths:
               schema: { $ref: '#/components/schemas/CostReport' }
         default: { $ref: '#/components/responses/Error' }
 
-  # ---------------------------------------------------------------- model gateway
-  /admin/v1/modelgw:
-    get:
-      tags: [modelgw]
-      operationId: getModelGateway
-      summary: 模型网关路由与单价（读自 ZEUS_MODELGW_CONFIG，只读；修改需改文件并重启）及近 24 小时调用
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ModelGateway' }
-        default: { $ref: '#/components/responses/Error' }
-
   # ---------------------------------------------------------------- analytics
   /admin/v1/analytics/overview:
     get:
@@ -729,10 +714,43 @@ paths:
     get:
       tags: [modelRouting]
       operationId: getModelRouting
-      summary: 各档位和各环节用哪个模型（路由文件默认值 + 后台指定）
+      summary: 模型路由：各档位的调用顺序、各环节的指定、熔断、实际生效的调用链、近 24 小时调用和历史版本
       responses:
         '200':
           description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelRouting' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [modelRouting]
+      operationId: saveRoutingSettings
+      summary: 保存各档位的调用顺序和熔断设置（仅 owner），约 1 分钟内生效；保存后记一个历史版本
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutingSettingsInput' }
+      responses:
+        '200':
+          description: 保存后的路由
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelRouting' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/model-routing/versions/{versionId}/restore:
+    parameters:
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [modelRouting]
+      operationId: restoreRoutingVersion
+      summary: 把路由（档位顺序、熔断、环节指定）恢复成某个历史版本（仅 owner），记为一个新版本
+      responses:
+        '200':
+          description: 恢复后的路由
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ModelRouting' }
@@ -789,7 +807,7 @@ paths:
     put:
       tags: [modelRouting]
       operationId: setModelOverride
-      summary: 指定档位或环节的模型（仅 owner），约 1 分钟内生效
+      summary: 给某个环节指定模型（仅 owner），先试它，失败后按所在档位的顺序继续；约 1 分钟内生效
       requestBody:
         required: true
         content:
@@ -797,15 +815,15 @@ paths:
             schema: { $ref: '#/components/schemas/ModelOverrideInput' }
       responses:
         '200':
-          description: 更新后的这一项
+          description: 保存后的路由
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ModelRoute' }
+              schema: { $ref: '#/components/schemas/ModelRouting' }
         default: { $ref: '#/components/responses/Error' }
     delete:
       tags: [modelRouting]
       operationId: deleteModelOverride
-      summary: 恢复路由文件的默认值（仅 owner）
+      summary: 环节恢复为跟随档位（仅 owner）
       responses:
         '204': { description: 已恢复 }
         default: { $ref: '#/components/responses/Error' }
@@ -1609,7 +1627,7 @@ components:
       name: scope
       in: path
       required: true
-      description: 档位（strong / fast）或环节（如 report.write）
+      description: 环节（如 report.write）；档位的顺序用 PUT /admin/v1/model-routing 保存
       schema: { type: string }
     KeyId:
       name: keyId
@@ -2349,59 +2367,6 @@ components:
               costCny: { type: number, format: double }
 
     # ------------------------------------------------------------ model gateway
-    ModelGateway:
-      type: object
-      required: [llmProvider, configured, providers, routes, usage24h]
-      properties:
-        llmProvider: { type: string, description: 'mock 或 gateway（ZEUS_LLM_PROVIDER）' }
-        configured: { type: boolean, description: 是否读到了路由文件 }
-        configError: { type: string }
-        breakerFailures: { type: integer }
-        breakerCooldown: { type: string, example: 30s }
-        routes:
-          type: object
-          description: tier → 按顺序尝试的服务商
-          additionalProperties:
-            type: array
-            items: { type: string }
-        providers:
-          type: array
-          items:
-            type: object
-            required: [name, baseUrl, apiKeyEnv, keyPresent, models, prices]
-            properties:
-              name: { type: string }
-              baseUrl: { type: string }
-              apiKeyEnv: { type: string }
-              keyPresent: { type: boolean, description: 是否有可用的 key（后台启用的 Key 或环境变量，不返回 key 本身） }
-              keySource:
-                type: string
-                enum: [console, env, none]
-                description: console = 后台「服务商」页启用的 Key；env = 环境变量
-              timeout: { type: string }
-              models:
-                type: object
-                additionalProperties: { type: string }
-              prices:
-                type: array
-                items:
-                  type: object
-                  required: [model, input, output, cached]
-                  properties:
-                    model: { type: string }
-                    input: { type: number, format: double, description: 元 / 百万 token }
-                    output: { type: number, format: double }
-                    cached: { type: number, format: double }
-        usage24h:
-          type: array
-          items:
-            type: object
-            required: [provider, calls, costCny]
-            properties:
-              provider: { type: string }
-              calls: { type: integer }
-              costCny: { type: number, format: double }
-              lastCallAt: { type: string, format: date-time, nullable: true }
 
     # ------------------------------------------------------------ analytics
     # 口径：按北京时间计日；活跃 = 当天打开过 App（带登录态调用过接口），定时简报不算。
@@ -2789,11 +2754,12 @@ components:
         keySource:
           type: string
           enum: [console, env, none]
-        inRoute: { type: boolean, description: 当前是否在用（模型：在网关路由里或被「模型指定」选中，且 ZEUS_LLM_PROVIDER=gateway；搜索：ZEUS_SEARCH_PROVIDER=bocha） }
+        inRoute: { type: boolean, description: 当前是否在用（模型：在「模型路由」的档位顺序或环节指定里，且 ZEUS_LLM_PROVIDER=gateway；搜索：ZEUS_SEARCH_PROVIDER=bocha） }
         source:
           type: string
-          enum: [file, console, builtin]
-          description: file = 服务端路由文件里的；console = 后台新增的（可改可删）；builtin = 内置（搜索）
+          enum: [console, builtin]
+          description: console = 模型服务商（存在数据库里，可改可停用可删）；builtin = 内置（搜索）
+        imported: { type: boolean, description: 是否从服务端路由文件导入（导入后和后台新增的一样可改） }
         enabled: { type: boolean }
         models: { $ref: '#/components/schemas/ProviderTierModels' }
         timeoutSeconds: { type: integer }
@@ -2883,38 +2849,54 @@ components:
     ModelRouting:
       type: object
       description: |
-        模型网关没开（llmProvider 不是 gateway）或路由文件读不到时，configured=false，指定的模型不会生效。
-      required: [llmProvider, configured, providers, tiers, purposes]
+        路由存在数据库里（首次启动时从服务端路由文件导入一次）。configured=false 表示还没有路由，
+        需要先保存档位顺序；gatewayOn=false 表示服务端还在用假模型，这里的设置会先保存。
+      required: [llmProvider, gatewayOn, configured, importedFromFile, providers, tiers, purposes, breaker, usage24h, versions]
       properties:
         llmProvider: { type: string }
+        gatewayOn: { type: boolean, description: 'ZEUS_LLM_PROVIDER=gateway' }
         configured: { type: boolean }
-        configError: { type: string }
+        importedFromFile: { type: boolean, description: 当前路由最初是从路由文件导入的 }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
         catalog: { $ref: '#/components/schemas/ModelCatalog' }
         providers:
           type: array
+          description: 启用中的模型服务商
           items: { $ref: '#/components/schemas/ModelProviderOption' }
         tiers:
           type: array
-          items: { $ref: '#/components/schemas/ModelRoute' }
+          items: { $ref: '#/components/schemas/TierRoute' }
         purposes:
           type: array
-          items: { $ref: '#/components/schemas/ModelRoute' }
+          items: { $ref: '#/components/schemas/PurposeRoute' }
+        breaker: { $ref: '#/components/schemas/BreakerSettings' }
+        usage24h:
+          type: array
+          items:
+            type: object
+            required: [provider, calls, costCny]
+            properties:
+              provider: { type: string }
+              calls: { type: integer }
+              costCny: { type: number, format: double }
+              lastCallAt: { type: string, format: date-time, nullable: true }
+        versions:
+          type: array
+          description: 最近的历史版本，新的在前；第一条是当前版本
+          items: { $ref: '#/components/schemas/RoutingVersion' }
     ModelProviderOption:
       type: object
-      required: [name, displayName, keyPresent, models, pricedModels, bailian]
+      required: [name, displayName, keyPresent, models, bailian]
       properties:
         name: { type: string }
         displayName: { type: string }
         keyPresent: { type: boolean }
-        bailian: { type: boolean, description: '百炼（DashScope）地址：可从模型目录选模型，目录里有价格的不用手填' }
+        bailian: { type: boolean, description: '百炼（DashScope）地址：可从模型目录选模型，价格取「模型定价」' }
         models:
           type: object
-          description: 路由文件里各档位的默认模型
+          description: 服务商各档位的默认模型
           additionalProperties: { type: string }
-        pricedModels:
-          type: array
-          description: 路由文件里有价格的模型
-          items: { type: string }
     ModelCatalog:
       type: object
       description: 百炼文本模型目录（随服务端发布，价格单位 元 / 百万 token；分档计价的模型没有 price）
@@ -2932,30 +2914,76 @@ components:
               vendor: { type: string }
               contextWindow: { type: integer }
               price: { $ref: '#/components/schemas/ModelPrice' }
-    ModelChoice:
+    RouteStep:
       type: object
-      required: [provider, model, fallbacks]
+      required: [provider, model, usesDefault, available, keyPresent, priced]
       properties:
         provider: { type: string }
-        model: { type: string }
-        fallbacks:
-          type: array
-          description: 首选失败后依次尝试的服务商（各用自己这一档的默认模型）
-          items: { type: string }
-    ModelRoute:
+        model: { type: string, description: 实际调用的模型 }
+        usesDefault: { type: boolean, description: 没有单独选模型，用服务商这一档的默认模型 }
+        available: { type: boolean, description: 服务商存在且启用；否则调用时会跳过 }
+        keyPresent: { type: boolean }
+        priced: { type: boolean, description: 「模型定价」里有价格（或百炼目录有），成本能算出来 }
+        price: { $ref: '#/components/schemas/ModelPrice' }
+    RouteStepInput:
       type: object
-      required: [scope, kind, tier, default, effective]
+      required: [provider]
       properties:
-        scope: { type: string, description: '档位名或环节名' }
-        kind: { type: string, enum: [tier, purpose] }
+        provider: { type: string }
+        model: { type: string, maxLength: 100, description: 不填用服务商这一档的默认模型 }
+    TierRoute:
+      type: object
+      required: [tier, steps]
+      properties:
         tier: { type: string, enum: [strong, fast] }
-        default:
-          allOf: [{ $ref: '#/components/schemas/ModelChoice' }]
-          description: 不指定时用什么：档位取路由文件，环节跟随所在档位（含档位的指定）
-        effective:
-          allOf: [{ $ref: '#/components/schemas/ModelChoice' }]
-          description: 现在实际生效的首选和备用顺序
+        steps:
+          type: array
+          description: 依次尝试，第一个是首选
+          items: { $ref: '#/components/schemas/RouteStep' }
+    PurposeRoute:
+      type: object
+      required: [scope, tier, effective]
+      properties:
+        scope: { type: string }
+        tier: { type: string, enum: [strong, fast] }
         override: { $ref: '#/components/schemas/ModelOverride' }
+        effective:
+          type: array
+          description: 实际调用顺序：指定的模型（如有），再按所在档位的顺序
+          items: { $ref: '#/components/schemas/RouteStep' }
+    BreakerSettings:
+      type: object
+      required: [failures, cooldownSeconds]
+      properties:
+        failures: { type: integer, description: 连续失败几次后暂停这个服务商 }
+        cooldownSeconds: { type: integer, description: 暂停多少秒 }
+    RoutingSettingsInput:
+      type: object
+      required: [routes, breaker]
+      properties:
+        routes:
+          type: object
+          required: [strong, fast]
+          properties:
+            strong:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/RouteStepInput' }
+            fast:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/RouteStepInput' }
+        breaker: { $ref: '#/components/schemas/BreakerSettings' }
+    RoutingVersion:
+      type: object
+      required: [id, action, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        action:
+          type: string
+          description: 'import = 从路由文件导入；settings = 改档位顺序或熔断；purpose = 改环节；restore = 恢复历史版本'
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
     ModelPriceTier:
       type: object
       required: [name, price]
@@ -2983,7 +3011,7 @@ components:
         stale: { type: boolean, description: '最近一次同步里百炼已不再列出这个模型' }
         usedBy:
           type: array
-          description: 「模型指定」里用到这个模型的档位或环节
+          description: 「模型路由」里用到这个模型的档位或环节
           items: { type: string }
         note: { type: string }
         updatedBy: { type: string }
@@ -3023,16 +3051,10 @@ components:
         cached: { type: number, minimum: 0 }
     ModelOverride:
       type: object
-      required: [provider, model, priced, updatedAt]
+      required: [provider, model, updatedAt]
       properties:
         provider: { type: string }
         model: { type: string }
-        fallbacks:
-          type: array
-          description: 仅档位；不填表示沿用路由文件的顺序
-          items: { type: string }
-        price: { $ref: '#/components/schemas/ModelPrice' }
-        priced: { type: boolean, description: '成本能算出来（路由文件或百炼目录有价格，或填了价格）' }
         updatedBy: { type: string }
         updatedAt: { type: string, format: date-time }
     ModelOverrideInput:
@@ -3041,11 +3063,6 @@ components:
       properties:
         provider: { type: string }
         model: { type: string, minLength: 1, maxLength: 100 }
-        fallbacks:
-          type: array
-          description: 仅档位可填；不填沿用路由文件的顺序，空数组表示不要备用
-          items: { type: string }
-        price: { $ref: '#/components/schemas/ModelPrice' }
 
     # ------------------------------------------------------------ feedback
     Satisfaction:

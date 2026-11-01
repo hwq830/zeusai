@@ -14,7 +14,7 @@ import (
 const createModelProvider = `-- name: CreateModelProvider :one
 INSERT INTO model_providers (name, display_name, base_url, model_strong, model_fast, timeout_seconds, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING name, display_name, base_url, model_strong, model_fast, timeout_seconds, enabled, created_by, created_at, updated_at
+RETURNING name, display_name, base_url, model_strong, model_fast, timeout_seconds, enabled, created_by, created_at, updated_at, api_key_env, imported
 `
 
 type CreateModelProviderParams struct {
@@ -49,6 +49,8 @@ func (q *Queries) CreateModelProvider(ctx context.Context, arg CreateModelProvid
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ApiKeyEnv,
+		&i.Imported,
 	)
 	return i, err
 }
@@ -66,7 +68,7 @@ func (q *Queries) DeleteModelProvider(ctx context.Context, name string) (int64, 
 }
 
 const listModelProviders = `-- name: ListModelProviders :many
-SELECT p.name, p.display_name, p.base_url, p.model_strong, p.model_fast, p.timeout_seconds, p.enabled, p.created_by, p.created_at, p.updated_at, a.email AS created_by_email
+SELECT p.name, p.display_name, p.base_url, p.model_strong, p.model_fast, p.timeout_seconds, p.enabled, p.created_by, p.created_at, p.updated_at, p.api_key_env, p.imported, a.email AS created_by_email
 FROM model_providers p LEFT JOIN admin_users a ON a.id = p.created_by
 ORDER BY p.created_at
 `
@@ -96,6 +98,8 @@ func (q *Queries) ListModelProviders(ctx context.Context) ([]ListModelProvidersR
 			&i.ModelProvider.CreatedBy,
 			&i.ModelProvider.CreatedAt,
 			&i.ModelProvider.UpdatedAt,
+			&i.ModelProvider.ApiKeyEnv,
+			&i.ModelProvider.Imported,
 			&i.CreatedByEmail,
 		); err != nil {
 			return nil, err
@@ -108,35 +112,11 @@ func (q *Queries) ListModelProviders(ctx context.Context) ([]ListModelProvidersR
 	return items, nil
 }
 
-const modelOverridesUsingProvider = `-- name: ModelOverridesUsingProvider :many
-SELECT scope FROM model_overrides WHERE provider = $1 OR $1 = ANY(fallbacks) ORDER BY scope
-`
-
-func (q *Queries) ModelOverridesUsingProvider(ctx context.Context, provider string) ([]string, error) {
-	rows, err := q.db.Query(ctx, modelOverridesUsingProvider, provider)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var scope string
-		if err := rows.Scan(&scope); err != nil {
-			return nil, err
-		}
-		items = append(items, scope)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const updateModelProvider = `-- name: UpdateModelProvider :one
 UPDATE model_providers SET display_name = $2, base_url = $3, model_strong = $4, model_fast = $5,
     timeout_seconds = $6, enabled = $7, updated_at = now()
 WHERE name = $1
-RETURNING name, display_name, base_url, model_strong, model_fast, timeout_seconds, enabled, created_by, created_at, updated_at
+RETURNING name, display_name, base_url, model_strong, model_fast, timeout_seconds, enabled, created_by, created_at, updated_at, api_key_env, imported
 `
 
 type UpdateModelProviderParams struct {
@@ -171,6 +151,8 @@ func (q *Queries) UpdateModelProvider(ctx context.Context, arg UpdateModelProvid
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ApiKeyEnv,
+		&i.Imported,
 	)
 	return i, err
 }

@@ -3,9 +3,12 @@ package modelgw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
@@ -33,23 +36,23 @@ var Purposes = []Purpose{
 // Tiers are the scopes a tier override can take.
 var Tiers = []llm.Tier{llm.TierStrong, llm.TierFast}
 
-// Override pins a provider and model for a tier or purpose. Fallbacks (tiers only) replaces
-// the tier's fallback order when non-nil; nil keeps the routing file's order. Price, when
-// set, is used for models the routing file has no price for.
+// Override pins a provider and model for a call purpose; it is tried first, then the tier's route.
 type Override struct {
-	Provider  string
-	Model     string
-	Fallbacks []string
-	Price     *Price
+	Provider string
+	Model    string
 }
 
-// Overrides are the console choices in effect, keyed by tier and purpose.
+// Overrides is the routing in effect, as kept in the database.
 type Overrides struct {
-	Tiers    map[llm.Tier]Override
+	// Settings is nil until the routing exists in the database (first start, or the database
+	// cannot be read before the first load); the gateway then uses the routing file.
+	Settings *Settings
 	Purposes map[string]Override
-	// Prices are the pricing page's Bailian prices by model, used on Bailian endpoints.
+	// Manual are the admin prices from the pricing page, used for any provider.
+	Manual map[string]Price
+	// Prices are the pricing page's Bailian list prices (synced), used on Bailian endpoints.
 	Prices map[string]Price
-	// Providers are the enabled providers added in the console.
+	// Providers are the enabled providers in the database.
 	Providers []ProviderConfig
 }
 
@@ -86,7 +89,7 @@ func (d *DBOverrides) Overrides(ctx context.Context) Overrides {
 	if d.cur != nil && time.Since(d.loaded) < every {
 		return *d.cur
 	}
-	rows, err := d.Q.ListModelOverrides(ctx)
+	rows, err := d.Q.ListPurposeOverrides(ctx)
 	if err != nil {
 		if d.Log != nil {
 			d.Log.Warn("model overrides reload failed", "err", err)
@@ -96,16 +99,19 @@ func (d *DBOverrides) Overrides(ctx context.Context) Overrides {
 		}
 		return *d.cur
 	}
-	o := Overrides{Tiers: map[llm.Tier]Override{}, Purposes: map[string]Override{}}
+	o := Overrides{Purposes: map[string]Override{}}
 	for _, r := range rows {
-		ov := Override{Provider: r.Provider, Model: r.Model, Fallbacks: r.Fallbacks}
-		if r.PriceInput != nil || r.PriceOutput != nil || r.PriceCached != nil {
-			ov.Price = &Price{Input: deref(r.PriceInput), Output: deref(r.PriceOutput), Cached: deref(r.PriceCached)}
+		o.Purposes[r.Scope] = Override{Provider: r.Provider, Model: r.Model}
+	}
+	if row, err := d.Q.GetGatewaySettings(ctx); err == nil {
+		st := ParseSettings(row.GatewaySetting)
+		o.Settings = &st
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		if d.Log != nil {
+			d.Log.Warn("gateway settings reload failed", "err", err)
 		}
-		if t := llm.Tier(r.Scope); t == llm.TierStrong || t == llm.TierFast {
-			o.Tiers[t] = ov
-		} else {
-			o.Purposes[r.Scope] = ov
+		if d.cur != nil {
+			o.Settings = d.cur.Settings
 		}
 	}
 	prices, err := d.Q.ListModelPrices(ctx)
@@ -114,12 +120,15 @@ func (d *DBOverrides) Overrides(ctx context.Context) Overrides {
 			d.Log.Warn("model prices reload failed", "err", err)
 		}
 		if d.cur != nil {
-			o.Prices = d.cur.Prices
+			o.Manual, o.Prices = d.cur.Manual, d.cur.Prices
 		}
 	} else {
-		o.Prices = map[string]Price{}
+		o.Manual, o.Prices = map[string]Price{}, map[string]Price{}
 		for _, r := range prices {
-			if p, ok := StoredPrice(r); ok {
+			if p, ok := ManualPrice(r); ok {
+				o.Manual[r.Model] = p
+			}
+			if p, ok := SyncedPrice(r); ok {
 				o.Prices[r.Model] = p
 			}
 		}
@@ -143,20 +152,24 @@ func (d *DBOverrides) Overrides(ctx context.Context) Overrides {
 	return o
 }
 
-// ConsoleProvider turns a provider added in the console into routing config; its key comes
-// only from the console (no environment variable).
+// ConsoleProvider turns a provider row into routing config; its key comes from the console,
+// else (providers imported from the routing file) the file's environment variable.
 func ConsoleProvider(r db.ModelProvider) ProviderConfig {
-	return ProviderConfig{Name: r.Name, DisplayName: r.DisplayName, BaseURL: r.BaseUrl,
+	return ProviderConfig{Name: r.Name, DisplayName: r.DisplayName, BaseURL: r.BaseUrl, APIKeyEnv: r.ApiKeyEnv,
 		Models:  map[llm.Tier]string{llm.TierStrong: r.ModelStrong, llm.TierFast: r.ModelFast},
 		Timeout: time.Duration(r.TimeoutSeconds) * time.Second}
 }
 
-// StoredPrice is the metered price of a pricing-page row: the admin's price, else the first
-// synced tier.
-func StoredPrice(r db.ListModelPricesRow) (Price, bool) {
-	if r.ManualInput != nil {
-		return Price{Input: *r.ManualInput, Output: deref(r.ManualOutput), Cached: deref(r.ManualCached)}, true
+// ManualPrice is a pricing-page row's admin price.
+func ManualPrice(r db.ListModelPricesRow) (Price, bool) {
+	if r.ManualInput == nil {
+		return Price{}, false
 	}
+	return Price{Input: *r.ManualInput, Output: deref(r.ManualOutput), Cached: deref(r.ManualCached)}, true
+}
+
+// SyncedPrice is a pricing-page row's Bailian list price: the first synced tier.
+func SyncedPrice(r db.ListModelPricesRow) (Price, bool) {
 	var tiers []PriceTier
 	if json.Unmarshal(r.Tiers, &tiers) == nil && len(tiers) > 0 {
 		return tiers[0].Price, true
@@ -175,18 +188,19 @@ func deref(f *float64) float64 {
 type attempt struct {
 	provider, model string
 	up              upstream
-	price           *Price
-	// bailian holds the pricing page's prices, consulted on Bailian endpoints.
-	bailian map[string]Price
+	ov              *Overrides
 }
 
-// chain resolves the ordered attempts for a call: a purpose override first, then the tier's
-// override (or the routing file's first provider), then the fallbacks. Each provider appears
-// once, and providers missing from the routing file are dropped.
+// chain resolves the ordered attempts for a call: the purpose's choice first, then the tier's
+// route (from the database, or the routing file before the first import). Each provider
+// appears once, and unknown or disabled providers are dropped.
 func (g *Gateway) chain(ctx context.Context, tier llm.Tier, purpose string) []attempt {
 	var ov Overrides
 	if g.overrides != nil {
 		ov = g.overrides.Overrides(ctx)
+	}
+	if ov.Settings != nil {
+		g.breaker.set(ov.Settings.BreakerFailures, ov.Settings.BreakerCooldown)
 	}
 	var out []attempt
 	seen := map[string]bool{}
@@ -195,28 +209,23 @@ func (g *Gateway) chain(ctx context.Context, tier llm.Tier, purpose string) []at
 		if !ok || seen[a.provider] {
 			return
 		}
-		a.up = up
+		a.up, a.ov = up, &ov
 		seen[a.provider] = true
-		a.bailian = ov.Prices
 		out = append(out, a)
 	}
 	if p, ok := ov.Purposes[purpose]; ok {
-		add(attempt{provider: p.Provider, model: p.Model, price: p.Price})
+		add(attempt{provider: p.Provider, model: p.Model})
 	}
-	t, ok := ov.Tiers[tier]
-	if !ok {
+	var steps []RouteStep
+	if ov.Settings != nil {
+		steps = ov.Settings.Routes[tier]
+	} else {
 		for _, n := range g.routes[tier] {
-			add(attempt{provider: n})
+			steps = append(steps, RouteStep{Provider: n})
 		}
-		return out
 	}
-	add(attempt{provider: t.Provider, model: t.Model, price: t.Price})
-	fallbacks := t.Fallbacks
-	if fallbacks == nil {
-		fallbacks = g.routes[tier]
-	}
-	for _, n := range fallbacks {
-		add(attempt{provider: n})
+	for _, s := range steps {
+		add(attempt{provider: s.Provider, model: s.Model})
 	}
 	return out
 }

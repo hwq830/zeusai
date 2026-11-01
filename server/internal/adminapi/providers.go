@@ -62,7 +62,7 @@ func (s *Server) consoleProvider(ctx context.Context, id string) (db.ModelProvid
 		}
 	}
 	if p, ok := s.keyProvider(ctx, id); ok && p.Source != "console" {
-		return db.ModelProvider{}, apperr.Invalid("这个服务商来自服务端配置，只能在服务器上修改")
+		return db.ModelProvider{}, apperr.Invalid("搜索服务商不能在这里修改")
 	}
 	return db.ModelProvider{}, apperr.NotFound("没有这个服务商")
 }
@@ -166,10 +166,10 @@ func (s *Server) UpdateModelProvider(ctx context.Context, req gen.UpdateModelPro
 		enabled = *b.Enabled
 	}
 	if !enabled && cur.Enabled {
-		if used, err := s.Q.ModelOverridesUsingProvider(ctx, cur.Name); err != nil {
+		if used, err := s.routingUses(ctx); err != nil {
 			return nil, apperr.Internal(err)
-		} else if len(used) > 0 {
-			return nil, apperr.Conflict("「模型指定」里还在用这个服务商（" + scopeList(used) + "），先改掉再停用")
+		} else if len(used[cur.Name]) > 0 {
+			return nil, apperr.Conflict("「模型路由」里还在用这个服务商（" + scopeList(used[cur.Name]) + "），先改掉再停用")
 		}
 	}
 	if _, err := s.Q.UpdateModelProvider(ctx, db.UpdateModelProviderParams{Name: cur.Name, DisplayName: f.name, BaseUrl: f.baseURL,
@@ -196,12 +196,12 @@ func (s *Server) DeleteModelProvider(ctx context.Context, req gen.DeleteModelPro
 	if err != nil {
 		return nil, err
 	}
-	used, err := s.Q.ModelOverridesUsingProvider(ctx, cur.Name)
+	used, err := s.routingUses(ctx)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
-	if len(used) > 0 {
-		return nil, apperr.Conflict("「模型指定」里还在用这个服务商（" + scopeList(used) + "），先改掉再删除")
+	if len(used[cur.Name]) > 0 {
+		return nil, apperr.Conflict("「模型路由」里还在用这个服务商（" + scopeList(used[cur.Name]) + "），先改掉再删除")
 	}
 	keys, err := s.Q.DeleteProviderKeysFor(ctx, cur.Name)
 	if err != nil {
@@ -214,7 +214,24 @@ func (s *Server) DeleteModelProvider(ctx context.Context, req gen.DeleteModelPro
 	return gen.DeleteModelProvider204Response{}, nil
 }
 
-func scopeList(scopes []string) string { return strings.Join(scopes, "、") }
+var scopeNames = map[string]string{
+	"strong": "强档", "fast": "快档",
+	"briefing.section": "简报：分段内容", "briefing.headline": "简报：标题",
+	"report.plan": "报告：规划", "report.research": "报告：资料调研", "report.write": "报告：撰写",
+	"report.followup": "报告：追问", "report.tools": "报告：工具调用",
+	"template.draft": "模板：AI 生成草稿", "subscription.draft": "订阅：AI 生成草稿",
+}
+
+func scopeList(scopes []string) string {
+	names := make([]string, 0, len(scopes))
+	for _, sc := range scopes {
+		if n, ok := scopeNames[sc]; ok {
+			sc = n
+		}
+		names = append(names, sc)
+	}
+	return strings.Join(names, "、")
+}
 
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError

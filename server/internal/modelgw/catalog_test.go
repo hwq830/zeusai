@@ -29,12 +29,20 @@ func TestBailianCatalog(t *testing.T) {
 	if p := a.priceFor(upstream{}, "qwen3.8-max"); p != (Price{}) {
 		t.Fatalf("non-Bailian %+v", p)
 	}
-	paged := attempt{provider: "qwen", model: "qwen3.8-max", bailian: map[string]Price{"qwen3.8-max": {Output: 40}}}
+	paged := attempt{provider: "qwen", model: "qwen3.8-max", ov: &Overrides{Prices: map[string]Price{"qwen3.8-max": {Output: 40}}}}
 	if p := paged.priceFor(upstream{bailian: true}, "qwen3.8-max"); p.Output != 40 {
 		t.Fatalf("pricing page should beat the built-in catalog %+v", p)
 	}
+	if p := paged.priceFor(upstream{}, "qwen3.8-max"); p != (Price{}) {
+		t.Fatalf("Bailian list price used off Bailian %+v", p)
+	}
 	file := upstream{bailian: true, prices: map[string]Price{"qwen3.8-max": {Input: 1}}}
 	if p := a.priceFor(file, "qwen3.8-max"); p.Input != 1 {
-		t.Fatalf("file price should win %+v", p)
+		t.Fatalf("file price should beat list prices %+v", p)
+	}
+	// The pricing page's admin price wins everywhere, on any provider.
+	manual := attempt{provider: "deepseek", model: "deepseek-chat", ov: &Overrides{Manual: map[string]Price{"deepseek-chat": {Input: 2}}}}
+	if p := manual.priceFor(upstream{prices: map[string]Price{"deepseek-chat": {Input: 9}}}, "deepseek-chat"); p.Input != 2 {
+		t.Fatalf("admin price should win %+v", p)
 	}
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
 	"github.com/hwq830/zeusai/server/internal/adminapi"
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
+	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
 )
@@ -38,44 +40,109 @@ providers:
 	h.createOwner("owner@zeus.test", "correct-horse-battery")
 	h.login("owner@zeus.test", "correct-horse-battery")
 
+	ctx := context.Background()
+	// A tier choice made on the old 模型指定 page is folded into the imported route.
+	if _, err := h.q.UpsertModelOverride(ctx, db.UpsertModelOverrideParams{Scope: "fast", Provider: "deepseek", Model: "deepseek-v3",
+		Fallbacks: []string{"qwen"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// First read imports the routing file: providers (with their key variables), prices, routes.
 	var rt gen.ModelRouting
 	h.do("GET", "/admin/v1/model-routing", nil, 200, &rt)
-	if !rt.Configured || len(rt.Providers) != 2 || !rt.Providers[0].KeyPresent || rt.Providers[1].KeyPresent ||
-		len(rt.Tiers) != 2 || len(rt.Purposes) != len(modelgw.Purposes) {
+	if !rt.Configured || !rt.ImportedFromFile || !rt.GatewayOn || len(rt.Providers) != 2 || !rt.Providers[0].KeyPresent ||
+		rt.Providers[1].KeyPresent || len(rt.Tiers) != 2 || len(rt.Purposes) != len(modelgw.Purposes) || len(rt.Versions) != 1 ||
+		rt.Breaker.Failures != 3 || rt.Breaker.CooldownSeconds != 30 {
 		t.Fatalf("routing = %+v", rt)
 	}
-	strong := rt.Tiers[0]
-	if strong.Scope != "strong" || strong.Effective.Provider != "qwen" || strong.Effective.Model != "qwen-max" ||
-		len(strong.Effective.Fallbacks) != 1 || strong.Override != nil {
+	strong, fast := rt.Tiers[0], rt.Tiers[1]
+	if strong.Tier != "strong" || len(strong.Steps) != 2 || strong.Steps[0].Provider != "qwen" || strong.Steps[0].Model != "qwen-max" ||
+		!strong.Steps[0].UsesDefault || !strong.Steps[0].Priced || strong.Steps[0].Price.Output != 9.6 || strong.Steps[1].Priced {
 		t.Fatalf("strong = %+v", strong)
 	}
+	if len(fast.Steps) != 2 || fast.Steps[0].Provider != "deepseek" || fast.Steps[0].Model != "deepseek-v3" || fast.Steps[0].UsesDefault ||
+		fast.Steps[1].Provider != "qwen" {
+		t.Fatalf("fast = %+v", fast)
+	}
+	if p := rt.Purposes[0]; p.Override != nil || len(p.Effective) != 2 || p.Effective[0].Provider != "deepseek" {
+		t.Fatalf("purpose = %+v", p)
+	}
+	// File prices are now admin prices on the pricing page.
+	var pl gen.ModelPriceList
+	h.do("GET", "/admin/v1/model-prices", nil, 200, &pl)
+	found := false
+	for _, m := range pl.Models {
+		if m.Model == "qwen-max" {
+			found = m.Origin == "manual" && m.Manual != nil && m.Manual.Output == 9.6
+		}
+	}
+	if !found {
+		t.Fatal("file price not imported")
+	}
 
-	// A model without a price in the file needs one.
-	h.do("PUT", "/admin/v1/model-routing/strong", map[string]any{"provider": "qwen", "model": "qwen3.8-max"}, 400, nil)
-	h.do("PUT", "/admin/v1/model-routing/strong", map[string]any{"provider": "nope", "model": "x"}, 400, nil)
+	// Saving tier routes: validation.
+	save := func(strong, fast []map[string]any, failures, cooldown, status int) {
+		t.Helper()
+		rt = gen.ModelRouting{}
+		h.do("PUT", "/admin/v1/model-routing", map[string]any{"routes": map[string]any{"strong": strong, "fast": fast},
+			"breaker": map[string]any{"failures": failures, "cooldownSeconds": cooldown}}, status, &rt)
+	}
+	q := []map[string]any{{"provider": "qwen"}}
+	save([]map[string]any{{"provider": "nope"}}, q, 3, 30, 400)
+	save([]map[string]any{{"provider": "qwen"}, {"provider": "qwen"}}, q, 3, 30, 400)
+	save(q, q, 0, 30, 400)
+	save(q, q, 3, 1, 400)
+	save([]map[string]any{{"provider": "qwen", "model": "qwen3.8-max"}, {"provider": "deepseek"}}, q, 5, 60, 200)
+	if s := rt.Tiers[0].Steps; len(s) != 2 || s[0].Model != "qwen3.8-max" || s[0].UsesDefault || rt.Breaker.Failures != 5 ||
+		len(rt.Versions) != 2 || rt.Versions[0].Action != "settings" || rt.UpdatedBy == nil {
+		t.Fatalf("saved = %+v", rt)
+	}
+
+	// Purposes: tiers are no longer set here; prices are not taken any more.
+	h.do("PUT", "/admin/v1/model-routing/strong", map[string]any{"provider": "qwen", "model": "qwen-max"}, 400, nil)
 	h.do("PUT", "/admin/v1/model-routing/nope", map[string]any{"provider": "qwen", "model": "qwen-max"}, 404, nil)
-	var r gen.ModelRoute
-	h.do("PUT", "/admin/v1/model-routing/strong", map[string]any{"provider": "qwen", "model": "qwen3.8-max",
-		"price": map[string]any{"input": 3, "output": 12, "cached": 1}, "fallbacks": []string{}}, 200, &r)
-	if r.Override == nil || !r.Override.Priced || r.Effective.Model != "qwen3.8-max" || len(r.Effective.Fallbacks) != 0 {
-		t.Fatalf("route = %+v", r)
+	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "nope", "model": "x"}, 400, nil)
+	rt = gen.ModelRouting{}
+	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "deepseek", "model": "deepseek-chat"}, 200, &rt)
+	var write gen.PurposeRoute
+	for _, p := range rt.Purposes {
+		if p.Scope == "report.write" {
+			write = p
+		}
 	}
-	// Purposes follow their tier until overridden; fallbacks are tier-only.
-	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "deepseek", "model": "deepseek-chat",
-		"fallbacks": []string{"qwen"}}, 400, nil)
-	h.do("PUT", "/admin/v1/model-routing/report.write", map[string]any{"provider": "deepseek", "model": "deepseek-chat",
-		"price": map[string]any{"input": 2, "output": 8, "cached": 0.5}}, 200, &r)
-	if r.Kind != "purpose" || r.Default.Model != "qwen3.8-max" || r.Effective.Provider != "deepseek" ||
-		len(r.Effective.Fallbacks) != 1 || r.Effective.Fallbacks[0] != "qwen" {
-		t.Fatalf("purpose route = %+v", r)
+	if write.Override == nil || len(write.Effective) != 2 || write.Effective[0].Provider != "deepseek" ||
+		write.Effective[1].Provider != "qwen" || write.Effective[1].Model != "qwen3.8-max" {
+		t.Fatalf("purpose route = %+v", write)
 	}
 
-	// The gateway built from the same database sees the overrides.
-	ov := (&modelgw.DBOverrides{Q: h.q}).Overrides(context.Background())
-	if ov.Tiers[llm.TierStrong].Model != "qwen3.8-max" || ov.Tiers[llm.TierStrong].Fallbacks == nil ||
-		ov.Tiers[llm.TierStrong].Price.Output != 12 || ov.Purposes["report.write"].Provider != "deepseek" {
+	// The gateway built from the same database sees the routing.
+	ov := (&modelgw.DBOverrides{Q: h.q}).Overrides(ctx)
+	if ov.Settings == nil || ov.Settings.Routes[llm.TierStrong][0].Model != "qwen3.8-max" || ov.Settings.BreakerFailures != 5 ||
+		ov.Purposes["report.write"].Provider != "deepseek" || len(ov.Providers) != 2 || ov.Providers[0].APIKeyEnv == "" ||
+		ov.Manual["qwen-max"].Output != 9.6 {
 		t.Fatalf("overrides = %+v", ov)
 	}
+
+	// A provider in the routing can be neither disabled nor deleted.
+	h.do("PATCH", "/admin/v1/providers/deepseek", map[string]any{"enabled": false}, 409, nil)
+	h.do("DELETE", "/admin/v1/providers/deepseek", nil, 409, nil)
+
+	// Going back to the imported version restores the tier routes and drops the purpose choice.
+	first := rt.Versions[len(rt.Versions)-1]
+	if first.Action != "import" {
+		t.Fatalf("versions = %+v", rt.Versions)
+	}
+	rt = gen.ModelRouting{}
+	h.do("POST", "/admin/v1/model-routing/versions/"+strconv.FormatInt(first.Id, 10)+"/restore", nil, 200, &rt)
+	if rt.Tiers[0].Steps[0].Model != "qwen-max" || rt.Breaker.Failures != 3 || rt.Versions[0].Action != "restore" {
+		t.Fatalf("restored = %+v", rt)
+	}
+	for _, p := range rt.Purposes {
+		if p.Override != nil {
+			t.Fatalf("purpose kept after restore: %+v", p)
+		}
+	}
+	h.do("POST", "/admin/v1/model-routing/versions/99999/restore", nil, 404, nil)
 
 	// Test with the key the gateway would use.
 	var res gen.ProviderKeyTest
@@ -103,10 +170,10 @@ providers:
 	}
 	h.do("GET", "/admin/v1/model-routing/providers/nope/models", nil, 404, nil)
 
-	// Reset goes back to the file.
-	h.do("DELETE", "/admin/v1/model-routing/strong", nil, 204, nil)
-	h.do("GET", "/admin/v1/model-routing", nil, 200, &rt)
-	if rt.Tiers[0].Override != nil || rt.Tiers[0].Effective.Model != "qwen-max" {
-		t.Fatalf("after reset = %+v", rt.Tiers[0])
+	// Imported providers are ordinary providers now: editable, and listed as imported.
+	var kp gen.KeyProvider
+	h.do("PATCH", "/admin/v1/providers/qwen", map[string]any{"timeoutSeconds": 90}, 200, &kp)
+	if kp.Source != "console" || kp.Imported == nil || !*kp.Imported || *kp.TimeoutSeconds != 90 || kp.ApiKeyEnv != "ZEUS_TEST_QWEN_KEY" {
+		t.Fatalf("imported provider = %+v", kp)
 	}
 }

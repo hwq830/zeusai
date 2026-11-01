@@ -2,7 +2,6 @@ package adminapi
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -10,7 +9,6 @@ import (
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
-	"github.com/hwq830/zeusai/server/internal/modelgw"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/task"
 )
@@ -434,85 +432,9 @@ func (s *Server) GetCosts(ctx context.Context, req gen.GetCostsRequestObject) (g
 
 // ---------------------------------------------------------------- model gateway
 
-type gwPrice struct {
-	Model  string  `json:"model"`
-	Input  float64 `json:"input"`
-	Output float64 `json:"output"`
-	Cached float64 `json:"cached"`
-}
-
-type gwProvider struct {
-	Name       string            `json:"name"`
-	BaseURL    string            `json:"baseUrl"`
-	APIKeyEnv  string            `json:"apiKeyEnv"`
-	KeyPresent bool              `json:"keyPresent"`
-	KeySource  string            `json:"keySource"`
-	Timeout    string            `json:"timeout,omitempty"`
-	Models     map[string]string `json:"models"`
-	Prices     []gwPrice         `json:"prices"`
-}
-
 type gwUsage struct {
 	Provider   string     `json:"provider"`
 	Calls      int        `json:"calls"`
 	CostCny    float64    `json:"costCny"`
 	LastCallAt *time.Time `json:"lastCallAt"`
-}
-
-// GetModelGateway shows the routing file the api and orchestrator load. The admin process
-// should be given the same ZEUS_MODELGW_CONFIG (and, to show keyPresent, the same key
-// variables).
-func (s *Server) GetModelGateway(ctx context.Context, _ gen.GetModelGatewayRequestObject) (gen.GetModelGatewayResponseObject, error) {
-	out := struct {
-		LLMProvider     string              `json:"llmProvider"`
-		Configured      bool                `json:"configured"`
-		ConfigError     string              `json:"configError,omitempty"`
-		BreakerFailures int                 `json:"breakerFailures,omitempty"`
-		BreakerCooldown string              `json:"breakerCooldown,omitempty"`
-		Routes          map[string][]string `json:"routes"`
-		Providers       []gwProvider        `json:"providers"`
-		Usage24h        []gwUsage           `json:"usage24h"`
-	}{LLMProvider: s.LLMProvider, Routes: map[string][]string{}, Providers: []gwProvider{}, Usage24h: []gwUsage{}}
-	if out.LLMProvider == "" {
-		out.LLMProvider = "mock"
-	}
-	if s.ModelGWConfig != "" {
-		cfg, err := modelgw.LoadConfig(s.ModelGWConfig)
-		if err != nil {
-			out.ConfigError = err.Error()
-		} else {
-			out.Configured = true
-			out.BreakerFailures = cfg.BreakerFailures
-			if cfg.BreakerCooldown > 0 {
-				out.BreakerCooldown = cfg.BreakerCooldown.String()
-			}
-			for tier, names := range cfg.Routes {
-				out.Routes[string(tier)] = names
-			}
-			for _, p := range cfg.Providers {
-				gp := gwProvider{Name: p.Name, BaseURL: p.BaseURL, APIKeyEnv: p.APIKeyEnv, Models: map[string]string{}, Prices: []gwPrice{}}
-				gp.KeyPresent, gp.KeySource = s.keySourceFor(ctx, p.Name, p.APIKeyEnv)
-				if p.Timeout > 0 {
-					gp.Timeout = p.Timeout.String()
-				}
-				for tier, m := range p.Models {
-					gp.Models[string(tier)] = m
-				}
-				for m, pr := range p.Prices {
-					gp.Prices = append(gp.Prices, gwPrice{Model: m, Input: pr.Input, Output: pr.Output, Cached: pr.Cached})
-				}
-				sort.Slice(gp.Prices, func(i, j int) bool { return gp.Prices[i].Model < gp.Prices[j].Model })
-				out.Providers = append(out.Providers, gp)
-			}
-		}
-	}
-	usage, err := s.Q.UsageByProviderSince(ctx, s.now().Add(-24*time.Hour))
-	if err != nil {
-		return nil, apperr.Internal(err)
-	}
-	for _, u := range usage {
-		last := u.LastCallAt
-		out.Usage24h = append(out.Usage24h, gwUsage{Provider: u.Provider, Calls: int(u.Calls), CostCny: cny(u.CostMicros), LastCallAt: &last})
-	}
-	return gen.GetModelGateway200JSONResponse(recode[gen.ModelGateway](out)), nil
 }

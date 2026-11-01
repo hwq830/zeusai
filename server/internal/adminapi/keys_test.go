@@ -194,11 +194,11 @@ providers:
 	h.do("POST", "/admin/v1/provider-keys/"+k2.Id.String()+"/deactivate", nil, 200, nil)
 	h.do("DELETE", "/admin/v1/provider-keys/"+k1.Id.String(), nil, 204, nil)
 
-	// The gateway page reports where each provider's key comes from.
-	var gw gen.ModelGateway
-	h.do("GET", "/admin/v1/modelgw", nil, 200, &gw)
+	// The routing page reports whether each provider has a key.
+	var gw gen.ModelRouting
+	h.do("GET", "/admin/v1/model-routing", nil, 200, &gw)
 	if len(gw.Providers) != 1 || gw.Providers[0].KeyPresent {
-		t.Fatalf("modelgw = %+v", gw.Providers)
+		t.Fatalf("model-routing = %+v", gw.Providers)
 	}
 
 	// Only owners manage keys; everyone can read the masked list.

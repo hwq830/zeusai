@@ -92,19 +92,6 @@ type upstream struct {
 	hasKey func(context.Context) bool
 }
 
-// WithProviders merges extra into the routing file's providers; a name the file already
-// has keeps the file's settings.
-func (c Config) WithProviders(extra []ProviderConfig) Config {
-	out := c
-	out.Providers = append([]ProviderConfig(nil), c.Providers...)
-	for _, p := range extra {
-		if !c.Has(p.Name) {
-			out.Providers = append(out.Providers, p)
-		}
-	}
-	return out
-}
-
 // Has reports whether the config names provider.
 func (c Config) Has(provider string) bool {
 	for _, p := range c.Providers {
@@ -148,7 +135,10 @@ type options struct {
 func WithKeys(ks KeySource) Option { return func(o *options) { o.keys = ks } }
 
 type Gateway struct {
-	ups       map[string]upstream
+	// ups are the routing file's providers, used until the routing is in the database.
+	ups map[string]upstream
+	// fixed are providers injected by tests; they stand in for providers of the same name.
+	fixed     map[string]upstream
 	routes    map[llm.Tier][]string
 	overrides OverrideSource
 	mod       moderation.Checker
@@ -167,19 +157,24 @@ type dynUpstream struct {
 
 // New builds a gateway. Providers can be overridden (tests) by passing them in extra.
 // Providers with no key at call time are skipped, so the route falls through to the next one.
+//
+// The routing file (cfg) may be empty: the routing then comes only from the database through
+// WithOverrides.
 func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts ...Option) (*Gateway, error) {
-	if err := cfg.validate(); err != nil {
-		return nil, err
+	if len(cfg.Providers) > 0 || len(cfg.Routes) > 0 {
+		if err := cfg.validate(); err != nil {
+			return nil, err
+		}
 	}
 	o := options{keys: envKeys{}}
 	for _, opt := range opts {
 		opt(&o)
 	}
-	g := &Gateway{ups: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
+	g := &Gateway{ups: map[string]upstream{}, fixed: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
 		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown), keys: o.keys, dyn: map[string]dynUpstream{}}
 	for _, pc := range cfg.Providers {
 		if p := extra[pc.Name]; p != nil {
-			g.ups[pc.Name] = upstream{Provider: p, prices: pc.Prices, bailian: IsBailian(pc.BaseURL)}
+			g.fixed[pc.Name] = upstream{Provider: p, prices: pc.Prices, bailian: IsBailian(pc.BaseURL)}
 			continue
 		}
 		g.ups[pc.Name] = g.newUpstream(pc)
@@ -203,10 +198,15 @@ func (g *Gateway) newUpstream(pc ProviderConfig) upstream {
 		hasKey: func(ctx context.Context) bool { return key(ctx) != "" }}
 }
 
-// upstreamFor finds a provider: the routing file's first, then the console's current list.
+// upstreamFor finds a provider: the database's enabled providers once the routing is in the
+// database, else the routing file's.
 func (g *Gateway) upstreamFor(ov Overrides, name string) (upstream, bool) {
-	if up, ok := g.ups[name]; ok {
+	if up, ok := g.fixed[name]; ok {
 		return up, true
+	}
+	if ov.Settings == nil {
+		up, ok := g.ups[name]
+		return up, ok
 	}
 	for _, pc := range ov.Providers {
 		if pc.Name != name {
@@ -279,30 +279,35 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 	return llm.Response{}, apperr.Unavailable("模型服务繁忙，请稍后再试").WithCause(lastErr)
 }
 
-// priceFor prefers the routing file's price for the model that answered, then the price set
-// with an override, then the file's price for the model asked for, then (on Bailian) the
-// pricing page's price, then the built-in catalog's.
+// priceFor meters a call: the admin price on the pricing page for the model that answered
+// (or was asked for), then the routing file's price (before the import), then on Bailian
+// endpoints the synced list price, then the built-in catalog's.
 func (a attempt) priceFor(up upstream, answered string) Price {
-	if p, ok := up.prices[answered]; ok {
-		return p
+	models := []string{answered, a.model}
+	var ov Overrides
+	if a.ov != nil {
+		ov = *a.ov
 	}
-	if a.price != nil {
-		return *a.price
+	for _, m := range models {
+		if p, ok := ov.Manual[m]; ok {
+			return p
+		}
 	}
-	if p, ok := up.prices[a.model]; ok {
-		return p
+	for _, m := range models {
+		if p, ok := up.prices[m]; ok {
+			return p
+		}
 	}
 	if up.bailian {
-		for _, m := range []string{answered, a.model} {
-			if p, ok := a.bailian[m]; ok {
+		for _, m := range models {
+			if p, ok := ov.Prices[m]; ok {
 				return p
 			}
 		}
-		if p, ok := BailianPrice(answered); ok {
-			return p
-		}
-		if p, ok := BailianPrice(a.model); ok {
-			return p
+		for _, m := range models {
+			if p, ok := BailianPrice(m); ok {
+				return p
+			}
 		}
 	}
 	return Price{}
@@ -348,6 +353,19 @@ func newBreaker(threshold int, cooldown time.Duration) *breaker {
 	}
 	return &breaker{threshold: threshold, cooldown: cooldown, fails: map[string]int{},
 		openUntil: map[string]time.Time{}, now: time.Now}
+}
+
+// set changes the threshold and cooldown (non-positive values keep the defaults).
+func (b *breaker) set(threshold int, cooldown time.Duration) {
+	if threshold <= 0 {
+		threshold = DefaultBreakerFailures
+	}
+	if cooldown <= 0 {
+		cooldown = DefaultBreakerCooldown
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.threshold, b.cooldown = threshold, cooldown
 }
 
 func (b *breaker) allow(name string) bool {

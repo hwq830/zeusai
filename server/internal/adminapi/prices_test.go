@@ -57,14 +57,17 @@ providers:
 		t.Fatalf("qwen-plus %+v", row)
 	}
 
-	// A Bailian model with a catalog price needs no price on the override.
-	var r gen.ModelRoute
-	h.do("PUT", "/admin/v1/model-routing/strong", map[string]any{"provider": "bailian", "model": "qwen3.8-max"}, 200, &r)
-	if r.Override == nil || !r.Override.Priced {
-		t.Fatalf("route %+v", r)
-	}
-	h.do("PUT", "/admin/v1/model-routing/fast", map[string]any{"provider": "bailian", "model": "no-such-model"}, 400, nil)
+	// A Bailian model is priced from the catalog; one without a price is flagged, not refused.
 	var rt gen.ModelRouting
+	h.do("PUT", "/admin/v1/model-routing", map[string]any{
+		"routes":  map[string]any{"strong": []map[string]any{{"provider": "bailian"}}, "fast": []map[string]any{{"provider": "bailian", "model": "no-such-model"}}},
+		"breaker": map[string]any{"failures": 3, "cooldownSeconds": 30}}, 200, &rt)
+	if s := rt.Tiers[0].Steps[0]; s.Model != "qwen3.8-max" || !s.Priced {
+		t.Fatalf("strong step %+v", s)
+	}
+	if s := rt.Tiers[1].Steps[0]; s.Priced {
+		t.Fatalf("fast step %+v", s)
+	}
 	h.do("GET", "/admin/v1/model-routing", nil, 200, &rt)
 	if !rt.Providers[0].Bailian || rt.Catalog == nil || len(rt.Catalog.Models) != len(builtin) {
 		t.Fatalf("routing catalog/bailian missing: %+v", rt.Providers)
@@ -109,8 +112,9 @@ providers:
 
 	// The gateway meters with the pricing page.
 	ov := (&modelgw.DBOverrides{Q: h.q}).Overrides(context.Background())
-	if ov.Prices["qwen3.8-max"].Output != 30 || ov.Prices["qwen-plus"].Input != 0.8 || ov.Prices["my-custom"].Output != 2 {
-		t.Fatalf("gateway prices %+v", ov.Prices)
+	if ov.Manual["qwen3.8-max"].Output != 30 || ov.Prices["qwen3.8-max"].Output != 36 || ov.Prices["qwen-plus"].Input != 0.8 ||
+		ov.Manual["my-custom"].Output != 2 {
+		t.Fatalf("gateway prices %+v manual %+v", ov.Prices, ov.Manual)
 	}
 
 	// Clearing goes back to the synced price; a custom model disappears.

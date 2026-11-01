@@ -65,7 +65,7 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 | `ZEUS_ADMIN_JWT_SECRET` | 控制台令牌密钥，与 `ZEUS_JWT_SECRET` 分开；非 dev 必填 |
 | `ZEUS_ADMIN_TOKEN_TTL` | 登录有效期，默认 `12h` |
 | `ZEUS_ADMIN_STATIC_DIR` | 可选：zeusai-admin 构建出的 `dist/`，由 admin 进程一起提供 |
-| `ZEUS_MODELGW_CONFIG`、`ZEUS_LLM_PROVIDER`、`ZEUS_SEARCH_PROVIDER` | 与 api 相同，控制台“模型网关”页只读展示，“API Key”页据此列出服务商 |
+| `ZEUS_MODELGW_CONFIG`、`ZEUS_LLM_PROVIDER`、`ZEUS_SEARCH_PROVIDER` | 与 api 相同；路由文件只在数据库还没有路由时导入一次 |
 | `ZEUS_SECRETS_KEY` | 加密控制台保存的模型 / 搜索 API Key（`openssl rand -hex 32`，至少 32 位）；api、orchestrator、admin 三个进程必须相同。不设置则不能在控制台保存 Key |
 
 角色：`owner` 全部权限；`operator` 用户、额度、模板、连接器、任务、用户反馈；`moderator` 内容审核、停用用户、用户反馈；`viewer` 只读。所有写操作进 `admin_audit_log`。在控制台改过的官方模板和连接器标记为 `admin_managed`，之后 `zeusctl seed` 不再覆盖它们的运营字段。控制台添加的屏蔽词与 `ZEUS_MODERATION_KEYWORDS_FILE` 合并，各进程约 1 分钟内生效，拦截记录写入 `moderation_events`。
@@ -74,11 +74,11 @@ go run ./server/cmd/admin &            # :8081，ZEUS_ADMIN_HTTP_ADDR 可改
 
 API Key：owner 在控制台“API Key”页为路由文件里的每个模型服务商和博查搜索保存 Key（AES-256-GCM 加密存 `provider_keys`，只显示末 4 位），可先测试再保存。每个服务商最多一把启用；启用的 Key 优先于环境变量，各进程约 1 分钟内生效、不用重启；停用后回退到环境变量。网关路由里没有 Key 的服务商会被跳过。保存 Key 时可以同时填 API 地址（如百炼业务空间专属地址，存 `provider_keys.base_url`），这把 Key 启用时调用和测试都走这个地址，不填用路由文件的 `base_url`（博查用默认地址）；地址可以在控制台随时修改。换 `ZEUS_SECRETS_KEY` 会让已保存的 Key 无法解密，需要重新添加。
 
-模型指定：owner 在控制台“模型指定”页给每个档位（strong / fast）选服务商和模型、调整备用顺序，也可以给单个环节（如 `report.write`）单独指定；存 `model_overrides`，叠加在路由文件之上，各进程约 1 分钟内生效。环节的指定先试，失败后按所在档位的顺序继续；指定里写了路由文件已删除的服务商会被忽略。路由文件里没价格的模型保存时必须填价格（元 / 百万 token），否则成本统计会按 0 计；服务商地址是百炼（DashScope）的，「模型定价」页里有价格就不用填。选模型时可以用服务商当前的 Key 实时拉一次可用模型（`GET /models`）。额度折算权重另在配置中心 `quota.token_weights` 里配。
+模型路由：路由存在数据库里（`gateway_settings` 存各档位的调用顺序和熔断，`model_overrides` 存各环节的指定），owner 在控制台“模型路由”页修改，各进程约 1 分钟内生效。`ZEUS_MODELGW_CONFIG` 指向的路由文件只在数据库还没有路由时导入一次（api、orchestrator、admin 谁先启动谁导入）：文件里的服务商进 `model_providers`（保留 `api_key_env` 作为 Key 的兜底），价格进“模型定价”的手动价格，路由连同旧“模型指定”页的档位指定一起成为各档位的顺序；之后改文件不再生效。每档是一串依次尝试的服务商，每个可以选模型，不选用服务商这一档的默认模型；环节的指定先试，失败后按所在档位的顺序继续。每次修改记一个历史版本（`routing_versions`），可以一键恢复。保存前可以用服务商当前的 Key 试调一次，也可以实时拉一次可用模型（`GET /models`）。额度折算权重另在配置中心 `quota.token_weights` 里配。
 
-模型定价：控制台“模型定价”页管理百炼模型的价格（元 / 百万 token），存 `model_prices`。没同步过时用服务端内置目录（`internal/modelgw/catalog_bailian.json`）；点“从百炼同步”会调用百炼控制台和 `bl model list` 用的模型列表接口（无需鉴权，非公开文档接口，失败时原价格不变）拉全部文本模型和标价。分档计价的模型（如 qwen-plus 按输入长度分档）计费按第一档。手动改的价格优先，之后同步不会覆盖，可随时恢复成同步价。计费顺序：路由文件价格 → 模型指定里填的价格 → 模型定价（仅百炼地址的服务商）→ 内置目录。
+模型定价：控制台“模型定价”页管理百炼模型的价格（元 / 百万 token），存 `model_prices`。没同步过时用服务端内置目录（`internal/modelgw/catalog_bailian.json`）；点“从百炼同步”会调用百炼控制台和 `bl model list` 用的模型列表接口（无需鉴权，非公开文档接口，失败时原价格不变）拉全部文本模型和标价。分档计价的模型（如 qwen-plus 按输入长度分档）计费按第一档。手动改的价格优先，之后同步不会覆盖，可随时恢复成同步价。计费顺序：手动价格（任何服务商）→ 百炼同步价（仅百炼地址的服务商）→ 内置目录。价格只在“模型定价”页设置，选模型时不再单独填价；没有价格的模型在“模型路由”页标为“无价格”，成本按 0 计。
 
-服务商：控制台“服务商”页（原“API Key”页）按种类列出模型服务商和搜索服务商，管理各自的 Key。owner 可以新增模型服务商（任意 OpenAI 兼容接口：标识、显示名称、API 地址、各档默认模型、超时，可同时保存 Key），存 `model_providers`，各进程约 1 分钟内加载，不用改路由文件或重启。新增的服务商在“模型指定”里选中（或列为备用）后才会被调用；还在被选用时不能停用或删除，删除会一并删除它的 Key。路由文件里的服务商只能在服务器上改；文件里可以用 `display_name` 设置显示名称。
+服务商：控制台“服务商”页（原“API Key”页）按种类列出模型服务商和搜索服务商，管理各自的 Key。owner 可以新增模型服务商（任意 OpenAI 兼容接口：标识、显示名称、API 地址、各档默认模型、超时，可同时保存 Key），存 `model_providers`，各进程约 1 分钟内加载，不用改路由文件或重启。从路由文件导入的服务商和后台新增的一样可以修改、停用、删除。服务商放进“模型路由”的档位顺序或环节指定后才会被调用；还在被用时不能停用或删除，删除会一并删除它的 Key。
 
 ### 配置中心
 
@@ -105,7 +105,7 @@ API Key：owner 在控制台“API Key”页为路由文件里的每个模型服
 
 | 能力 | 环境变量 |
 | --- | --- |
-| 模型网关 | `ZEUS_LLM_PROVIDER=gateway`、`ZEUS_MODELGW_CONFIG=deploy/modelgw.example.yaml`，以及该文件里 `api_key_env` 指定的 key（如 `ZEUS_QWEN_API_KEY`），或设 `ZEUS_SECRETS_KEY` 后在控制台“API Key”页填写 |
+| 模型网关 | `ZEUS_LLM_PROVIDER=gateway`、`ZEUS_MODELGW_CONFIG=deploy/modelgw.example.yaml`，以及该文件里 `api_key_env` 指定的 key（如 `ZEUS_QWEN_API_KEY`），或设 `ZEUS_SECRETS_KEY` 后在控制台“服务商”页填写；路由文件只在首次启动时导入，之后在控制台“模型路由”页修改 |
 | 内容审核词表 | `ZEUS_MODERATION_KEYWORDS_FILE`（每行一个词；非 dev 环境必填） |
 | 博查搜索 | `ZEUS_SEARCH_PROVIDER=bocha`、`ZEUS_BOCHA_API_KEY`（或在控制台“API Key”页填写）；网页读取走 `ZEUS_EGRESS_PROXY`（可选） |
 | 高德 MCP | `ZEUS_MCP_AMAP_URL`（含 key 的完整 Streamable HTTP 地址） |

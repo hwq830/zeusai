@@ -1,4 +1,7 @@
 # Model gateway routing (ZEUS_LLM_PROVIDER=gateway, ZEUS_MODELGW_CONFIG=<this file>).
+# Imported into the database once, the first time a process starts and the database has no
+# routing yet; after that the routing is edited on the console's 模型路由 page and this file
+# is not read again.
 # Keys come from the environment variables named in api_key_env; never put keys here.
 # Model names and prices are examples: check each vendor's current price list before use.
 breaker_failures: 3

@@ -69,9 +69,20 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 	case "", "mock":
 		p = llm.Mock{}
 	case "gateway":
-		gc, err := modelgw.LoadConfig(cfg.ModelGWConfig)
-		if err != nil {
-			return nil, err
+		// The routing lives in the database; the file only seeds it on first start.
+		var gc modelgw.Config
+		if cfg.ModelGWConfig != "" {
+			c, err := modelgw.LoadConfig(cfg.ModelGWConfig)
+			if err != nil {
+				slog.Warn("model routing file not usable; using the database only", "err", err)
+			} else {
+				gc = c
+			}
+		}
+		if q != nil {
+			if err := modelgw.Bootstrap(context.Background(), q, gc, slog.Default()); err != nil {
+				slog.Warn("model routing import failed", "err", err)
+			}
 		}
 		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys),
 			modelgw.WithOverrides(&modelgw.DBOverrides{Q: q, Log: slog.Default()}))
