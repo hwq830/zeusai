@@ -23,9 +23,9 @@ import (
 
 // Price is CNY per million tokens.
 type Price struct {
-	Input  float64 `yaml:"input"`
-	Output float64 `yaml:"output"`
-	Cached float64 `yaml:"cached"`
+	Input  float64 `yaml:"input" json:"input"`
+	Output float64 `yaml:"output" json:"output"`
+	Cached float64 `yaml:"cached" json:"cached"`
 }
 
 type ProviderConfig struct {
@@ -84,6 +84,8 @@ func (c Config) validate() error {
 type upstream struct {
 	llm.Provider
 	prices map[string]Price
+	// bailian marks a Bailian endpoint, whose catalog prices fill gaps in prices.
+	bailian bool
 	// hasKey reports whether a key is configured right now; nil (test providers) means yes.
 	hasKey func(context.Context) bool
 }
@@ -141,7 +143,7 @@ func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts
 	g := &Gateway{ups: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
 		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown)}
 	for _, pc := range cfg.Providers {
-		up := upstream{Provider: extra[pc.Name], prices: pc.Prices}
+		up := upstream{Provider: extra[pc.Name], prices: pc.Prices, bailian: IsBailian(pc.BaseURL)}
 		if up.Provider == nil {
 			timeout := pc.Timeout
 			if timeout == 0 {
@@ -195,7 +197,7 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 			continue
 		}
 		g.breaker.success(name)
-		resp.CostMicros = cost(a.priceFor(up.prices, resp.Model), resp.Usage)
+		resp.CostMicros = cost(a.priceFor(up, resp.Model), resp.Usage)
 		if g.mod != nil {
 			verdict, err := g.mod.Check(ctx, moderation.Output, resp.Content)
 			if err != nil {
@@ -214,15 +216,32 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 }
 
 // priceFor prefers the routing file's price for the model that answered, then the price set
-// with an override, then the file's price for the model asked for.
-func (a attempt) priceFor(prices map[string]Price, answered string) Price {
-	if p, ok := prices[answered]; ok {
+// with an override, then the file's price for the model asked for, then (on Bailian) the
+// pricing page's price, then the built-in catalog's.
+func (a attempt) priceFor(up upstream, answered string) Price {
+	if p, ok := up.prices[answered]; ok {
 		return p
 	}
 	if a.price != nil {
 		return *a.price
 	}
-	return prices[a.model]
+	if p, ok := up.prices[a.model]; ok {
+		return p
+	}
+	if up.bailian {
+		for _, m := range []string{answered, a.model} {
+			if p, ok := a.bailian[m]; ok {
+				return p
+			}
+		}
+		if p, ok := BailianPrice(answered); ok {
+			return p
+		}
+		if p, ok := BailianPrice(a.model); ok {
+			return p
+		}
+	}
+	return Price{}
 }
 
 func retryable(err error) bool {

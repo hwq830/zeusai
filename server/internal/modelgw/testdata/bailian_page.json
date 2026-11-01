@@ -1,0 +1,27 @@
+{"code":"200","data":{"DataV2":{"ret":["SUCCESS::接口调用成功"],"data":{"codeEnum":"SUCCESS","code":"200","data":{"total":3,"pageNo":1,"pageSize":50,"list":[
+ {"model":"group-qwen3.8-max","items":[
+  {"model":"qwen3.8-max","provider":"qwen","contextWindow":262144,"capabilities":["TG"],"prices":[
+   {"priceUnit":"每百万tokens","price":"12","timeBand":"standard","type":"input_token"},
+   {"priceUnit":"每百万tokens","price":"36","timeBand":"standard","type":"output_token"},
+   {"priceUnit":"每百万tokens","price":"1.5","timeBand":"standard","type":"input_token_cache"},
+   {"priceUnit":"每百万tokens","price":"6","timeBand":"standard","type":"input_token_batch"}]},
+  {"model":"qwen3.8-max-preview","provider":"qwen","contextWindow":"131072","prices":[
+   {"price":"10","timeBand":"standard","type":"input_token"},
+   {"price":"30","timeBand":"standard","type":"output_token"}]}]},
+ {"model":"group-decision-model","group":true,"items":[
+  {"model":"decision-model-preview","provider":"qwen-domain-model","contextWindow":65536,"priceTimeBands":[],
+   "prices":[{"priceUnit":"每百万tokens","price":"0","discount":0.0,"type":"input_token","priceName":"输入"}]}]},
+ {"model":"group-qwen-plus","items":[
+  {"model":"qwen-plus","provider":"qwen","contextWindow":1000000,"multiPrices":[
+   {"rangeStart":0,"rangeName":"输入<=128k","rangeEnd":131072,"prices":[
+    {"price":"0.8","timeBand":"standard","ntmAmountType":"input_token","type":"input_token"},
+    {"price":"2","timeBand":"standard","type":"output_token"},
+    {"price":"8","timeBand":"standard","type":"thinking_output_token"},
+    {"price":"0.16","timeBand":"standard","type":"input_token_cache"},
+    {"price":"0.8","timeBand":"standard","discount":0.5,"type":"input_token_batch_chat"}]},
+   {"rangeStart":131072,"rangeName":"128k<输入<=256k","rangeEnd":262144,"prices":[
+    {"price":"2.4","timeBand":"standard","ntmAmountType":"context_128k-256k_input_token","type":"input_token"},
+    {"price":"20","timeBand":"standard","type":"output_token"},
+    {"price":"0.48","timeBand":"standard","type":"input_token_cache"}]}]},
+  {"model":"qwen-plus","provider":"qwen","contextWindow":1000000,"prices":[]}]}
+]},"success":true,"message":"dashscope-model.SUCCESS"}},"success":true,"httpStatus":200},"httpStatusCode":"200","successResponse":true}

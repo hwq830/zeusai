@@ -78,6 +78,17 @@ func following(cfg modelgw.Config, first string, names []string) []string {
 	return out
 }
 
+// hasPrice reports whether calls to provider's model are metered without a price on the
+// override: the routing file has one, or the provider is Bailian and the pricing page does.
+func hasPrice(cfg modelgw.Config, provider, model string, bailian map[string]modelgw.Price) bool {
+	p, _ := providerConfig(cfg, provider)
+	if _, ok := p.Prices[model]; ok {
+		return true
+	}
+	_, ok := bailian[model]
+	return modelgw.IsBailian(p.BaseURL) && ok
+}
+
 func isTier(scope string) bool { return slices.Contains(modelgw.Tiers, llm.Tier(scope)) }
 
 func purposeTier(scope string) (llm.Tier, bool) {
@@ -94,6 +105,11 @@ func (s *Server) loadRouting(ctx context.Context, cfg modelgw.Config) (routing, 
 	if err != nil {
 		return routing{}, apperr.Internal(err)
 	}
+	pl, err := s.prices(ctx)
+	if err != nil {
+		return routing{}, err
+	}
+	bailian := pl.metered()
 	ovs := map[string]*modelOverride{}
 	for _, r := range rows {
 		o := &modelOverride{Provider: r.Provider, Model: r.Model, Fallbacks: r.Fallbacks, UpdatedBy: r.UpdatedByEmail,
@@ -101,9 +117,7 @@ func (s *Server) loadRouting(ctx context.Context, cfg modelgw.Config) (routing, 
 		if r.PriceInput != nil || r.PriceOutput != nil || r.PriceCached != nil {
 			o.Price = &modelgw.Price{Input: deref(r.PriceInput), Output: deref(r.PriceOutput), Cached: deref(r.PriceCached)}
 		}
-		p, _ := providerConfig(cfg, r.Provider)
-		_, priced := p.Prices[r.Model]
-		o.Priced = priced || o.Price != nil
+		o.Priced = hasPrice(cfg, r.Provider, r.Model, bailian) || o.Price != nil
 		ovs[r.Scope] = o
 	}
 	rt := routing{cfg: cfg}
@@ -165,8 +179,26 @@ func (s *Server) GetModelRouting(ctx context.Context, _ gen.GetModelRoutingReque
 		slices.Sort(priced)
 		present, _ := s.keySourceFor(ctx, p.Name, p.APIKeyEnv)
 		providers = append(providers, map[string]any{"name": p.Name, "displayName": displayName(p.Name),
-			"keyPresent": present, "models": models, "pricedModels": priced})
+			"keyPresent": present, "models": models, "pricedModels": priced, "bailian": modelgw.IsBailian(p.BaseURL)})
 	}
+	pl, err := s.prices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cat := map[string]any{"source": modelgw.BailianSource(), "updated": pl.BuiltinUpdated}
+	if pl.SyncedAt != nil {
+		cat["source"], cat["updated"] = "百炼实时价格（「模型定价」页同步）", pl.SyncedAt.Format("2006-01-02 15:04")
+	}
+	catModels := []map[string]any{}
+	for _, m := range pl.Models {
+		e := map[string]any{"model": m.Model, "vendor": m.Vendor, "contextWindow": m.ContextWindow}
+		if m.Metered != nil {
+			e["price"] = m.Metered
+		}
+		catModels = append(catModels, e)
+	}
+	cat["models"] = catModels
+	out["catalog"] = cat
 	out["configured"] = s.LLMProvider == "gateway"
 	out["providers"], out["tiers"], out["purposes"] = providers, rt.tiers, rt.purposes
 	return gen.GetModelRouting200JSONResponse(recode[gen.ModelRouting](out)), nil
@@ -215,8 +247,14 @@ func (s *Server) SetModelOverride(ctx context.Context, req gen.SetModelOverrideR
 		}
 		in, outp, cached := float64(pr.Input), float64(pr.Output), float64(pr.Cached)
 		params.PriceInput, params.PriceOutput, params.PriceCached = &in, &outp, &cached
-	} else if _, priced := p.Prices[model]; !priced {
-		return nil, apperr.Invalid("路由文件里没有 " + model + " 的价格，请填写价格，否则成本会按 0 计")
+	} else {
+		pl, err := s.prices(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !hasPrice(cfg, p.Name, model, pl.metered()) {
+			return nil, apperr.Invalid("路由文件和「模型定价」里都没有 " + model + " 的价格，请填写价格，否则成本会按 0 计")
+		}
 	}
 	if _, err := s.Q.UpsertModelOverride(ctx, params); err != nil {
 		return nil, apperr.Internal(err)
@@ -251,6 +289,40 @@ func (s *Server) DeleteModelOverride(ctx context.Context, req gen.DeleteModelOve
 		s.audit(ctx, "model_override.reset", "model_override", scope, nil)
 	}
 	return gen.DeleteModelOverride204Response{}, nil
+}
+
+// ListProviderModels asks the provider which models its current key can use (GET /models).
+func (s *Server) ListProviderModels(ctx context.Context, req gen.ListProviderModelsRequestObject) (gen.ListProviderModelsResponseObject, error) {
+	if _, err := require(ctx, PermModels); err != nil {
+		return nil, err
+	}
+	cfg, err := s.modelGWConfig()
+	if err != nil {
+		return nil, err
+	}
+	p, ok := providerConfig(cfg, req.Provider)
+	if !ok {
+		return nil, apperr.NotFound("路由文件里没有这个服务商")
+	}
+	none := func(msg string) (gen.ListProviderModelsResponseObject, error) {
+		return gen.ListProviderModels200JSONResponse{Models: []string{}, Error: &msg}, nil
+	}
+	key := s.Keys.Key(ctx, p.Name, p.APIKeyEnv)
+	if key == "" {
+		return none("这个服务商还没有 Key，先到「API Key」页添加")
+	}
+	base := p.BaseURL
+	if u := s.Keys.BaseURL(ctx, p.Name); u != "" {
+		base = u
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	models, err := llm.OpenAICompat{BaseURL: base, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.ListModels(ctx)
+	if err != nil {
+		return none(testError(err))
+	}
+	slices.Sort(models)
+	return gen.ListProviderModels200JSONResponse{Models: slices.Compact(models)}, nil
 }
 
 // TestModel sends one output token to provider's model with the key the gateway would use.

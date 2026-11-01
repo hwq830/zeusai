@@ -2,6 +2,7 @@ package modelgw
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -46,6 +47,8 @@ type Override struct {
 type Overrides struct {
 	Tiers    map[llm.Tier]Override
 	Purposes map[string]Override
+	// Prices are the pricing page's Bailian prices by model, used on Bailian endpoints.
+	Prices map[string]Price
 }
 
 // OverrideSource supplies the current overrides per call.
@@ -103,8 +106,37 @@ func (d *DBOverrides) Overrides(ctx context.Context) Overrides {
 			o.Purposes[r.Scope] = ov
 		}
 	}
+	prices, err := d.Q.ListModelPrices(ctx)
+	if err != nil {
+		if d.Log != nil {
+			d.Log.Warn("model prices reload failed", "err", err)
+		}
+		if d.cur != nil {
+			o.Prices = d.cur.Prices
+		}
+	} else {
+		o.Prices = map[string]Price{}
+		for _, r := range prices {
+			if p, ok := StoredPrice(r); ok {
+				o.Prices[r.Model] = p
+			}
+		}
+	}
 	d.cur, d.loaded = &o, time.Now()
 	return o
+}
+
+// StoredPrice is the metered price of a pricing-page row: the admin's price, else the first
+// synced tier.
+func StoredPrice(r db.ListModelPricesRow) (Price, bool) {
+	if r.ManualInput != nil {
+		return Price{Input: *r.ManualInput, Output: deref(r.ManualOutput), Cached: deref(r.ManualCached)}, true
+	}
+	var tiers []PriceTier
+	if json.Unmarshal(r.Tiers, &tiers) == nil && len(tiers) > 0 {
+		return tiers[0].Price, true
+	}
+	return Price{}, false
 }
 
 func deref(f *float64) float64 {
@@ -118,6 +150,8 @@ func deref(f *float64) float64 {
 type attempt struct {
 	provider, model string
 	price           *Price
+	// bailian holds the pricing page's prices, consulted on Bailian endpoints.
+	bailian map[string]Price
 }
 
 // chain resolves the ordered attempts for a call: a purpose override first, then the tier's
@@ -135,10 +169,11 @@ func (g *Gateway) chain(ctx context.Context, tier llm.Tier, purpose string) []at
 			return
 		}
 		seen[a.provider] = true
+		a.bailian = ov.Prices
 		out = append(out, a)
 	}
 	if p, ok := ov.Purposes[purpose]; ok {
-		add(attempt{p.Provider, p.Model, p.Price})
+		add(attempt{provider: p.Provider, model: p.Model, price: p.Price})
 	}
 	t, ok := ov.Tiers[tier]
 	if !ok {
@@ -147,7 +182,7 @@ func (g *Gateway) chain(ctx context.Context, tier llm.Tier, purpose string) []at
 		}
 		return out
 	}
-	add(attempt{t.Provider, t.Model, t.Price})
+	add(attempt{provider: t.Provider, model: t.Model, price: t.Price})
 	fallbacks := t.Fallbacks
 	if fallbacks == nil {
 		fallbacks = g.routes[tier]

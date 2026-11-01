@@ -19,9 +19,19 @@ import (
 
 // fakeUpstream accepts only "Bearer good-key-1234" on both the chat and the search endpoint.
 func fakeUpstream(t *testing.T, calls *atomic.Int32) *httptest.Server {
+	return fakeUpstreamBodies(t, calls, nil)
+}
+
+// fakeUpstreamBodies also keeps the last request body in last, when given.
+func fakeUpstreamBodies(t *testing.T, calls *atomic.Int32, last *atomic.Value) *httptest.Server {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if last != nil {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			last.Store(body)
+		}
 		if r.Header.Get("Authorization") != "Bearer good-key-1234" {
 			http.Error(w, `{"error":"invalid api key"}`, http.StatusUnauthorized)
 			return
@@ -30,6 +40,9 @@ func fakeUpstream(t *testing.T, calls *atomic.Int32) *httptest.Server {
 		case "/chat/completions":
 			_ = json.NewEncoder(w).Encode(map[string]any{"model": "qwen-turbo",
 				"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": "p"}}}})
+		case "/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": []any{
+				map[string]string{"id": "qwen-turbo"}, map[string]string{"id": "qwen-max"}}})
 		case "/v1/web-search":
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"webPages": map[string]any{
 				"value": []any{map[string]string{"name": "n", "url": "https://a.cn/x", "snippet": "s"}}}}})
@@ -102,7 +115,7 @@ providers:
 	if got := reader.Key(ctx, "qwen", "ZEUS_TEST_QWEN_KEY"); got != "good-key-1234" {
 		t.Fatalf("resolved key = %q", got)
 	}
-	h.do("POST", "/admin/v1/provider-keys/"+k1.Id.String()+"/test", nil, 200, &res)
+	h.do("POST", "/admin/v1/provider-keys/"+k1.Id.String()+"/test", map[string]any{}, 200, &res)
 	if !res.Ok {
 		t.Fatalf("saved key test = %+v", res)
 	}
@@ -127,13 +140,35 @@ providers:
 	if got := (&secrets.Keys{Q: h.q, Box: box}).BaseURL(ctx, "qwen"); got != up2.URL {
 		t.Fatalf("resolved address = %q", got)
 	}
-	h.do("POST", "/admin/v1/provider-keys/"+k1.Id.String()+"/test", nil, 200, &res)
+	h.do("POST", "/admin/v1/provider-keys/"+k1.Id.String()+"/test", map[string]any{}, 200, &res)
 	if !res.Ok || calls2.Load() != 2 {
 		t.Fatalf("saved key test with address = %+v, calls %d", res, calls2.Load())
 	}
 	h.do("PATCH", "/admin/v1/provider-keys/"+k1.Id.String(), map[string]string{"baseUrl": ""}, 200, &k1u)
 	if k1u.BaseUrl != "" {
 		t.Fatalf("cleared = %+v", k1u)
+	}
+
+	// Test parameters reach the upstream, and the reply comes back.
+	var calls3 atomic.Int32
+	var last atomic.Value
+	up3 := fakeUpstreamBodies(t, &calls3, &last)
+	h.do("POST", "/admin/v1/provider-keys/test", map[string]any{"provider": "qwen", "apiKey": "good-key-1234", "baseUrl": up3.URL,
+		"params": map[string]any{"model": "qwen-plus", "system": "be brief", "prompt": "你好", "maxTokens": 20, "temperature": 0.5}}, 200, &res)
+	body, _ := last.Load().(map[string]any)
+	if !res.Ok || res.Reply == nil || *res.Reply != "p" || body["model"] != "qwen-plus" || body["max_tokens"] != float64(20) ||
+		body["temperature"] != 0.5 || len(body["messages"].([]any)) != 2 {
+		t.Fatalf("test with params = %+v, upstream got %v", res, body)
+	}
+	h.do("POST", "/admin/v1/provider-keys/test", map[string]any{"provider": "qwen", "apiKey": "good-key-1234", "params": map[string]any{"maxTokens": 5000}}, 400, nil)
+	h.do("POST", "/admin/v1/provider-keys/test", map[string]any{"provider": "bocha", "apiKey": "good-key-1234",
+		"params": map[string]any{"query": "AI 新闻", "count": 3}}, 200, &res)
+	if !res.Ok || res.Results == nil || len(*res.Results) != 1 || (*res.Results)[0].Url != "https://a.cn/x" {
+		t.Fatalf("search test = %+v", res)
+	}
+	h.do("POST", "/admin/v1/provider-keys/"+k1.Id.String()+"/test", map[string]any{"params": map[string]any{"prompt": "hi"}}, 200, &res)
+	if !res.Ok || res.Reply == nil {
+		t.Fatalf("saved key test with params = %+v", res)
 	}
 
 	// A second key takes over; the first is deactivated, then can be deleted.

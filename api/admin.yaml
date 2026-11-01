@@ -34,6 +34,7 @@ tags:
   - name: modelgw
   - name: providerKeys
   - name: modelRouting
+  - name: modelPrices
   - name: analytics
   - name: admins
   - name: feedback
@@ -666,6 +667,64 @@ paths:
         default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- provider keys
+  /admin/v1/model-prices:
+    get:
+      tags: [modelPrices]
+      operationId: listModelPrices
+      summary: 百炼模型定价（同步自百炼的价格 + 后台手动价；没同步过时用服务端内置目录）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelPriceList' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [modelPrices]
+      operationId: setModelPrice
+      summary: 手动设置一个模型的价格（仅 owner），之后同步不会覆盖，约 1 分钟内用于计费
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, price]
+              properties:
+                model: { type: string, maxLength: 120 }
+                price: { $ref: '#/components/schemas/ModelPrice' }
+                note: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: 更新后的列表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelPriceList' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [modelPrices]
+      operationId: clearModelPrice
+      summary: 去掉手动价格，恢复按同步价（或内置目录）计费（仅 owner）
+      parameters:
+        - name: model
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 已恢复 }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/model-prices/sync:
+    post:
+      tags: [modelPrices]
+      operationId: syncModelPrices
+      summary: 从百炼实时拉取全部文本模型和价格（仅 owner）；手动价格保留
+      responses:
+        '200':
+          description: 失败也返回 200，ok=false，原有价格不变
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelPriceSyncResult' }
+        default: { $ref: '#/components/responses/Error' }
   /admin/v1/model-routing:
     get:
       tags: [modelRouting]
@@ -699,6 +758,30 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProviderKeyTest' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/model-routing/providers/{provider}/models:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [modelRouting]
+      operationId: listProviderModels
+      summary: 用这个服务商当前的 Key 实时拉取可用模型（GET /models）
+      responses:
+        '200':
+          description: 拉取失败也返回 200，error 说明原因
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items: { type: string }
+                  error: { type: string }
         default: { $ref: '#/components/responses/Error' }
   /admin/v1/model-routing/{scope}:
     parameters:
@@ -770,6 +853,7 @@ paths:
                 provider: { type: string }
                 apiKey: { type: string }
                 baseUrl: { type: string, description: 不填用默认地址 }
+                params: { $ref: '#/components/schemas/KeyTestParams' }
       responses:
         '200':
           description: 测试结果（失败也返回 200，ok=false）
@@ -813,7 +897,15 @@ paths:
     post:
       tags: [providerKeys]
       operationId: testProviderKey
-      summary: 测试已保存的 Key（仅 owner），结果记在这把 Key 上
+      summary: 测试已保存的 Key（仅 owner），结果记在这把 Key 上；不指定参数时传 {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                params: { $ref: '#/components/schemas/KeyTestParams' }
       responses:
         '200':
           description: 测试结果
@@ -2677,6 +2769,18 @@ components:
         apiKey: { type: string, minLength: 8, maxLength: 512 }
         baseUrl: { type: string, maxLength: 300, description: 'API 地址，如百炼业务空间专属地址；不填用默认地址' }
         activate: { type: boolean, default: true }
+    KeyTestParams:
+      type: object
+      description: 测试调用的参数，都可不填：模型默认用快档模型、提示词 ping、最多 1 个 token；搜索默认查“今日新闻”1 条
+      properties:
+        model: { type: string, maxLength: 100 }
+        system: { type: string, maxLength: 4000 }
+        prompt: { type: string, maxLength: 4000 }
+        maxTokens: { type: integer, minimum: 1, maximum: 2048 }
+        temperature: { type: number, minimum: 0, maximum: 2 }
+        json: { type: boolean, description: 要求模型返回 JSON（response_format=json_object） }
+        query: { type: string, maxLength: 200 }
+        count: { type: integer, minimum: 1, maximum: 10 }
     ProviderKeyTest:
       type: object
       required: [ok, message, latencyMs]
@@ -2684,6 +2788,19 @@ components:
         ok: { type: boolean }
         message: { type: string }
         latencyMs: { type: integer }
+        model: { type: string, description: 实际应答的模型 }
+        reply: { type: string, description: 模型回复（最多 4000 字） }
+        inputTokens: { type: integer }
+        outputTokens: { type: integer }
+        results:
+          type: array
+          description: 搜索结果
+          items:
+            type: object
+            required: [title, url]
+            properties:
+              title: { type: string }
+              url: { type: string }
 
     # ------------------------------------------------------------ model routing
     ModelRouting:
@@ -2695,6 +2812,7 @@ components:
         llmProvider: { type: string }
         configured: { type: boolean }
         configError: { type: string }
+        catalog: { $ref: '#/components/schemas/ModelCatalog' }
         providers:
           type: array
           items: { $ref: '#/components/schemas/ModelProviderOption' }
@@ -2706,11 +2824,12 @@ components:
           items: { $ref: '#/components/schemas/ModelRoute' }
     ModelProviderOption:
       type: object
-      required: [name, displayName, keyPresent, models, pricedModels]
+      required: [name, displayName, keyPresent, models, pricedModels, bailian]
       properties:
         name: { type: string }
         displayName: { type: string }
         keyPresent: { type: boolean }
+        bailian: { type: boolean, description: '百炼（DashScope）地址：可从模型目录选模型，目录里有价格的不用手填' }
         models:
           type: object
           description: 路由文件里各档位的默认模型
@@ -2719,6 +2838,23 @@ components:
           type: array
           description: 路由文件里有价格的模型
           items: { type: string }
+    ModelCatalog:
+      type: object
+      description: 百炼文本模型目录（随服务端发布，价格单位 元 / 百万 token；分档计价的模型没有 price）
+      required: [source, updated, models]
+      properties:
+        source: { type: string }
+        updated: { type: string }
+        models:
+          type: array
+          items:
+            type: object
+            required: [model, vendor, contextWindow]
+            properties:
+              model: { type: string }
+              vendor: { type: string }
+              contextWindow: { type: integer }
+              price: { $ref: '#/components/schemas/ModelPrice' }
     ModelChoice:
       type: object
       required: [provider, model, fallbacks]
@@ -2743,6 +2879,63 @@ components:
           allOf: [{ $ref: '#/components/schemas/ModelChoice' }]
           description: 现在实际生效的首选和备用顺序
         override: { $ref: '#/components/schemas/ModelOverride' }
+    ModelPriceTier:
+      type: object
+      required: [name, price]
+      properties:
+        name: { type: string, description: '档位说明，如 ≤128K；单一价格时为空' }
+        maxTokens: { type: integer, description: '这一档输入 token 上限' }
+        price: { $ref: '#/components/schemas/ModelPrice' }
+    ModelPriceRow:
+      type: object
+      required: [model, vendor, contextWindow, tiers, origin, stale, usedBy, note]
+      properties:
+        model: { type: string }
+        vendor: { type: string }
+        contextWindow: { type: integer }
+        tiers:
+          type: array
+          description: 百炼标价（同步或内置目录）；多档时计费按第一档
+          items: { $ref: '#/components/schemas/ModelPriceTier' }
+        manual: { $ref: '#/components/schemas/ModelPrice' }
+        metered: { $ref: '#/components/schemas/ModelPrice' }
+        origin:
+          type: string
+          enum: [manual, synced, builtin, none]
+          description: 计费价格的来源：手动 / 同步自百炼 / 服务端内置目录 / 没有价格
+        stale: { type: boolean, description: '最近一次同步里百炼已不再列出这个模型' }
+        usedBy:
+          type: array
+          description: 「模型指定」里用到这个模型的档位或环节
+          items: { type: string }
+        note: { type: string }
+        updatedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ModelPriceList:
+      type: object
+      required: [source, builtinUpdated, models]
+      properties:
+        source:
+          type: string
+          enum: [synced, builtin]
+          description: synced = 用的是最近一次从百炼同步的价格；builtin = 还没同步过，用服务端内置目录
+        syncedAt: { type: string, format: date-time }
+        builtinUpdated: { type: string }
+        models:
+          type: array
+          items: { $ref: '#/components/schemas/ModelPriceRow' }
+    ModelPriceSyncResult:
+      type: object
+      required: [ok, message]
+      properties:
+        ok: { type: boolean }
+        message: { type: string }
+        count: { type: integer }
+        added: { type: integer }
+        changed:
+          type: array
+          description: 标价变了的模型
+          items: { type: string }
     ModelPrice:
       type: object
       description: 元 / 百万 token
@@ -2762,7 +2955,7 @@ components:
           description: 仅档位；不填表示沿用路由文件的顺序
           items: { type: string }
         price: { $ref: '#/components/schemas/ModelPrice' }
-        priced: { type: boolean, description: '成本能算出来（路由文件有价格或填了价格）' }
+        priced: { type: boolean, description: '成本能算出来（路由文件或百炼目录有价格，或填了价格）' }
         updatedBy: { type: string }
         updatedAt: { type: string, format: date-time }
     ModelOverrideInput:
