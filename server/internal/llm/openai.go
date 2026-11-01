@@ -30,6 +30,7 @@ type chatRequest struct {
 	Model          string    `json:"model"`
 	Messages       []Message `json:"messages"`
 	MaxTokens      int       `json:"max_tokens,omitempty"`
+	Temperature    *float64  `json:"temperature,omitempty"`
 	ResponseFormat any       `json:"response_format,omitempty"`
 }
 
@@ -68,7 +69,7 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 	if req.System != "" {
 		msgs = append([]Message{{Role: "system", Content: req.System}}, msgs...)
 	}
-	body := chatRequest{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens}
+	body := chatRequest{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens, Temperature: req.Temperature}
 	if body.Model == "" {
 		body.Model = c.Models[req.Tier]
 	}
@@ -79,13 +80,7 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 		body.ResponseFormat = map[string]string{"type": "json_object"}
 	}
 	b, _ := json.Marshal(body)
-	base := c.BaseURL
-	if c.BaseURLFunc != nil {
-		if u := c.BaseURLFunc(ctx); u != "" {
-			base = u
-		}
-	}
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base(ctx)+"/chat/completions", bytes.NewReader(b))
 	if err != nil {
 		return Response{}, err
 	}
@@ -124,4 +119,52 @@ func (c OpenAICompat) key(ctx context.Context) string {
 		return c.KeyFunc(ctx)
 	}
 	return c.APIKey
+}
+
+func (c OpenAICompat) base(ctx context.Context) string {
+	if c.BaseURLFunc != nil {
+		if u := c.BaseURLFunc(ctx); u != "" {
+			return u
+		}
+	}
+	return c.BaseURL
+}
+
+// ListModels returns the model ids the endpoint offers this key (GET /models).
+func (c OpenAICompat) ListModels(ctx context.Context) ([]string, error) {
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base(ctx)+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if key := c.key(ctx); key != "" {
+		hreq.Header.Set("Authorization", "Bearer "+key)
+	}
+	hc := c.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := hc.Do(hreq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(b)}
+	}
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("%s: models: %w", c.Name, err)
+	}
+	ids := make([]string, 0, len(out.Data))
+	for _, m := range out.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	return ids, nil
 }

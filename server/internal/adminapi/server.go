@@ -50,6 +50,8 @@ type Server struct {
 	// LLMProvider and ModelGWConfig mirror the api process settings for the gateway page.
 	LLMProvider   string
 	ModelGWConfig string
+	// BailianCatalogURL overrides where model prices are synced from (tests only).
+	BailianCatalogURL string
 	// SearchProvider mirrors ZEUS_SEARCH_PROVIDER; BochaBaseURL overrides the search endpoint (tests).
 	SearchProvider string
 	BochaBaseURL   string

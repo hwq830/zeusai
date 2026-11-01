@@ -1,0 +1,974 @@
+{
+ "source": "阿里云百炼模型价格（bailian-docs-llm-wiki skill，同 https://help.aliyun.com/zh/model-studio/model-pricing）",
+ "updated": "2026-11-01",
+ "unit": "CNY per million tokens",
+ "models": [
+  {
+   "model": "kimi-k2.5",
+   "vendor": "moonshot-ai",
+   "contextWindow": 262144,
+   "price": {
+    "input": 4.0,
+    "output": 21.0,
+    "cached": 0.8
+   }
+  },
+  {
+   "model": "kimi-k2.6",
+   "vendor": "moonshot-ai",
+   "contextWindow": 262144,
+   "price": {
+    "input": 6.5,
+    "output": 27.0,
+    "cached": 1.3
+   }
+  },
+  {
+   "model": "kimi-k2.7-code",
+   "vendor": "moonshot-ai",
+   "contextWindow": 262144,
+   "price": {
+    "input": 6.5,
+    "output": 27.0,
+    "cached": 1.3
+   }
+  },
+  {
+   "model": "kimi-k3",
+   "vendor": "moonshot-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 20.0,
+    "output": 100.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "MiniMax-M2.5",
+   "vendor": "mini-max",
+   "contextWindow": 204800,
+   "price": {
+    "input": 2.1,
+    "output": 8.4,
+    "cached": 0.42
+   }
+  },
+  {
+   "model": "decision-model-preview",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 65536
+  },
+  {
+   "model": "deepseek-r1-distill-qwen-1.5b",
+   "vendor": "deepseek",
+   "contextWindow": 32768
+  },
+  {
+   "model": "deepseek-v4-flash-0731",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 1.5,
+    "output": 4.5,
+    "cached": 0.15
+   }
+  },
+  {
+   "model": "deepseek-v4-pro",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 24.0,
+    "cached": 1.0
+   }
+  },
+  {
+   "model": "deepseek-v4-pro-0813",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 4.5,
+    "output": 13.5,
+    "cached": 0.45
+   }
+  },
+  {
+   "model": "deepseek-v4.1-flash",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 1.0,
+    "output": 4.0,
+    "cached": 0.1
+   }
+  },
+  {
+   "model": "deepseek-v4.1-flash-1017",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 1.0,
+    "output": 4.0,
+    "cached": 0.1
+   }
+  },
+  {
+   "model": "glm-5",
+   "vendor": "zhipu-ai",
+   "contextWindow": 202752,
+   "tiers": [
+    {
+     "name": "≤32K",
+     "maxTokens": 32768,
+     "price": {
+      "input": 4,
+      "output": 18,
+      "cached": 0.8
+     }
+    },
+    {
+     "name": "32K–200K",
+     "maxTokens": 204800,
+     "price": {
+      "input": 6,
+      "output": 22,
+      "cached": 1.2
+     }
+    }
+   ]
+  },
+  {
+   "model": "glm-5.1",
+   "vendor": "zhipu-ai",
+   "contextWindow": 202745
+  },
+  {
+   "model": "glm-5.2",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 8.0,
+    "output": 28.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "glm-5.3",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 8.0,
+    "output": 28.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "glm-5.3-prime",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 16.0,
+    "output": 56.0,
+    "cached": 4.0
+   }
+  },
+  {
+   "model": "glm-5.2-fast-preview",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 16.0,
+    "output": 56.0,
+    "cached": 4.0
+   }
+  },
+  {
+   "model": "kimi/kimi-k2.6",
+   "vendor": "moonshot-ai",
+   "contextWindow": 262144,
+   "price": {
+    "input": 6.5,
+    "output": 27.0,
+    "cached": 1.1
+   }
+  },
+  {
+   "model": "kimi/kimi-k2.7-code",
+   "vendor": "moonshot-ai",
+   "contextWindow": 262144,
+   "price": {
+    "input": 6.5,
+    "output": 27.0,
+    "cached": 1.3
+   }
+  },
+  {
+   "model": "kimi/kimi-k2.7-code-highspeed",
+   "vendor": "moonshot-ai",
+   "contextWindow": 262144,
+   "price": {
+    "input": 13.0,
+    "output": 54.0,
+    "cached": 2.6
+   }
+  },
+  {
+   "model": "kimi/kimi-k2.8-preview",
+   "vendor": "moonshot-ai",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 6.5,
+    "output": 27.0,
+    "cached": 1.7
+   }
+  },
+  {
+   "model": "kimi/kimi-k3",
+   "vendor": "moonshot-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 20.0,
+    "output": 100.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "kimi/kimi-k3.1-pro",
+   "vendor": "moonshot-ai",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 13.0,
+    "output": 68.0,
+    "cached": 1.3
+   }
+  },
+  {
+   "model": "kimi/kimi-k3.1-pro-highspeed",
+   "vendor": "moonshot-ai",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 26.0,
+    "output": 136.0,
+    "cached": 1.3
+   }
+  },
+  {
+   "model": "MiniMax/MiniMax-M2.1",
+   "vendor": "mini-max",
+   "contextWindow": 204800,
+   "price": {
+    "input": 2.1,
+    "output": 8.4,
+    "cached": 0.21
+   }
+  },
+  {
+   "model": "MiniMax/MiniMax-M2.5",
+   "vendor": "mini-max",
+   "contextWindow": 204800,
+   "price": {
+    "input": 2.1,
+    "output": 8.4,
+    "cached": 0.21
+   }
+  },
+  {
+   "model": "MiniMax/MiniMax-M2.7",
+   "vendor": "mini-max",
+   "contextWindow": 204800,
+   "price": {
+    "input": 2.1,
+    "output": 8.4,
+    "cached": 0.42
+   }
+  },
+  {
+   "model": "MiniMax/MiniMax-M3",
+   "vendor": "mini-max",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 4.2,
+    "output": 16.8,
+    "cached": 0.84
+   }
+  },
+  {
+   "model": "MiniMax/MiniMax-M3.1-Flash",
+   "vendor": "mini-max",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 1.0,
+    "output": 4.0,
+    "cached": 0.1
+   }
+  },
+  {
+   "model": "qwen-deep-research",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 54.0,
+    "output": 163.0,
+    "cached": 54.0
+   }
+  },
+  {
+   "model": "qwen-doc-turbo",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 262144,
+   "price": {
+    "input": 0.6,
+    "output": 1.0,
+    "cached": 0.12
+   }
+  },
+  {
+   "model": "qwen-flash-character",
+   "vendor": "qwen",
+   "contextWindow": 8192,
+   "price": {
+    "input": 0.25,
+    "output": 1.5,
+    "cached": 0.05
+   }
+  },
+  {
+   "model": "qwen-flash",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "tiers": [
+    {
+     "name": "≤128K",
+     "maxTokens": 131072,
+     "price": {
+      "input": 0.15,
+      "output": 1.5,
+      "cached": 0.03
+     }
+    },
+    {
+     "name": "128K–256K",
+     "maxTokens": 262144,
+     "price": {
+      "input": 0.6,
+      "output": 6,
+      "cached": 0.12
+     }
+    },
+    {
+     "name": "256K–1M",
+     "maxTokens": 1048576,
+     "price": {
+      "input": 1.2,
+      "output": 12,
+      "cached": 0.24
+     }
+    }
+   ]
+  },
+  {
+   "model": "qwen-long",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 10000000,
+   "price": {
+    "input": 0.5,
+    "output": 2.0,
+    "cached": 0.5
+   }
+  },
+  {
+   "model": "qwen-max",
+   "vendor": "qwen",
+   "contextWindow": 32768,
+   "price": {
+    "input": 2.4,
+    "output": 9.6,
+    "cached": 0.48
+   }
+  },
+  {
+   "model": "qwen-mt-flash",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 16384,
+   "price": {
+    "input": 0.7,
+    "output": 1.95,
+    "cached": 0.7
+   }
+  },
+  {
+   "model": "qwen-mt-lite",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 16384,
+   "price": {
+    "input": 0.6,
+    "output": 1.6,
+    "cached": 0.6
+   }
+  },
+  {
+   "model": "qwen-mt-plus",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 16384,
+   "price": {
+    "input": 1.8,
+    "output": 5.4,
+    "cached": 1.8
+   }
+  },
+  {
+   "model": "qwen-plus-character",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 32768,
+   "price": {
+    "input": 0.8,
+    "output": 2.0,
+    "cached": 0.16
+   }
+  },
+  {
+   "model": "qwen-plus",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "tiers": [
+    {
+     "name": "≤128K",
+     "maxTokens": 131072,
+     "price": {
+      "input": 0.8,
+      "output": 2,
+      "cached": 0.16
+     }
+    },
+    {
+     "name": "128K–256K",
+     "maxTokens": 262144,
+     "price": {
+      "input": 2.4,
+      "output": 20,
+      "cached": 0.48
+     }
+    },
+    {
+     "name": "256K–1M",
+     "maxTokens": 1048576,
+     "price": {
+      "input": 4.8,
+      "output": 48,
+      "cached": 0.96
+     }
+    }
+   ]
+  },
+  {
+   "model": "qwen-plus-latest",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "tiers": [
+    {
+     "name": "≤128K",
+     "maxTokens": 131072,
+     "price": {
+      "input": 0.8,
+      "output": 2,
+      "cached": 0.8
+     }
+    },
+    {
+     "name": "128K–256K",
+     "maxTokens": 262144,
+     "price": {
+      "input": 2.4,
+      "output": 20,
+      "cached": 2.4
+     }
+    },
+    {
+     "name": "256K–1M",
+     "maxTokens": 1048576,
+     "price": {
+      "input": 4.8,
+      "output": 48,
+      "cached": 4.8
+     }
+    }
+   ]
+  },
+  {
+   "model": "qwen3-coder-flash",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 1000000
+  },
+  {
+   "model": "qwen3.5-flash",
+   "vendor": "qwen",
+   "contextWindow": 1000000
+  },
+  {
+   "model": "qwen3.5-plus",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "tiers": [
+    {
+     "name": "≤128K",
+     "maxTokens": 131072,
+     "price": {
+      "input": 0.8,
+      "output": 4.8,
+      "cached": 0.8
+     }
+    },
+    {
+     "name": "128K–256K",
+     "maxTokens": 262144,
+     "price": {
+      "input": 2,
+      "output": 12,
+      "cached": 2
+     }
+    },
+    {
+     "name": "256K–1M",
+     "maxTokens": 1048576,
+     "price": {
+      "input": 4,
+      "output": 24,
+      "cached": 4
+     }
+    }
+   ]
+  },
+  {
+   "model": "qwen3.5-122b-a10b",
+   "vendor": "qwen",
+   "contextWindow": 262144
+  },
+  {
+   "model": "qwen3.5-27b",
+   "vendor": "qwen",
+   "contextWindow": 262144
+  },
+  {
+   "model": "qwen3.5-35b-a3b",
+   "vendor": "qwen",
+   "contextWindow": 262144
+  },
+  {
+   "model": "qwen3.5-397b-a17b",
+   "vendor": "qwen",
+   "contextWindow": 262144
+  },
+  {
+   "model": "qwen3.6-flash",
+   "vendor": "qwen",
+   "contextWindow": 1000000
+  },
+  {
+   "model": "qwen3.6-plus",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "tiers": [
+    {
+     "name": "≤256K",
+     "maxTokens": 262144,
+     "price": {
+      "input": 2,
+      "output": 12,
+      "cached": 0.2
+     }
+    },
+    {
+     "name": "256K–1M",
+     "maxTokens": 1048576,
+     "price": {
+      "input": 8,
+      "output": 48,
+      "cached": 8
+     }
+    }
+   ]
+  },
+  {
+   "model": "qwen3.6-27b",
+   "vendor": "qwen",
+   "contextWindow": 262144,
+   "price": {
+    "input": 3.0,
+    "output": 18.0,
+    "cached": 3.0
+   }
+  },
+  {
+   "model": "qwen3.6-35b-a3b",
+   "vendor": "qwen",
+   "contextWindow": 262144,
+   "price": {
+    "input": 1.8,
+    "output": 10.8,
+    "cached": 1.8
+   }
+  },
+  {
+   "model": "qwen3.7-flash",
+   "vendor": "qwen",
+   "contextWindow": 1000000
+  },
+  {
+   "model": "qwen3.7-max",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 36.0,
+    "cached": 2.4
+   }
+  },
+  {
+   "model": "qwen3.7-max-preview",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 36.0,
+    "cached": 12.0
+   }
+  },
+  {
+   "model": "qwen3.7-plus",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "tiers": [
+    {
+     "name": "≤256K",
+     "maxTokens": 262144,
+     "price": {
+      "input": 2,
+      "output": 8,
+      "cached": 0.4
+     }
+    },
+    {
+     "name": "256K–1M",
+     "maxTokens": 1048576,
+     "price": {
+      "input": 6,
+      "output": 24,
+      "cached": 1.2
+     }
+    }
+   ]
+  },
+  {
+   "model": "qwen3.8-flash",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 0.8,
+    "output": 2.7,
+    "cached": 0.1
+   }
+  },
+  {
+   "model": "qwen3.8-max",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 36.0,
+    "cached": 1.5
+   }
+  },
+  {
+   "model": "qwen3.8-max-0902",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 36.0,
+    "cached": 1.5
+   }
+  },
+  {
+   "model": "qwen3.8-2.4t-a95b",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 36.0,
+    "cached": 1.5
+   }
+  },
+  {
+   "model": "qwen3.8-27b",
+   "vendor": "qwen",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 3.0,
+    "output": 12.0,
+    "cached": 0.6
+   }
+  },
+  {
+   "model": "siliconflow/deepseek-r1-0528",
+   "vendor": "deepseek",
+   "contextWindow": 163840,
+   "price": {
+    "input": 4.0,
+    "output": 16.0,
+    "cached": 4.0
+   }
+  },
+  {
+   "model": "siliconflow/deepseek-v3-0324",
+   "vendor": "deepseek",
+   "contextWindow": 163840,
+   "price": {
+    "input": 2.0,
+    "output": 8.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "siliconflow/deepseek-v3.1-terminus",
+   "vendor": "deepseek",
+   "contextWindow": 163840,
+   "price": {
+    "input": 4.0,
+    "output": 12.0,
+    "cached": 4.0
+   }
+  },
+  {
+   "model": "siliconflow/deepseek-v3.2",
+   "vendor": "deepseek",
+   "contextWindow": 163840,
+   "price": {
+    "input": 2.0,
+    "output": 3.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "stepfun/step-3.7-flash",
+   "vendor": "stepfun",
+   "contextWindow": 262144,
+   "price": {
+    "input": 1.35,
+    "output": 8.1,
+    "cached": 0.27
+   }
+  },
+  {
+   "model": "stepfun/step-5-preview",
+   "vendor": "stepfun",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 7.0,
+    "output": 20.0,
+    "cached": 0.35
+   }
+  },
+  {
+   "model": "tongyi-intent-detect-v3",
+   "vendor": "qwen",
+   "contextWindow": 8192,
+   "price": {
+    "input": 0.4,
+    "output": 1.0,
+    "cached": 0.4
+   }
+  },
+  {
+   "model": "tongyi-xiaomi-analysis-flash",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 32768,
+   "price": {
+    "input": 0.2,
+    "output": 0.4,
+    "cached": 0.04
+   }
+  },
+  {
+   "model": "tongyi-xiaomi-analysis-pro",
+   "vendor": "qwen-domain-model",
+   "contextWindow": 32768,
+   "price": {
+    "input": 1.0,
+    "output": 2.7,
+    "cached": 0.2
+   }
+  },
+  {
+   "model": "unisound/unisound-u2",
+   "vendor": "unisound",
+   "contextWindow": 163840,
+   "price": {
+    "input": 1.0,
+    "output": 2.0,
+    "cached": 0.2
+   }
+  },
+  {
+   "model": "vanchin/deepseek-ocr",
+   "vendor": "deepseek",
+   "contextWindow": 8192,
+   "price": {
+    "input": 0.216,
+    "output": 0.216,
+    "cached": 0.216
+   }
+  },
+  {
+   "model": "vanchin/deepseek-r1",
+   "vendor": "deepseek",
+   "contextWindow": 131072,
+   "price": {
+    "input": 4.0,
+    "output": 16.0,
+    "cached": 1.6
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v3",
+   "vendor": "deepseek",
+   "contextWindow": 131072,
+   "price": {
+    "input": 2.0,
+    "output": 8.0,
+    "cached": 0.8
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v3.1-terminus",
+   "vendor": "deepseek",
+   "contextWindow": 131072,
+   "price": {
+    "input": 4.0,
+    "output": 12.0,
+    "cached": 1.6
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v3.2-think",
+   "vendor": "deepseek",
+   "contextWindow": 131072,
+   "price": {
+    "input": 2.0,
+    "output": 3.0,
+    "cached": 0.2
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v4-pro",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 12.0,
+    "output": 24.0,
+    "cached": 1.0
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v4-pro-0813",
+   "vendor": "deepseek",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 9.0,
+    "output": 27.0,
+    "cached": 0.3
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v4.1-flash",
+   "vendor": "deepseek",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 2.0,
+    "output": 8.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "vanchin/deepseek-v4.1-flash-1017",
+   "vendor": "deepseek",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 2.0,
+    "output": 8.0,
+    "cached": 0.04
+   }
+  },
+  {
+   "model": "xiaomi/mimo-v2.6-pro-ultraspeed",
+   "vendor": "xiaomi",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 30.0,
+    "output": 60.0,
+    "cached": 0.25
+   }
+  },
+  {
+   "model": "ZHIPU/GLM-5",
+   "vendor": "zhipu-ai",
+   "contextWindow": 204800,
+   "price": {
+    "input": 6.0,
+    "output": 22.0,
+    "cached": 1.5
+   }
+  },
+  {
+   "model": "ZHIPU/GLM-5.1",
+   "vendor": "zhipu-ai",
+   "contextWindow": 204800,
+   "price": {
+    "input": 8.0,
+    "output": 28.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "ZHIPU/GLM-5.2",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 8.0,
+    "output": 28.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "ZHIPU/GLM-5.3",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 8.0,
+    "output": 28.0,
+    "cached": 2.0
+   }
+  },
+  {
+   "model": "ZHIPU/GLM-5.3-Flash",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1000000,
+   "price": {
+    "input": 0.8,
+    "output": 2.8,
+    "cached": 0.23
+   }
+  },
+  {
+   "model": "ZHIPU/GLM-5.3-FlashX",
+   "vendor": "zhipu-ai",
+   "contextWindow": 1048576,
+   "price": {
+    "input": 2.0,
+    "output": 7.0,
+    "cached": 0.57
+   }
+  }
+ ],
+ "note": "分档计价（tiers）的模型按第一档计费；tiers 来自百炼控制台模型列表接口，2026-11-01"
+}

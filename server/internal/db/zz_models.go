@@ -268,6 +268,20 @@ type ModelOverride struct {
 	UpdatedAt   time.Time
 }
 
+type ModelPrice struct {
+	Model         string
+	Vendor        string
+	ContextWindow int32
+	Tiers         json.RawMessage
+	SyncedAt      *time.Time
+	ManualInput   *float64
+	ManualOutput  *float64
+	ManualCached  *float64
+	Note          string
+	UpdatedBy     *uuid.UUID
+	UpdatedAt     time.Time
+}
+
 type ModelUsage struct {
 	ID           int64
 	UserID       *uuid.UUID

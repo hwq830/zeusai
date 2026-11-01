@@ -88,6 +88,21 @@ providers:
 		t.Fatalf("test without key = %+v", res)
 	}
 
+	// Live model list with the gateway's key; no key is reported, not an error.
+	var lm struct {
+		Models []string `json:"models"`
+		Error  *string  `json:"error"`
+	}
+	h.do("GET", "/admin/v1/model-routing/providers/qwen/models", nil, 200, &lm)
+	if len(lm.Models) != 2 || lm.Models[0] != "qwen-max" || lm.Error != nil {
+		t.Fatalf("models = %+v", lm)
+	}
+	h.do("GET", "/admin/v1/model-routing/providers/deepseek/models", nil, 200, &lm)
+	if len(lm.Models) != 0 || lm.Error == nil {
+		t.Fatalf("models without key = %+v", lm)
+	}
+	h.do("GET", "/admin/v1/model-routing/providers/nope/models", nil, 404, nil)
+
 	// Reset goes back to the file.
 	h.do("DELETE", "/admin/v1/model-routing/strong", nil, 204, nil)
 	h.do("GET", "/admin/v1/model-routing", nil, 200, &rt)

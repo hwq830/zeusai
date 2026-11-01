@@ -41,8 +41,10 @@ type Request struct {
 	Messages  []Message
 	JSON      bool
 	MaxTokens int
-	UserID    *uuid.UUID
-	TaskID    *uuid.UUID
+	// Temperature, when set, is sent as is (console tests); otherwise the endpoint default.
+	Temperature *float64
+	UserID      *uuid.UUID
+	TaskID      *uuid.UUID
 }
 
 type Usage struct {

@@ -259,11 +259,17 @@ func (s *Server) TestNewProviderKey(ctx context.Context, req gen.TestNewProvider
 	if base != "" {
 		p.BaseURL = base
 	}
-	return gen.TestNewProviderKey200JSONResponse(s.testKey(ctx, p, strings.TrimSpace(req.Body.ApiKey))), nil
+	if err := checkTestParams(req.Body.Params); err != nil {
+		return nil, err
+	}
+	return gen.TestNewProviderKey200JSONResponse(s.testKey(ctx, p, strings.TrimSpace(req.Body.ApiKey), req.Body.Params)), nil
 }
 
 func (s *Server) TestProviderKey(ctx context.Context, req gen.TestProviderKeyRequestObject) (gen.TestProviderKeyResponseObject, error) {
 	if _, err := require(ctx, PermProviderKeys); err != nil {
+		return nil, err
+	}
+	if err := checkTestParams(req.Body.Params); err != nil {
 		return nil, err
 	}
 	k, err := s.getKey(ctx, req.KeyId)
@@ -284,7 +290,7 @@ func (s *Server) TestProviderKey(ctx context.Context, req gen.TestProviderKeyReq
 		if k.BaseUrl != "" {
 			p.BaseURL = k.BaseUrl
 		}
-		res = s.testKey(ctx, p, key)
+		res = s.testKey(ctx, p, key, req.Body.Params)
 	}
 	latency := int32(res.LatencyMs)
 	if err := s.Q.RecordProviderKeyTest(ctx, db.RecordProviderKeyTestParams{ID: k.ID, LastTestOk: &res.Ok,
@@ -341,34 +347,95 @@ func cleanBaseURL(raw string) (string, error) {
 	return strings.TrimRight(raw, "/"), nil
 }
 
-// testKey sends the smallest real request: one output token from the fast model, or a
-// one-result search.
-func (s *Server) testKey(ctx context.Context, p keyProvider, key string) gen.ProviderKeyTest {
+// checkTestParams enforces the contract's limits: a test call is paid for, so it stays small.
+func checkTestParams(p *gen.KeyTestParams) error {
+	if p == nil {
+		return nil
+	}
+	if n := deref(p.MaxTokens); p.MaxTokens != nil && (n < 1 || n > 2048) {
+		return apperr.Invalid("最大输出 token 需在 1–2048 之间")
+	}
+	if t := deref(p.Temperature); p.Temperature != nil && (t < 0 || t > 2) {
+		return apperr.Invalid("temperature 需在 0–2 之间")
+	}
+	if n := deref(p.Count); p.Count != nil && (n < 1 || n > 10) {
+		return apperr.Invalid("搜索条数需在 1–10 之间")
+	}
+	if len([]rune(deref(p.Prompt))) > 4000 || len([]rune(deref(p.System))) > 4000 || len([]rune(deref(p.Query))) > 200 || len(deref(p.Model)) > 100 {
+		return apperr.Invalid("测试参数太长")
+	}
+	return nil
+}
+
+// searchHit is one search result in a key test (the contract's inline item type).
+type searchHit = struct {
+	Title string `json:"title"`
+	Url   string `json:"url"`
+}
+
+// testKey sends a real request: by default one output token from the fast model, or a
+// one-result search; params lets the console choose the model, prompt and limits.
+func (s *Server) testKey(ctx context.Context, p keyProvider, key string, params *gen.KeyTestParams) gen.ProviderKeyTest {
 	if key == "" {
 		return gen.ProviderKeyTest{Message: "Key 为空"}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	var tp gen.KeyTestParams
+	if params != nil {
+		tp = *params
+	}
+	timeout := 30 * time.Second
+	if deref(tp.MaxTokens) > 64 {
+		timeout = 120 * time.Second // longer answers take longer
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	hc := &http.Client{Timeout: 30 * time.Second}
+	hc := &http.Client{Timeout: timeout}
 	start := time.Now()
+	res := gen.ProviderKeyTest{}
 	var err error
 	var detail string
 	switch p.Kind {
 	case "search":
+		q := strings.TrimSpace(deref(tp.Query))
+		if q == "" {
+			q = "今日新闻"
+		}
+		n := min(max(deref(tp.Count), 1), 10)
 		var rs []search.Result
-		rs, err = search.Bocha{APIKey: key, BaseURL: p.BaseURL, HTTP: hc}.Search(ctx, search.Query{Q: "今日新闻", Limit: 1})
+		rs, err = search.Bocha{APIKey: key, BaseURL: p.BaseURL, HTTP: hc}.Search(ctx, search.Query{Q: q, Limit: n})
 		if err == nil {
 			detail = "返回 " + strconv.Itoa(len(rs)) + " 条结果"
+			results := make([]searchHit, 0, len(rs))
+			for _, r := range rs {
+				results = append(results, searchHit{Title: r.Title, Url: r.URL})
+			}
+			res.Results = &results
 		}
 	default:
+		prompt := deref(tp.Prompt)
+		if strings.TrimSpace(prompt) == "" {
+			prompt = "ping"
+		}
+		maxTokens := min(max(deref(tp.MaxTokens), 1), 2048)
+		req := llm.Request{Purpose: "key_test", Tier: llm.TierFast, Model: strings.TrimSpace(deref(tp.Model)),
+			System: deref(tp.System), JSON: deref(tp.Json), MaxTokens: maxTokens, Messages: []llm.Message{{Role: "user", Content: prompt}}}
+		if tp.Temperature != nil {
+			t := float64(*tp.Temperature)
+			req.Temperature = &t
+		}
 		var resp llm.Response
-		resp, err = llm.OpenAICompat{BaseURL: p.BaseURL, APIKey: key, Name: p.ID, Models: p.Models, HTTP: hc}.Complete(ctx,
-			llm.Request{Purpose: "key_test", Tier: llm.TierFast, MaxTokens: 1, Messages: []llm.Message{{Role: "user", Content: "ping"}}})
+		resp, err = llm.OpenAICompat{BaseURL: p.BaseURL, APIKey: key, Name: p.ID, Models: p.Models, HTTP: hc}.Complete(ctx, req)
 		if err == nil {
 			detail = "模型 " + resp.Model + " 正常响应"
+			reply := resp.Content
+			if r := []rune(reply); len(r) > 4000 {
+				reply = string(r[:4000]) + "…"
+			}
+			in, out := resp.Usage.InputTokens, resp.Usage.OutputTokens
+			res.Model, res.Reply, res.InputTokens, res.OutputTokens = &resp.Model, &reply, &in, &out
 		}
 	}
-	res := gen.ProviderKeyTest{LatencyMs: int(time.Since(start).Milliseconds())}
+	res.LatencyMs = int(time.Since(start).Milliseconds())
 	if err != nil {
 		res.Message = testError(err)
 		return res
