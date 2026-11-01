@@ -71,7 +71,7 @@ func (a Audience) Validate() error {
 			}
 		}
 		if a.Language != "" && !i18n.Valid(a.Language) {
-			return apperr.Invalid("语言只能是 zh 或 en")
+			return apperr.Invalid("语言只能是 zh、zh-Hant 或 en")
 		}
 		if a.Platform != "" && a.Platform != "ios" && a.Platform != "android" {
 			return apperr.Invalid("平台只能是 ios 或 android")
@@ -234,8 +234,11 @@ func (s *Service) SendCampaignBatch(ctx context.Context, id, after uuid.UUID) (n
 		}
 		uid := row.ID
 		title, body := c.Title, c.Body
-		if i18n.Parse(row.UiLanguage) == i18n.EN && c.TitleEn != "" {
+		switch l := i18n.Parse(row.UiLanguage); {
+		case l == i18n.EN && c.TitleEn != "":
 			title, body = c.TitleEn, c.BodyEn
+		case l == i18n.ZHHant:
+			title, body = i18n.Hant(title), i18n.Hant(body)
 		}
 		m, err := s.Q.CreateCampaignMessage(ctx, db.CreateCampaignMessageParams{
 			UserID: uid, Category: c.Category, Title: title, Body: body, ImageUrl: c.ImageUrl, Deeplink: c.Deeplink, CampaignID: &c.ID,

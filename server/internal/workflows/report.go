@@ -208,7 +208,7 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		out.Questions = out.Questions[:b.Questions]
 	}
 	plan := ReportPlan{UserID: run.UserID, TaskID: run.TaskID, ReportID: r.ID, Topic: r.Topic, Depth: r.Depth, Focuses: r.Focuses,
-		Title: clip(strings.TrimSpace(out.Title), lang.ClipLen(30)), Questions: out.Questions, Lang: lang, UILang: ui}
+		Title: clip(strings.TrimSpace(lang.Model(out.Title)), lang.ClipLen(30)), Questions: out.Questions, Lang: lang, UILang: ui}
 	if plan.Title == "" {
 		plan.Title = r.Title
 	}
@@ -345,6 +345,7 @@ func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results [
 	}, &out); err != nil {
 		return err
 	}
+	out.Summary, out.Markdown = plan.Lang.Model(out.Summary), plan.Lang.Model(out.Markdown)
 	if err := a.streamText(ctx, plan.UserID, plan.TaskID, out.Summary); err != nil {
 		return err
 	}
@@ -455,6 +456,7 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 	}, &out); err != nil {
 		return err
 	}
+	out.Answer = lang.Model(out.Answer)
 	if err := a.streamText(ctx, run.UserID, run.TaskID, out.Answer); err != nil {
 		return err
 	}

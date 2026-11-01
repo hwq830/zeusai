@@ -111,8 +111,16 @@ func or(s, fallback string) string {
 	return fallback
 }
 
-// Localize returns the template with its texts in l where a translation has them.
+// Localize returns the template with its texts in l where a translation has them. Official
+// templates are converted to Traditional Chinese for Traditional Chinese users; a user's own
+// template stays as its owner wrote it.
 func (t Template) Localize(l i18n.Lang) Template {
+	if l == i18n.ZHHant {
+		if t.OwnerID != nil {
+			return t
+		}
+		return t.mapTexts(i18n.Hant)
+	}
 	tr, ok := t.Translations[string(l)]
 	if l == i18n.ZH || !ok {
 		return t
@@ -131,6 +139,30 @@ func (t Template) Localize(l i18n.Lang) Template {
 	for i, sec := range t.Sections {
 		st := tr.Sections[sec.Key]
 		sec.Title, sec.Instruction = or(st.Title, sec.Title), or(st.Instruction, sec.Instruction)
+		sections[i] = sec
+	}
+	t.Fields, t.Sections = fields, sections
+	return t
+}
+
+// mapTexts applies f to every text the App shows or the briefing prompt uses.
+func (t Template) mapTexts(f func(string) string) Template {
+	t.Name, t.Description, t.Category = f(t.Name), f(t.Description), f(t.Category)
+	fields := make([]Field, len(t.Fields))
+	for i, fd := range t.Fields {
+		fd.Label, fd.Placeholder, fd.Help = f(fd.Label), f(fd.Placeholder), f(fd.Help)
+		if len(fd.Options) > 0 {
+			opts := make([]string, len(fd.Options))
+			for j, o := range fd.Options {
+				opts[j] = f(o)
+			}
+			fd.Options = opts
+		}
+		fields[i] = fd
+	}
+	sections := make([]Section, len(t.Sections))
+	for i, sec := range t.Sections {
+		sec.Title, sec.Instruction = f(sec.Title), f(sec.Instruction)
 		sections[i] = sec
 	}
 	t.Fields, t.Sections = fields, sections
@@ -349,9 +381,9 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, p ListParams) ([]T
 	if err != nil {
 		return nil, nil, apperr.Internal(err)
 	}
-	if p.Category != "" && lang == i18n.EN {
-		for _, c := range cats { // the App filters by the English name it was shown
-			if c.CategoryEn == p.Category {
+	if p.Category != "" && lang != i18n.ZH {
+		for _, c := range cats { // the App filters by the name it was shown
+			if lang.Pick(c.Category, c.CategoryEn) == p.Category {
 				p.Category = c.Category
 			}
 		}
