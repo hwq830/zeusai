@@ -120,6 +120,10 @@ providers:
 	if k1u.BaseUrl != up2.URL || k1u.Label != "主账号" {
 		t.Fatalf("updated = %+v", k1u)
 	}
+	h.do("GET", "/admin/v1/provider-keys", nil, 200, &list)
+	if len(list.Keys) != 1 || list.Keys[0].BaseUrl != up2.URL {
+		t.Fatalf("listed = %+v", list.Keys)
+	}
 	if got := (&secrets.Keys{Q: h.q, Box: box}).BaseURL(ctx, "qwen"); got != up2.URL {
 		t.Fatalf("resolved address = %q", got)
 	}

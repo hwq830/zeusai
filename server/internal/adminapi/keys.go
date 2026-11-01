@@ -119,7 +119,7 @@ func (s *Server) ListProviderKeys(ctx context.Context, _ gen.ListProviderKeysReq
 			KeySource: keySource(s.Keys.Source(ctx, p.ID, p.EnvName)), InRoute: p.InRoute})
 	}
 	for _, r := range rows {
-		out.Keys = append(out.Keys, toProviderKey(db.ProviderKey{ID: r.ID, Provider: r.Provider, Label: r.Label, Last4: r.Last4,
+		out.Keys = append(out.Keys, toProviderKey(db.ProviderKey{ID: r.ID, Provider: r.Provider, Label: r.Label, Last4: r.Last4, BaseUrl: r.BaseUrl,
 			Active: r.Active, CreatedAt: r.CreatedAt, LastTestedAt: r.LastTestedAt, LastTestOk: r.LastTestOk,
 			LastTestMessage: r.LastTestMessage, LastTestLatencyMs: r.LastTestLatencyMs}, r.CreatedByEmail))
 	}
