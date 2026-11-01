@@ -11,6 +11,9 @@ info:
     - 鉴权：`Authorization: Bearer <token>`，令牌由 `POST /admin/v1/auth/login` 签发，12 小时有效，与 App 令牌密钥不同。
     - 角色：`owner` 全部权限（含管理员账号、推送活动审批）；`operator` 用户、额度、模板、连接器、任务、用户反馈、推送活动（编辑和提交）；
       `moderator` 内容审核、停用用户、用户反馈；`viewer` 只读。越权返回 403 `forbidden`。
+    - 用户内容：查看报告 / 简报正文要 `content.read`（owner、operator、moderator），每次查看记审计日志 `content.view`，
+      `viewer` 只能看列表；重新生成、立即运行、暂停订阅、处理异常要 `content.write`（owner、operator）；
+      下架和隐藏单条要 `moderation.write`；退还额度要 `users.write`。后台发起的任务不计入用户额度。
     - 配置中心：`operator` 编辑配置项规则、提交发布、回滚；`owner` 另可新建 / 归档配置项、改命名空间、审批发布。
       生产环境（ZEUS_ENV=prod）提交后需 owner 审批，以下情况直接上线：只改动 killswitch 命名空间里已有的配置项；
       提交人是唯一的 owner。其他环境提交即上线。
@@ -29,6 +32,7 @@ tags:
   - name: templates
   - name: connectors
   - name: moderation
+  - name: content
   - name: tasks
   - name: costs
   - name: providerKeys
@@ -470,22 +474,407 @@ paths:
       responses:
         '204': { description: 已撤销 }
         default: { $ref: '#/components/responses/Error' }
-  /admin/v1/reports/{reportId}:
-    parameters:
-      - name: reportId
-        in: path
-        required: true
-        schema: { type: string }
+
+  # ---------------------------------------------------------------- content (reports / briefings)
+  /admin/v1/reports:
     get:
-      tags: [moderation]
-      operationId: getReport
-      summary: 查看报告正文（审核用）
+      tags: [content]
+      operationId: listReports
+      summary: 全部调研报告（元数据，不含正文），按创建时间倒序
+      parameters:
+        - { name: q, in: query, description: 标题或题目关键词, schema: { type: string } }
+        - { name: userId, in: query, schema: { type: string } }
+        - name: status
+          in: query
+          description: hidden 表示已下架
+          schema: { type: string, enum: [running, done, failed, cancelled, hidden] }
+        - { name: depth, in: query, schema: { type: string, enum: [quick, standard, deep] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: rating, in: query, schema: { type: string, enum: [satisfied, unsatisfied, none] } }
+        - name: origin
+          in: query
+          description: direct 用户直接发起；briefing 从简报条目深入调研
+          schema: { type: string, enum: [direct, briefing] }
+        - { name: shared, in: query, schema: { type: boolean } }
+        - { name: minCostCny, in: query, schema: { type: number, format: double } }
+        - { name: promptVersion, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: OK
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/AdminReport' }
+              schema: { $ref: '#/components/schemas/ReportPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/reports/{reportId}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [content]
+      operationId: getReport
+      summary: 报告详情：正文、来源、追问、生成过程、反馈、分享、备注。需要 content.read，每次查看记审计日志
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReportDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/reports/{reportId}/regenerate:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [content]
+      operationId: regenerateReport
+      summary: 用相同输入重新生成一份新报告（不扣用户额度，旧报告保留）。需要 content.write
+      responses:
+        '202':
+          description: 已开始
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentRunResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/reports/{reportId}/hide:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [content]
+      operationId: hideReport
+      summary: 下架报告：App 显示"已下架"，撤销全部分享，给用户发一条站内信（不推送）。需要 moderation.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HideRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReportDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/reports/{reportId}/unhide:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [content]
+      operationId: unhideReport
+      summary: 恢复下架的报告（已撤销的分享不会恢复）。需要 moderation.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReportDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/reports/{reportId}/refund:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    post:
+      tags: [content]
+      operationId: refundReport
+      summary: 把这份报告（含追问）计入额度的 token 加回用户本月额度，每份只能退一次。需要 users.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundResult' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/subscriptions:
+    get:
+      tags: [content]
+      operationId: listSubscriptions
+      summary: 全部定时简报订阅，按创建时间倒序
+      parameters:
+        - { name: q, in: query, description: 订阅名称关键词, schema: { type: string } }
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: templateId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [active, paused] } }
+        - name: lastStatus
+          in: query
+          description: 最近一期的状态；empty 表示生成成功但没有条目
+          schema: { type: string, enum: [ready, failed, generating, empty] }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubscriptionPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/subscriptions/{subscriptionId}/pause:
+    parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+    post:
+      tags: [content]
+      operationId: pauseSubscription
+      summary: 暂停订阅（paused_reason=admin）。需要 content.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSubscription' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/subscriptions/{subscriptionId}/resume:
+    parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+    post:
+      tags: [content]
+      operationId: resumeSubscription
+      summary: 恢复订阅。需要 content.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminSubscription' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/subscriptions/{subscriptionId}/run:
+    parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+    post:
+      tags: [content]
+      operationId: runSubscription
+      summary: 立即生成今天这期（已有则覆盖，旧版本保留在历史里；不扣用户额度）。需要 content.write
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BriefingRunRequest' }
+      responses:
+        '202':
+          description: 已开始
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentRunResult' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/briefings:
+    get:
+      tags: [content]
+      operationId: listBriefings
+      summary: 每期简报（元数据），按日期倒序
+      parameters:
+        - { name: q, in: query, description: 标题或导语关键词, schema: { type: string } }
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: subscriptionId, in: query, schema: { type: string } }
+        - { name: templateId, in: query, schema: { type: string } }
+        - name: status
+          in: query
+          description: empty 生成成功但没有条目；hidden 已下架
+          schema: { type: string, enum: [generating, ready, failed, empty, hidden] }
+        - { name: from, in: query, description: 起始日期（含）, schema: { type: string, format: date } }
+        - { name: to, in: query, description: 结束日期（含）, schema: { type: string, format: date } }
+        - { name: read, in: query, schema: { type: boolean } }
+        - { name: disliked, in: query, description: 只看有「一般」评价的, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BriefingPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    get:
+      tags: [content]
+      operationId: getBriefing
+      summary: 简报详情。需要 content.read，每次查看记审计日志；私密区块默认打码，带 revealReason 时显示并单独记日志
+      parameters:
+        - { name: revealReason, in: query, description: 查看私密区块的原因, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBriefingDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}/regenerate:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    post:
+      tags: [content]
+      operationId: regenerateBriefing
+      summary: 重新生成这一期（只能是订阅时区里今天这期；旧版本进历史；不扣用户额度）。需要 content.write
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BriefingRunRequest' }
+      responses:
+        '202':
+          description: 已开始
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentRunResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}/hide:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    post:
+      tags: [content]
+      operationId: hideBriefing
+      summary: 下架整期简报（同报告）。需要 moderation.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HideRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBriefingDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}/unhide:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    post:
+      tags: [content]
+      operationId: unhideBriefing
+      summary: 恢复下架的简报。需要 moderation.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBriefingDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}/refund:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+    post:
+      tags: [content]
+      operationId: refundBriefing
+      summary: 退还这一期计入额度的 token，每期只能退一次。需要 users.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundResult' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}/items/{itemId}/hide:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+      - $ref: '#/components/parameters/ItemId'
+    post:
+      tags: [content]
+      operationId: hideBriefingItem
+      summary: 从用户端隐藏一条（其余条目不受影响，分享页同样不再显示）。需要 moderation.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HideRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBriefingDetail' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/briefings/{briefingId}/items/{itemId}/unhide:
+    parameters:
+      - $ref: '#/components/parameters/BriefingId'
+      - $ref: '#/components/parameters/ItemId'
+    post:
+      tags: [content]
+      operationId: unhideBriefingItem
+      summary: 放回隐藏的条目。需要 moderation.write
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminBriefingDetail' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/content/notes:
+    get:
+      tags: [content]
+      operationId: listContentNotes
+      summary: 内部备注
+      parameters:
+        - { name: targetType, in: query, required: true, schema: { $ref: '#/components/schemas/NoteTargetType' } }
+        - { name: targetId, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ContentNote' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [content]
+      operationId: createContentNote
+      summary: 添加内部备注（用户看不到）。需要 content.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContentNoteInput' }
+      responses:
+        '201':
+          description: 已添加
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentNote' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/content/issues:
+    get:
+      tags: [content]
+      operationId: listContentIssues
+      summary: 异常队列：失败、空简报、来源过少、不满意、"一般"评价、成本过高的内容
+      parameters:
+        - { name: kind, in: query, schema: { $ref: '#/components/schemas/ContentIssueKind' } }
+        - { name: targetType, in: query, schema: { type: string, enum: [report, briefing] } }
+        - { name: resolved, in: query, description: true 看已处理的, schema: { type: boolean, default: false } }
+        - { name: days, in: query, description: 最近多少天, schema: { type: integer, minimum: 1, maximum: 90, default: 14 } }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContentIssuePage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/content/issues/resolve:
+    post:
+      tags: [content]
+      operationId: resolveContentIssue
+      summary: 标记已处理。需要 content.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContentIssueResolve' }
+      responses:
+        '204': { description: 已处理 }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/content/issues/reopen:
+    post:
+      tags: [content]
+      operationId: reopenContentIssue
+      summary: 重新打开。需要 content.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContentIssueResolve' }
+      responses:
+        '204': { description: 已重新打开 }
         default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- tasks
@@ -1598,6 +1987,26 @@ components:
       in: path
       required: true
       schema: { type: string }
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema: { type: string }
+    BriefingId:
+      name: briefingId
+      in: path
+      required: true
+      schema: { type: string }
+    SubscriptionId:
+      name: subscriptionId
+      in: path
+      required: true
+      schema: { type: string }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: string }
     TaskId:
       name: taskId
       in: path
@@ -2214,19 +2623,341 @@ components:
           type: array
           items: { $ref: '#/components/schemas/AdminShare' }
         nextCursor: { $ref: '#/components/schemas/NextCursor' }
-    AdminReport:
+    # ------------------------------------------------------------ content (reports / briefings)
+    ContentSource:
       type: object
-      required: [id, userId, title, topic, status, summary, markdown, sourceCount, createdAt]
+      required: [url, title]
+      properties:
+        url: { type: string }
+        title: { type: string }
+        siteName: { type: string }
+        domain: { type: string }
+    AdminReportRow:
+      type: object
+      required: [id, userId, nickname, phoneMasked, title, depth, status, hidden, sourceCount, wordCount, costCny, followups, shares, shareViews, fromBriefing, adminRun, createdAt]
       properties:
         id: { type: string }
         userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
         title: { type: string }
-        topic: { type: string }
-        status: { type: string }
-        summary: { type: string }
-        markdown: { type: string }
+        depth: { type: string }
+        status: { type: string, description: running / done / failed / cancelled }
+        hidden: { type: boolean, description: 已下架 }
         sourceCount: { type: integer }
+        wordCount: { type: integer }
+        durationSeconds: { type: integer, nullable: true }
+        costCny: { type: number, format: double, description: 报告任务和追问的模型成本 }
+        rating: { type: string, nullable: true, description: satisfied / unsatisfied }
+        reasons:
+          type: array
+          items: { type: string }
+        followups: { type: integer }
+        shares: { type: integer }
+        shareViews: { type: integer }
+        fromBriefing: { type: boolean, description: 从简报条目深入调研 }
+        adminRun: { type: boolean, description: 后台重新生成的（不扣额度） }
+        regeneratedFrom: { type: string, nullable: true }
+        promptVersion: { type: string }
         createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    ReportPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminReportRow' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    ContentFeedback:
+      type: object
+      required: [rating, reasons, comment, updatedAt]
+      properties:
+        rating: { type: string }
+        reasons:
+          type: array
+          items: { type: string }
+        comment: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ContentRef:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+    AdminReportDetail:
+      type: object
+      required: [report, topic, focuses, language, summary, markdown, sources, hiddenReason, tasks, shares, regenerations, notes, refunded]
+      properties:
+        report: { $ref: '#/components/schemas/AdminReportRow' }
+        topic: { type: string }
+        focuses:
+          type: array
+          items: { type: string }
+        language: { type: string }
+        summary: { type: string }
+        markdown: { type: string, description: 正文，含追问的回答 }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/ContentSource' }
+        hiddenReason: { type: string }
+        hiddenAt: { type: string, format: date-time, nullable: true }
+        sourceBriefingItemId: { type: string, nullable: true }
+        tasks:
+          type: array
+          description: 报告任务和追问，按时间顺序；追问的问题在 input.question
+          items: { $ref: '#/components/schemas/TaskDetail' }
+        feedback: { $ref: '#/components/schemas/ContentFeedback' }
+        shares:
+          type: array
+          items: { $ref: '#/components/schemas/AdminShare' }
+        regenerations:
+          type: array
+          description: 由这份报告重新生成出的报告
+          items: { $ref: '#/components/schemas/ContentRef' }
+        notes:
+          type: array
+          items: { $ref: '#/components/schemas/ContentNote' }
+        refunded: { type: boolean, description: 已退还过额度 }
+    ContentRunResult:
+      type: object
+      required: [taskId]
+      properties:
+        taskId: { type: string }
+        reportId: { type: string, description: 重新生成的新报告 }
+    HideRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 200, description: 给用户看的原因 }
+        notify: { type: boolean, default: true, description: 给用户发一条站内信（不推送）；隐藏单条时忽略 }
+    RefundResult:
+      type: object
+      required: [tokens]
+      properties:
+        tokens: { type: integer, format: int64, description: 退还的 token；0 表示没有可退的 }
+        grant: { $ref: '#/components/schemas/QuotaGrant' }
+    AdminSubscription:
+      type: object
+      required: [id, userId, nickname, phoneMasked, name, templateName, topics, scheduleText, length, pushEnabled, status, issues, recent, recentReady, recentRead, recentFailed, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        name: { type: string }
+        templateId: { type: string, nullable: true }
+        templateName: { type: string }
+        templateVersion: { type: integer, nullable: true }
+        topics:
+          type: array
+          items: { type: string }
+        fieldValues:
+          type: object
+          additionalProperties: true
+        schedule: { $ref: '#/components/schemas/Schedule' }
+        scheduleText: { type: string, description: 如"每天 07:30" }
+        length: { type: string }
+        pushEnabled: { type: boolean }
+        status: { type: string, description: active / paused }
+        pausedReason: { type: string, nullable: true, description: user / inactive / account_disabled / admin }
+        nextRunAt: { type: string, format: date-time, nullable: true }
+        lastOpenedAt: { type: string, format: date-time, nullable: true }
+        lastStatus: { type: string, description: 最近一期：ready / failed / generating / empty，空表示还没有 }
+        lastDate: { type: string, description: 最近一期日期 YYYY-MM-DD }
+        issues: { type: integer, description: 累计期数 }
+        recent: { type: integer, description: 近 7 期期数 }
+        recentReady: { type: integer }
+        recentRead: { type: integer }
+        recentFailed: { type: integer, description: 近 3 期失败数 }
+        createdAt: { type: string, format: date-time }
+    SubscriptionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminSubscription' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    BriefingRunRequest:
+      type: object
+      properties:
+        push: { type: boolean, default: false, description: 生成后给用户推送（用户开着简报推送时） }
+    AdminBriefingRow:
+      type: object
+      required: [id, userId, nickname, phoneMasked, subscriptionId, templateName, title, date, status, hidden, headline, itemCount, sourceCount, costCny, useful, meh, adminRun, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        subscriptionId: { type: string }
+        templateId: { type: string, nullable: true }
+        templateName: { type: string }
+        title: { type: string }
+        date: { type: string, format: date }
+        status: { type: string, description: generating / ready / failed }
+        hidden: { type: boolean }
+        headline: { type: string }
+        itemCount: { type: integer }
+        sourceCount: { type: integer }
+        readAt: { type: string, format: date-time, nullable: true }
+        durationSeconds: { type: integer, nullable: true }
+        costCny: { type: number, format: double }
+        useful: { type: integer, description: 「有用」评价数（含整期和单条） }
+        meh: { type: integer, description: 「一般」评价数 }
+        adminRun: { type: boolean, description: 当前版本由后台重新生成 }
+        generatedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    BriefingPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminBriefingRow' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    AdminBriefingItem:
+      type: object
+      required: [id, title, summary, sources, useful, meh, comments]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/ContentSource' }
+        useful: { type: integer }
+        meh: { type: integer }
+        comments:
+          type: array
+          items: { type: string }
+    AdminBriefingSection:
+      type: object
+      required: [key, title, private, masked, items]
+      properties:
+        key: { type: string }
+        title: { type: string }
+        private: { type: boolean, description: 含个人信息的区块 }
+        masked: { type: boolean, description: 私密区块已打码（items 为空，itemCount 为条目数） }
+        itemCount: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminBriefingItem' }
+    HiddenBriefingItem:
+      type: object
+      required: [itemId, sectionKey, title, reason, createdAt]
+      properties:
+        itemId: { type: string }
+        sectionKey: { type: string }
+        title: { type: string }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+    BriefingRevision:
+      type: object
+      required: [id, status, headline, itemCount, sourceCount, sections, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        status: { type: string }
+        headline: { type: string }
+        itemCount: { type: integer }
+        sourceCount: { type: integer }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/AdminBriefingSection' }
+        generatedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time, description: 被覆盖的时间 }
+    AdminBriefingDetail:
+      type: object
+      required: [briefing, sections, privateRevealed, hiddenReason, hiddenItems, revisions, overallFeedback, shares, notes, refunded]
+      properties:
+        briefing: { $ref: '#/components/schemas/AdminBriefingRow' }
+        subscription: { $ref: '#/components/schemas/AdminSubscription' }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/AdminBriefingSection' }
+        privateRevealed: { type: boolean }
+        hiddenReason: { type: string }
+        hiddenAt: { type: string, format: date-time, nullable: true }
+        hiddenItems:
+          type: array
+          items: { $ref: '#/components/schemas/HiddenBriefingItem' }
+        revisions:
+          type: array
+          description: 被重新生成覆盖前的版本，最近 10 个
+          items: { $ref: '#/components/schemas/BriefingRevision' }
+        task: { $ref: '#/components/schemas/TaskDetail' }
+        overallFeedback:
+          type: array
+          description: 对整期的评价（useful / meh）
+          items: { type: string }
+        shares:
+          type: array
+          items: { $ref: '#/components/schemas/AdminShare' }
+        notes:
+          type: array
+          items: { $ref: '#/components/schemas/ContentNote' }
+        refunded: { type: boolean }
+    NoteTargetType:
+      type: string
+      enum: [report, briefing, subscription]
+    ContentNote:
+      type: object
+      required: [id, targetType, targetId, body, adminName, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        targetType: { $ref: '#/components/schemas/NoteTargetType' }
+        targetId: { type: string }
+        body: { type: string }
+        adminName: { type: string }
+        createdAt: { type: string, format: date-time }
+    ContentNoteInput:
+      type: object
+      required: [targetType, targetId, body]
+      properties:
+        targetType: { $ref: '#/components/schemas/NoteTargetType' }
+        targetId: { type: string }
+        body: { type: string, minLength: 1, maxLength: 2000 }
+    ContentIssueKind:
+      type: string
+      enum: [failed, empty, few_sources, unsatisfied, disliked, costly]
+    ContentIssue:
+      type: object
+      required: [targetType, targetId, kind, title, userId, nickname, phoneMasked, detail, createdAt]
+      properties:
+        targetType: { type: string, enum: [report, briefing] }
+        targetId: { type: string }
+        kind: { $ref: '#/components/schemas/ContentIssueKind' }
+        title: { type: string }
+        userId: { type: string }
+        nickname: { type: string }
+        phoneMasked: { type: string }
+        detail: { type: string, description: 来源数 / 不满意原因 / 「一般」条数 / 成本（元） }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        resolvedBy: { type: string }
+        resolutionNote: { type: string }
+    ContentIssuePage:
+      type: object
+      required: [items, openCounts]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ContentIssue' }
+        openCounts:
+          type: object
+          description: 各类未处理数量
+          additionalProperties: { type: integer }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    ContentIssueResolve:
+      type: object
+      required: [targetType, targetId, kind]
+      properties:
+        targetType: { type: string, enum: [report, briefing] }
+        targetId: { type: string }
+        kind: { $ref: '#/components/schemas/ContentIssueKind' }
+        note: { type: string, maxLength: 500 }
 
     # ------------------------------------------------------------ tasks
     AdminTask:

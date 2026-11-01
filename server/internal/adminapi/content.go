@@ -393,18 +393,3 @@ func (s *Server) RevokeShare(ctx context.Context, req gen.RevokeShareRequestObje
 	s.audit(ctx, "share.revoke", "share", id.String(), nil)
 	return gen.RevokeShare204Response{}, nil
 }
-
-func (s *Server) GetReport(ctx context.Context, req gen.GetReportRequestObject) (gen.GetReportResponseObject, error) {
-	id, err := parseID(req.ReportId, "报告")
-	if err != nil {
-		return nil, err
-	}
-	r, err := s.Q.AdminGetReport(ctx, id)
-	if err != nil {
-		return nil, notFound(err, "报告")
-	}
-	return gen.GetReport200JSONResponse{
-		Id: r.ID.String(), UserId: r.UserID.String(), Title: r.Title, Topic: r.Topic, Status: r.Status,
-		Summary: r.Summary, Markdown: r.Markdown, SourceCount: int(r.SourceCount), CreatedAt: r.CreatedAt,
-	}, nil
-}

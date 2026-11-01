@@ -148,6 +148,9 @@ func BriefingWorkflow(ctx workflow.Context, run orch.BriefingRun) error {
 		}
 		return workflow.ExecuteActivity(ctx, a.NotifyBriefing, plan).Get(ctx, nil)
 	}
+	if run.Push && plan.PushEnabled {
+		return workflow.ExecuteActivity(ctx, a.NotifyBriefing, plan).Get(ctx, nil)
+	}
 	return nil
 }
 

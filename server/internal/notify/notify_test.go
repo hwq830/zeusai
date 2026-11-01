@@ -292,3 +292,14 @@ func TestLanguage(t *testing.T) {
 		t.Fatal("English body without English title must be rejected")
 	}
 }
+
+func TestInboxOnly(t *testing.T) {
+	e := setup(t)
+	u := e.user()
+	if err := e.svc.Notify(context.Background(), u.ID, push.Notification{Title: "你的一份报告已下架", InboxOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if ms := e.messages(u.ID); len(ms) != 1 || ms[0].PushStatus != "skipped" || len(e.sent.Notifications()) != 0 {
+		t.Fatalf("messages = %+v, pushes = %d", ms, len(e.sent.Notifications()))
+	}
+}

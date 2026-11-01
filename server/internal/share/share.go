@@ -197,6 +197,9 @@ func (s *Service) CreateForReport(ctx context.Context, userID uuid.UUID, reportI
 	if err != nil {
 		return Share{}, apperr.Internal(err)
 	}
+	if r.HiddenAt != nil {
+		return Share{}, apperr.TakenDown()
+	}
 	if r.Status != "done" {
 		return Share{}, apperr.Conflict("报告生成完后才能分享")
 	}
@@ -276,6 +279,9 @@ func (s *Service) readyBriefing(ctx context.Context, id, userID uuid.UUID) (db.B
 	}
 	if err != nil {
 		return db.Briefing{}, apperr.Internal(err)
+	}
+	if r.HiddenAt != nil {
+		return db.Briefing{}, apperr.TakenDown()
 	}
 	if r.Status != "ready" {
 		return db.Briefing{}, apperr.Conflict("简报生成完后才能分享")
@@ -440,7 +446,7 @@ func (s *Service) Page(ctx context.Context, token string, v Visitor) ([]byte, er
 	switch {
 	case sh.ReportID != nil:
 		r, err := s.Q.GetReport(ctx, db.GetReportParams{ID: *sh.ReportID, UserID: sh.UserID})
-		if err != nil || r.Status != "done" {
+		if err != nil || r.Status != "done" || r.HiddenAt != nil {
 			return nil, apperr.NotFound("分享已失效")
 		}
 		d := report.TemplateData(r, sh.Scope == ScopeFull)
@@ -451,7 +457,7 @@ func (s *Service) Page(ctx context.Context, token string, v Visitor) ([]byte, er
 		}
 	case sh.BriefingID != nil:
 		r, err := s.Q.GetBriefing(ctx, db.GetBriefingParams{ID: *sh.BriefingID, UserID: sh.UserID})
-		if err != nil || r.Status != "ready" {
+		if err != nil || r.Status != "ready" || r.HiddenAt != nil {
 			return nil, apperr.NotFound("分享已失效")
 		}
 		view, err := BriefingView(briefing.IssueFromRow(r), sh.Scope, sh.ItemID)

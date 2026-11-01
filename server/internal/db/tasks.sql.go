@@ -41,7 +41,7 @@ func (q *Queries) CountActiveTasks(ctx context.Context, userID uuid.UUID) (int32
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (user_id, kind, title, subtitle, input, subscription_id, report_id, prompt_version)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at
+RETURNING id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at, admin_id
 `
 
 type CreateTaskParams struct {
@@ -87,12 +87,13 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.AdminID,
 	)
 	return i, err
 }
 
 const getTask = `-- name: GetTask :one
-SELECT id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at FROM tasks WHERE id = $1 AND user_id = $2
+SELECT id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at, admin_id FROM tasks WHERE id = $1 AND user_id = $2
 `
 
 type GetTaskParams struct {
@@ -123,12 +124,13 @@ func (q *Queries) GetTask(ctx context.Context, arg GetTaskParams) (Task, error) 
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.AdminID,
 	)
 	return i, err
 }
 
 const listTasks = `-- name: ListTasks :many
-SELECT id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at FROM tasks
+SELECT id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at, admin_id FROM tasks
 WHERE user_id = $1 AND (NOT $4::bool OR status IN ('queued', 'running', 'waiting_confirm'))
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -175,6 +177,7 @@ func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, e
 			&i.CreatedAt,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.AdminID,
 		); err != nil {
 			return nil, err
 		}

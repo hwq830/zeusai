@@ -65,7 +65,7 @@ func (q *Queries) CreateMemory(ctx context.Context, arg CreateMemoryParams) (uui
 const dailyBilledTokens = `-- name: DailyBilledTokens :many
 SELECT (m.created_at AT TIME ZONE $1::text)::date AS day, coalesce(sum(m.billed_tokens), 0)::bigint AS tokens
 FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
-WHERE m.user_id = $2 AND m.created_at >= $3 AND (t.status IS NULL OR t.status <> 'failed')
+WHERE m.user_id = $2 AND m.created_at >= $3 AND (t.id IS NULL OR (t.status <> 'failed' AND t.admin_id IS NULL))
 GROUP BY day ORDER BY day
 `
 
@@ -305,7 +305,7 @@ func (q *Queries) SearchMemories(ctx context.Context, arg SearchMemoriesParams) 
 
 const sumBilledTokensSince = `-- name: SumBilledTokensSince :one
 SELECT coalesce(sum(m.billed_tokens), 0)::bigint FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
-WHERE m.user_id = $1 AND m.created_at >= $2 AND (t.status IS NULL OR t.status <> 'failed')
+WHERE m.user_id = $1 AND m.created_at >= $2 AND (t.id IS NULL OR (t.status <> 'failed' AND t.admin_id IS NULL))
 `
 
 type SumBilledTokensSinceParams struct {
@@ -313,7 +313,7 @@ type SumBilledTokensSinceParams struct {
 	CreatedAt time.Time
 }
 
-// Tokens counted against the quota: calls of failed tasks are not charged.
+// Tokens counted against the quota: calls of failed tasks and of console re-runs are not charged.
 func (q *Queries) SumBilledTokensSince(ctx context.Context, arg SumBilledTokensSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumBilledTokensSince, arg.UserID, arg.CreatedAt)
 	var column_1 int64

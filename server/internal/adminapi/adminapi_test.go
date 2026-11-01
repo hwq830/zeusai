@@ -45,6 +45,8 @@ type fakeOrch struct {
 	cancelled []uuid.UUID
 	campaigns []orch.CampaignRun
 	stopped   []uuid.UUID
+	reports   []orch.ReportRun
+	briefings []orch.BriefingRun
 }
 
 func (f *fakeOrch) StartCampaign(_ context.Context, run orch.CampaignRun) error {
@@ -200,7 +202,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 14 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 16 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

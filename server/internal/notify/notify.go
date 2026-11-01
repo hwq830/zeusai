@@ -94,6 +94,12 @@ func (s *Service) Notify(ctx context.Context, userID uuid.UUID, n push.Notificat
 	if err != nil {
 		return err
 	}
+	if n.InboxOnly {
+		if err := s.Q.SetMessagePush(ctx, db.SetMessagePushParams{ID: m.ID, PushStatus: "skipped"}); err != nil {
+			s.warn("notify: record push", "message", m.ID, "err", err)
+		}
+		return nil
+	}
 	s.deliver(ctx, m, false)
 	return nil
 }

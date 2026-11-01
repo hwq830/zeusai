@@ -1226,7 +1226,8 @@ components:
             `unauthenticated` 令牌缺失或过期（先 refresh 再重试）、`forbidden`、`not_found`、
             `invalid_argument`、`conflict`、`auth_required`（连接器需先授权）、
             `quota_exceeded`（额度用尽，见 details.quota；token 额度时 details 另有 used、limit、remaining、resetsAt）、`content_blocked`（内容安全拦截）、
-            `rate_limited`、`sms_code_invalid`、`unavailable`、`internal`。
+            `rate_limited`、`sms_code_invalid`、`unavailable`、`internal`、
+            `taken_down`（410，内容已被运营下架：报告的 HTML / PDF / 追问、简报的 PDF、新建分享）。
           example: quota_exceeded
         message:
           type: string
@@ -1712,6 +1713,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/Language'
           description: 这期生成时用户的显示语言
+        takenDown:
+          type: boolean
+          description: 已被运营下架；此时 headline 为空、sections 为空数组，App 显示占位和 takedownReason
+        takedownReason: { type: string }
     Briefing:
       allOf:
         - $ref: '#/components/schemas/BriefingSummary'
@@ -1796,6 +1801,10 @@ components:
           type: integer
           format: int64
           description: 这份报告（含追问）消耗的 token；只在详情接口返回
+        takenDown:
+          type: boolean
+          description: 已被运营下架；此时 summary、htmlUrl 为空，App 显示占位和 takedownReason
+        takedownReason: { type: string }
     ReportList:
       allOf:
         - $ref: '#/components/schemas/Page'

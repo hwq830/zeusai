@@ -78,6 +78,9 @@ type Briefing struct {
 	TaskID         *string    `json:"taskId,omitempty"`
 	Feedback       *string    `json:"feedback,omitempty"`
 	TokensUsed     *int64     `json:"tokensUsed,omitempty"`
+	// TakenDown: an operator took the issue down; sections and headline are left out.
+	TakenDown      bool   `json:"takenDown,omitempty"`
+	TakedownReason string `json:"takedownReason,omitempty"`
 }
 
 // FromRow converts a subscription row.
@@ -113,6 +116,10 @@ func briefingFromRow(r db.Briefing, withSections bool) Briefing {
 		b.TaskID = &id
 	}
 	b.Sections = []Section{}
+	if r.HiddenAt != nil {
+		b.TakenDown, b.TakedownReason, b.Headline = true, r.HiddenReason, ""
+		return b
+	}
 	if withSections {
 		_ = json.Unmarshal(r.Sections, &b.Sections)
 	}

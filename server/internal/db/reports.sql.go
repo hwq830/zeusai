@@ -33,7 +33,7 @@ UPDATE reports SET
     status = 'done', title = $3, summary = $4, markdown = $5, sources = $6, source_count = $7,
     word_count = $8, completed_at = now()
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from
 `
 
 type CompleteReportParams struct {
@@ -79,6 +79,10 @@ func (q *Queries) CompleteReport(ctx context.Context, arg CompleteReportParams) 
 		&i.CreatedAt,
 		&i.CompletedAt,
 		&i.Language,
+		&i.HiddenAt,
+		&i.HiddenReason,
+		&i.HiddenBy,
+		&i.RegeneratedFrom,
 	)
 	return i, err
 }
@@ -102,7 +106,7 @@ func (q *Queries) CountReportsSince(ctx context.Context, arg CountReportsSincePa
 const createReport = `-- name: CreateReport :one
 INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, language)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from
 `
 
 type CreateReportParams struct {
@@ -148,6 +152,10 @@ func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Rep
 		&i.CreatedAt,
 		&i.CompletedAt,
 		&i.Language,
+		&i.HiddenAt,
+		&i.HiddenReason,
+		&i.HiddenBy,
+		&i.RegeneratedFrom,
 	)
 	return i, err
 }
@@ -170,7 +178,7 @@ func (q *Queries) DeleteReport(ctx context.Context, arg DeleteReportParams) (int
 }
 
 const getReport = `-- name: GetReport :one
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language FROM reports WHERE id = $1 AND user_id = $2
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from FROM reports WHERE id = $1 AND user_id = $2
 `
 
 type GetReportParams struct {
@@ -201,12 +209,16 @@ func (q *Queries) GetReport(ctx context.Context, arg GetReportParams) (Report, e
 		&i.CreatedAt,
 		&i.CompletedAt,
 		&i.Language,
+		&i.HiddenAt,
+		&i.HiddenReason,
+		&i.HiddenBy,
+		&i.RegeneratedFrom,
 	)
 	return i, err
 }
 
 const listReports = `-- name: ListReports :many
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language FROM reports
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from FROM reports
 WHERE user_id = $1
   AND ($4::text IS NULL OR status = $4)
   AND ($5::text IS NULL OR title ILIKE '%' || $5 || '%' OR topic ILIKE '%' || $5 || '%')
@@ -257,6 +269,10 @@ func (q *Queries) ListReports(ctx context.Context, arg ListReportsParams) ([]Rep
 			&i.CreatedAt,
 			&i.CompletedAt,
 			&i.Language,
+			&i.HiddenAt,
+			&i.HiddenReason,
+			&i.HiddenBy,
+			&i.RegeneratedFrom,
 		); err != nil {
 			return nil, err
 		}
