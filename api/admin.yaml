@@ -2377,7 +2377,7 @@ components:
               keySource:
                 type: string
                 enum: [console, env, none]
-                description: console = 后台「API Key」页启用的 Key；env = 环境变量
+                description: console = 后台「服务商」页启用的 Key；env = 环境变量
               timeout: { type: string }
               models:
                 type: object

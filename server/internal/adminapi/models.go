@@ -329,7 +329,7 @@ func (s *Server) ListProviderModels(ctx context.Context, req gen.ListProviderMod
 	}
 	key := s.Keys.Key(ctx, p.Name, p.APIKeyEnv)
 	if key == "" {
-		return none("这个服务商还没有 Key，先到「API Key」页添加")
+		return none("这个服务商还没有 Key，先到「服务商」页添加")
 	}
 	base := p.BaseURL
 	if u := s.Keys.BaseURL(ctx, p.Name); u != "" {
@@ -364,7 +364,7 @@ func (s *Server) TestModel(ctx context.Context, req gen.TestModelRequestObject) 
 	}
 	key := s.Keys.Key(ctx, p.Name, p.APIKeyEnv)
 	if key == "" {
-		return gen.TestModel200JSONResponse(gen.ProviderKeyTest{Message: "这个服务商还没有 Key，先到「API Key」页添加"}), nil
+		return gen.TestModel200JSONResponse(gen.ProviderKeyTest{Message: "这个服务商还没有 Key，先到「服务商」页添加"}), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
