@@ -25,6 +25,92 @@ func (q *Queries) ConsumeRefreshToken(ctx context.Context, tokenHash []byte) (uu
 	return user_id, err
 }
 
+const createEmailUser = `-- name: CreateEmailUser :one
+INSERT INTO users (nickname, email, timezone) VALUES ($1, $2, $3)
+ON CONFLICT (email) DO NOTHING RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email
+`
+
+type CreateEmailUserParams struct {
+	Nickname string
+	Email    *string
+	Timezone string
+}
+
+func (q *Queries) CreateEmailUser(ctx context.Context, arg CreateEmailUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createEmailUser, arg.Nickname, arg.Email, arg.Timezone)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Nickname,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.WechatUnionid,
+		&i.WechatOpenid,
+		&i.AppleSub,
+		&i.Timezone,
+		&i.PlanCode,
+		&i.PlanExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
+		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
+	)
+	return i, err
+}
+
+const createGoogleUser = `-- name: CreateGoogleUser :one
+INSERT INTO users (nickname, google_sub, google_email, timezone) VALUES ($1, $2, $3, $4)
+ON CONFLICT (google_sub) DO NOTHING RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email
+`
+
+type CreateGoogleUserParams struct {
+	Nickname    string
+	GoogleSub   *string
+	GoogleEmail *string
+	Timezone    string
+}
+
+func (q *Queries) CreateGoogleUser(ctx context.Context, arg CreateGoogleUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createGoogleUser,
+		arg.Nickname,
+		arg.GoogleSub,
+		arg.GoogleEmail,
+		arg.Timezone,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Nickname,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.WechatUnionid,
+		&i.WechatOpenid,
+		&i.AppleSub,
+		&i.Timezone,
+		&i.PlanCode,
+		&i.PlanExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
+		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
+	)
+	return i, err
+}
+
 const createRefreshToken = `-- name: CreateRefreshToken :exec
 INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)
 `
@@ -43,7 +129,7 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (nickname, phone, wechat_unionid, wechat_openid, apple_sub, timezone)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email
 `
 
 type CreateUserParams struct {
@@ -84,6 +170,9 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UiLanguage,
 		&i.ReportLanguage,
 		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
 	)
 	return i, err
 }
@@ -130,7 +219,7 @@ func (q *Queries) GetQuotaOverride(ctx context.Context, userID uuid.UUID) (UserQ
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market FROM users WHERE id = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
@@ -155,12 +244,15 @@ func (q *Queries) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.UiLanguage,
 		&i.ReportLanguage,
 		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
 	)
 	return i, err
 }
 
 const getUserByAppleSub = `-- name: GetUserByAppleSub :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market FROM users WHERE apple_sub = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email FROM users WHERE apple_sub = $1
 `
 
 func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User, error) {
@@ -185,12 +277,81 @@ func (q *Queries) GetUserByAppleSub(ctx context.Context, appleSub *string) (User
 		&i.UiLanguage,
 		&i.ReportLanguage,
 		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email FROM users WHERE email = $1
+`
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email *string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Nickname,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.WechatUnionid,
+		&i.WechatOpenid,
+		&i.AppleSub,
+		&i.Timezone,
+		&i.PlanCode,
+		&i.PlanExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
+		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
+	)
+	return i, err
+}
+
+const getUserByGoogleSub = `-- name: GetUserByGoogleSub :one
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email FROM users WHERE google_sub = $1
+`
+
+func (q *Queries) GetUserByGoogleSub(ctx context.Context, googleSub *string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByGoogleSub, googleSub)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Nickname,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.WechatUnionid,
+		&i.WechatOpenid,
+		&i.AppleSub,
+		&i.Timezone,
+		&i.PlanCode,
+		&i.PlanExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisabledAt,
+		&i.DisabledReason,
+		&i.LastSeenAt,
+		&i.UiLanguage,
+		&i.ReportLanguage,
+		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
 	)
 	return i, err
 }
 
 const getUserByPhone = `-- name: GetUserByPhone :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market FROM users WHERE phone = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email FROM users WHERE phone = $1
 `
 
 func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, error) {
@@ -215,12 +376,15 @@ func (q *Queries) GetUserByPhone(ctx context.Context, phone *string) (User, erro
 		&i.UiLanguage,
 		&i.ReportLanguage,
 		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
 	)
 	return i, err
 }
 
 const getUserByWechatUnionID = `-- name: GetUserByWechatUnionID :one
-SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market FROM users WHERE wechat_unionid = $1
+SELECT id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email FROM users WHERE wechat_unionid = $1
 `
 
 func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *string) (User, error) {
@@ -245,6 +409,9 @@ func (q *Queries) GetUserByWechatUnionID(ctx context.Context, wechatUnionid *str
 		&i.UiLanguage,
 		&i.ReportLanguage,
 		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
 	)
 	return i, err
 }
@@ -359,7 +526,7 @@ UPDATE users SET
     market = coalesce($6, market),
     updated_at = now()
 WHERE id = $1
-RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market
+RETURNING id, nickname, avatar_url, phone, wechat_unionid, wechat_openid, apple_sub, timezone, plan_code, plan_expires_at, created_at, updated_at, disabled_at, disabled_reason, last_seen_at, ui_language, report_language, market, email, google_sub, google_email
 `
 
 type UpdateUserProfileParams struct {
@@ -400,6 +567,9 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.UiLanguage,
 		&i.ReportLanguage,
 		&i.Market,
+		&i.Email,
+		&i.GoogleSub,
+		&i.GoogleEmail,
 	)
 	return i, err
 }

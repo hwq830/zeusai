@@ -51,6 +51,13 @@ type Config struct {
 	SMSSignName           string `koanf:"sms_sign_name"`
 	SMSTemplateCode       string `koanf:"sms_template_code"`
 	OneClickEnabled       bool   `koanf:"oneclick_enabled"` // Aliyun 号码认证, same AccessKey
+	GoogleClientIDs       string `koanf:"google_client_ids"`
+	SMTPHost              string `koanf:"smtp_host"`
+	SMTPPort              int    `koanf:"smtp_port"`
+	SMTPUsername          string `koanf:"smtp_username"`
+	SMTPPassword          string `koanf:"smtp_password"`
+	SMTPFrom              string `koanf:"smtp_from"`
+	DevEmailCode          string `koanf:"dev_email_code"`
 	AppleClientIDs        string `koanf:"apple_client_ids"` // comma-separated audiences
 	WechatAppID           string `koanf:"wechat_app_id"`
 	WechatSecret          string `koanf:"wechat_secret"`
@@ -111,7 +118,7 @@ func Load() (Config, error) {
 	if cfg.AdminJWTSecret == "" && cfg.IsDev() {
 		cfg.AdminJWTSecret = "dev-only-insecure-admin-secret"
 	}
-	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.LLMProvider == "mock" || cfg.SearchProvider == "mock") {
+	if !cfg.IsDev() && (cfg.DevSMSCode != "" || cfg.DevEmailCode != "" || cfg.LLMProvider == "mock" || cfg.SearchProvider == "mock") {
 		return Config{}, errors.New("dev-only settings (DEV_SMS_CODE, mock LLM or search) are not allowed outside dev")
 	}
 	if cfg.SearchProvider != "" && cfg.SearchProvider != "mock" && cfg.BochaAPIKey == "" && cfg.SecretsKey == "" {
