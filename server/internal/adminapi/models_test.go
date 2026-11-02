@@ -176,4 +176,18 @@ providers:
 	if kp.Source != "console" || kp.Imported == nil || !*kp.Imported || *kp.TimeoutSeconds != 90 || kp.ApiKeyEnv != "ZEUS_TEST_QWEN_KEY" {
 		t.Fatalf("imported provider = %+v", kp)
 	}
+	var changed gen.ModelRouting
+	h.do("GET", "/admin/v1/model-routing", nil, 200, &changed)
+	timeoutFound := false
+	for _, p := range changed.Providers {
+		if p.Name == "qwen" {
+			timeoutFound = true
+			if p.TimeoutSeconds == nil || *p.TimeoutSeconds != 90 {
+				t.Fatalf("routing timeout not updated: %+v", p)
+			}
+		}
+	}
+	if !timeoutFound {
+		t.Fatal("missing qwen in routing")
+	}
 }

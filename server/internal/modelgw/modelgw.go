@@ -14,9 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 )
@@ -126,6 +128,7 @@ func (envKeys) Key(_ context.Context, _, envName string) string {
 type Option func(*options)
 
 type options struct {
+	calls     *calllog.Recorder
 	keys      KeySource
 	overrides OverrideSource
 }
@@ -134,7 +137,10 @@ type options struct {
 // environment once.
 func WithKeys(ks KeySource) Option { return func(o *options) { o.keys = ks } }
 
+func WithCalls(c *calllog.Recorder) Option { return func(o *options) { o.calls = c } }
+
 type Gateway struct {
+	calls *calllog.Recorder
 	// ups are the routing file's providers, used until the routing is in the database.
 	ups map[string]upstream
 	// fixed are providers injected by tests; they stand in for providers of the same name.
@@ -170,7 +176,7 @@ func New(cfg Config, mod moderation.Checker, extra map[string]llm.Provider, opts
 	for _, opt := range opts {
 		opt(&o)
 	}
-	g := &Gateway{ups: map[string]upstream{}, fixed: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
+	g := &Gateway{calls: o.calls, ups: map[string]upstream{}, fixed: map[string]upstream{}, routes: cfg.Routes, overrides: o.overrides, mod: mod,
 		breaker: newBreaker(cfg.BreakerFailures, cfg.BreakerCooldown), keys: o.keys, dyn: map[string]dynUpstream{}}
 	for _, pc := range cfg.Providers {
 		if p := extra[pc.Name]; p != nil {
@@ -189,7 +195,7 @@ func (g *Gateway) newUpstream(pc ProviderConfig) upstream {
 	}
 	name, env, keys := pc.Name, pc.APIKeyEnv, g.keys
 	key := func(ctx context.Context) string { return keys.Key(ctx, name, env) }
-	oc := llm.OpenAICompat{BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
+	oc := llm.OpenAICompat{Calls: g.calls, BaseURL: pc.BaseURL, KeyFunc: key, Name: pc.Name,
 		Models: pc.Models, HTTP: &http.Client{Timeout: timeout}}
 	if bs, ok := keys.(BaseURLSource); ok {
 		oc.BaseURLFunc = func(ctx context.Context) string { return bs.BaseURL(ctx, name) }
@@ -235,18 +241,47 @@ func (g *Gateway) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 		tier = llm.TierStrong
 	}
 	var lastErr error
-	for _, a := range g.chain(ctx, tier, req.Purpose) {
+	group := req.CallGroupID
+	if group == uuid.Nil {
+		group = uuid.New()
+	}
+	for index, a := range g.chain(ctx, tier, req.Purpose) {
 		name, up := a.provider, a.up
+		if ctx.Err() != nil {
+			return llm.Response{}, ctx.Err()
+		}
+		scope := calllog.FromContext(ctx)
+		if req.UserID != nil {
+			scope.UserID = req.UserID
+		}
+		if req.TaskID != nil {
+			scope.TaskID = req.TaskID
+		}
+		scope.Purpose = req.Purpose
+		if req.Origin != "" {
+			scope.Origin = req.Origin
+		}
+		skip := func(reason string) error {
+			return g.calls.Skip(ctx, calllog.Begin{GroupID: group, Attempt: index + 1, Scope: scope, Kind: "model", Provider: name, Model: a.model}, reason)
+		}
 		if !g.breaker.allow(name) {
+			if err := skip("circuit_open"); err != nil {
+				return llm.Response{}, err
+			}
 			continue
 		}
 		if up.hasKey != nil && !up.hasKey(ctx) {
+			if err := skip("missing_key"); err != nil {
+				return llm.Response{}, err
+			}
 			if lastErr == nil {
 				lastErr = fmt.Errorf("%s: no API key configured", name)
 			}
 			continue
 		}
 		call := req
+		call.CallGroupID = group
+		call.Attempt = index + 1
 		call.Model = a.model
 		resp, err := up.Complete(ctx, call)
 		if err != nil {

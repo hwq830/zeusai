@@ -17,6 +17,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/billing"
 	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/browse"
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
@@ -86,7 +87,7 @@ func LLM(cfg config.Config, q *db.Queries, mod moderation.Checker, rc *remotecon
 			}
 		}
 		gw, err := modelgw.New(gc, mod, nil, modelgw.WithKeys(keys),
-			modelgw.WithOverrides(&modelgw.DBOverrides{Q: q, Log: slog.Default()}))
+			modelgw.WithOverrides(&modelgw.DBOverrides{Q: q, Log: slog.Default()}), modelgw.WithCalls(calllog.New(q, slog.Default())))
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +109,7 @@ func Search(cfg config.Config, q *db.Queries, keys *secrets.Keys, log *slog.Logg
 	default:
 		return nil, fmt.Errorf("unknown ZEUS_SEARCH_PROVIDER %q (mock | console)", cfg.SearchProvider)
 	}
-	r := &search.Router{Keys: keys, Log: log,
+	r := &search.Router{Keys: keys, Log: log, Calls: calllog.New(q, log),
 		Fallback: []search.Provider{{Name: BochaProvider, Protocol: search.ProtocolBocha, KeyEnv: "ZEUS_BOCHA_API_KEY"}}}
 	if q != nil {
 		// A cold-start database error must not send global requests to the legacy Bocha route.

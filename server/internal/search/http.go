@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/hwq830/zeusai/server/internal/calllog"
 )
 
 // StatusError is a non-200 answer from a search API; the console maps 401/403/429 to advice.
@@ -29,7 +31,11 @@ func do(hc *http.Client, req *http.Request, name string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	calllog.SetHTTPInfo(req.Context(), resp.StatusCode, resp.Header.Get("X-Request-Id"))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, &StatusError{Provider: name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 300)]))}
 	}

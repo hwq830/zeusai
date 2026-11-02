@@ -9,6 +9,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/hwq830/zeusai/server/internal/calllog"
 )
 
 // Provider is one configured search provider: a name (its keys are saved under it), the API
@@ -48,6 +52,7 @@ func (c Routing) Chain(country string) []Provider {
 // Router selects a regional chain and tries providers within a bounded time budget.
 // Configuration reloads about once a minute without restarting.
 type Router struct {
+	Calls       *calllog.Recorder
 	LoadRouting func(context.Context) (Routing, error)
 	routing     *Routing
 	// Per-attempt and total search budgets; defaults 8s and 30s.
@@ -182,7 +187,8 @@ func (r *Router) Search(ctx context.Context, q Query) ([]Result, error) {
 	ordered = append(ordered, cooling...)
 	var errs []error
 	attempts, empties, maxAttempts := 0, 0, 5
-	for _, p := range ordered {
+	group := uuid.New()
+	for index, p := range ordered {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -194,6 +200,9 @@ func (r *Router) Search(ctx context.Context, q Query) ([]Result, error) {
 			key, base = r.Keys.Key(ctx, p.Name, p.KeyEnv), r.Keys.BaseURL(ctx, p.Name)
 		}
 		if key == "" {
+			if err := r.Calls.Skip(ctx, calllog.Begin{GroupID: group, Attempt: index + 1, Scope: calllog.FromContext(ctx), Kind: "search", Provider: p.Name, Protocol: p.Protocol, Region: region}, "missing_key"); err != nil {
+				return nil, err
+			}
 			errs = append(errs, fmt.Errorf("%s: no API key", p.Name))
 			continue
 		}
@@ -212,7 +221,7 @@ func (r *Router) Search(ctx context.Context, q Query) ([]Result, error) {
 		callCtx, stop := context.WithTimeout(ctx, attempt)
 		started := time.Now()
 		attempts++
-		res, err := s.Search(callCtx, q)
+		res, err := (Observed{Searcher: s, Calls: r.Calls, Provider: p.Name, Protocol: p.Protocol, GroupID: group, Attempt: index + 1, Timeout: attempt}).Search(callCtx, q)
 		stop()
 		outcome := "success"
 		if err != nil {

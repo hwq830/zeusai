@@ -13,7 +13,7 @@ providers:
   - name: qwen
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     api_key_env: ZEUS_QWEN_API_KEY
-    timeout: 120s
+    timeout: 180s
     models:
       strong: qwen-max
       fast: qwen-turbo

@@ -2040,6 +2040,30 @@ paths:
               schema: { $ref: '#/components/schemas/ConfigPreview' }
         default: { $ref: '#/components/responses/Error' }
 
+  /admin/v1/calls:
+    get:
+      tags: [tasks]
+      operationId: listExternalCalls
+      summary: 每次模型和搜索调用的独立记录（含失败、超时、跳过）
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [model, search] } }
+        - { name: provider, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: model, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: status, in: query, schema: { type: string, enum: [running, success, empty, failed, timeout, cancelled, skipped, unknown] } }
+        - { name: taskId, in: query, schema: { type: string, format: uuid } }
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: 按记录创建顺序倒序；游标分页
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExternalCallList' }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3804,6 +3828,7 @@ components:
         displayName: { type: string }
         keyPresent: { type: boolean }
         bailian: { type: boolean, description: '百炼（DashScope）地址：可从模型目录选模型，价格取「模型定价」' }
+        timeoutSeconds: { type: integer, minimum: 10, maximum: 600, description: 服务商调用超时，作用于所有使用该服务商的路由 }
         models:
           type: object
           description: 服务商各档位的默认模型
@@ -4489,3 +4514,43 @@ components:
         values:
           type: array
           items: { $ref: '#/components/schemas/ConfigPreviewValue' }
+
+    ExternalCall:
+      type: object
+      required: [id, groupId, attempt, kind, provider, model, protocol, purpose, origin, region, dispatched, status, startedAt, deadlineAt]
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid, description: 同一次逻辑请求的主备尝试共享该标识 }
+        attempt: { type: integer }
+        kind: { type: string }
+        provider: { type: string }
+        model: { type: string, description: 请求的模型 }
+        responseModel: { type: string, description: 实际返回的模型 }
+        protocol: { type: string }
+        purpose: { type: string }
+        origin: { type: string, description: app / system / admin_test }
+        taskId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
+        region: { type: string }
+        query: { type: string, description: 搜索词，最多 400 字；不保存模型提示词 }
+        dispatched: { type: boolean, description: false 表示跳过，没有发出请求 }
+        status: { type: string, description: running / success / empty / failed / timeout / cancelled / skipped / unknown }
+        errorCode: { type: string }
+        requestId: { type: string }
+        httpStatus: { type: integer }
+        inputTokens: { type: integer, nullable: true, description: 缺失或 null 表示未获得真实用量 }
+        outputTokens: { type: integer, nullable: true }
+        cachedTokens: { type: integer, nullable: true }
+        resultCount: { type: integer, nullable: true }
+        startedAt: { type: string, format: date-time }
+        deadlineAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time, nullable: true }
+        durationMs: { type: integer, format: int64, nullable: true }
+    ExternalCallList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ExternalCall' }
+        nextCursor: { type: string, nullable: true }

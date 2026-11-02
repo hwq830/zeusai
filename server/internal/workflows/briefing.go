@@ -20,6 +20,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/blob"
 	"github.com/hwq830/zeusai/server/internal/briefing"
 	"github.com/hwq830/zeusai/server/internal/browse"
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
@@ -114,7 +115,7 @@ type SectionResult struct {
 func BriefingWorkflow(ctx workflow.Context, run orch.BriefingRun) error {
 	var a *Activities
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 3 * time.Minute,
+		StartToCloseTimeout: modelActivityTimeout,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	})
 
@@ -387,6 +388,7 @@ type promptSource struct {
 }
 
 func (a *Activities) ResearchSection(ctx context.Context, plan BriefingPlan, i int) (SectionResult, error) {
+	ctx = calllog.WithScope(ctx, calllog.Scope{UserID: &plan.UserID, TaskID: &plan.TaskID, Purpose: "briefing.section"})
 	sec := plan.Sections[i]
 	step := sectionStep(plan.Lang, i, sec.Title)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
