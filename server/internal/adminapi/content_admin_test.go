@@ -3,6 +3,7 @@ package adminapi_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,7 +133,7 @@ func TestContentManagement(t *testing.T) {
 	// ---- report detail is audited
 	var rd gen.AdminReportDetail
 	h.do("GET", "/admin/v1/reports/"+rep.ID.String(), nil, 200, &rd)
-	if rd.Markdown == "" || len(rd.Sources) != 1 || deref(rd.Sources[0].Domain) != "example.com" || len(rd.Tasks) != 1 || len(rd.Tasks[0].Calls) != 1 ||
+	if rd.Markdown == "" || rd.RenderedHtml == nil || !strings.Contains(*rd.RenderedHtml, `class="toc-button"`) || len(rd.Sources) != 1 || deref(rd.Sources[0].Domain) != "example.com" || len(rd.Tasks) != 1 || len(rd.Tasks[0].Calls) != 1 ||
 		rd.Feedback == nil || len(rd.Shares) != 1 || rd.Refunded {
 		t.Fatalf("report detail = %+v", rd)
 	}

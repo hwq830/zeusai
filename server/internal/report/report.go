@@ -105,7 +105,7 @@ type Service struct {
 	Mod   moderation.Checker
 	Blob  blob.Store // nil: PDF export unavailable
 	// Config carries the report kill switches; nil leaves reports and PDF export on.
-	Config        *remoteconfig.Cache
+	Config *remoteconfig.Cache
 }
 
 func clip(s string, n int) string {
@@ -325,6 +325,13 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID, id string) error
 func TemplateData(r db.Report, full bool) reporttemplate.Data {
 	l := i18n.Parse(r.Language)
 	d := reporttemplate.Data{Title: r.Title, Summary: r.Summary, DepthLabel: DepthLabel(l, r.Depth), SourceCount: int(r.SourceCount), Lang: string(l)}
+	if r.WordCount > 0 {
+		speed := 300
+		if l == i18n.EN {
+			speed = 200
+		}
+		d.ReadMinutes = (int(r.WordCount) + speed - 1) / speed
+	}
 	if r.CompletedAt != nil {
 		d.CompletedAt = r.CompletedAt.In(time.FixedZone("CST", 8*3600)).Format("2006-01-02")
 	}
@@ -339,13 +346,16 @@ func TemplateData(r db.Report, full bool) reporttemplate.Data {
 	return d
 }
 
+// RenderHTML renders the full report using the shared App, console and PDF template.
+func RenderHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(TemplateData(r, true)) }
+
 // PrintHTML renders a report for PDF printing.
-func PrintHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(TemplateData(r, true)) }
+func PrintHTML(r db.Report) ([]byte, error) { return RenderHTML(r) }
 
 // PDFKey names the stored PDF for the report's current content, so a follow-up (which
 // appends to the markdown) makes the old file stale.
 func PDFKey(r db.Report) string {
-	h := sha256.Sum256([]byte(r.Title + "\x00" + r.Markdown))
+	h := sha256.Sum256([]byte("report-layout-v2\x00" + r.Title + "\x00" + r.Markdown))
 	return fmt.Sprintf("reports/%s/%s-%x.pdf", r.UserID, r.ID, h[:6])
 }
 
@@ -405,7 +415,7 @@ func (s *Service) HTML(ctx context.Context, userID uuid.UUID, id string) ([]byte
 	if r.Status != "done" {
 		return nil, apperr.Conflict("报告还没有生成完")
 	}
-	b, err := reporttemplate.Render(TemplateData(r, true))
+	b, err := RenderHTML(r)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}

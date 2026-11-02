@@ -2823,6 +2823,7 @@ components:
         language: { type: string }
         summary: { type: string }
         markdown: { type: string, description: 正文，含追问的回答 }
+        renderedHtml: { type: string, description: 使用与 App 相同模板渲染的完整报告 HTML }
         sources:
           type: array
           items: { $ref: '#/components/schemas/ContentSource' }

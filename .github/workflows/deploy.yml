@@ -66,7 +66,7 @@ jobs:
           load: ${{ env.PUSH != 'true' }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }},ignore-error=true
       - name: Smoke-test the image
         if: env.PUSH != 'true'
         run: |

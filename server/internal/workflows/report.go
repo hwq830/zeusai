@@ -27,6 +27,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/search"
+	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
 const FollowupWorkflowName = "FollowupWorkflow"
@@ -405,17 +406,18 @@ func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results [
 		return err
 	}
 	out.Summary, out.Markdown = plan.Lang.Model(out.Summary), plan.Lang.Model(out.Markdown)
+	out.Markdown = reporttemplate.FilterCharts(out.Markdown, plan.Lang.Model(merged), len(sources))
 	if err := a.streamText(ctx, plan.UserID, plan.TaskID, out.Summary); err != nil {
 		return err
 	}
 	srcJSON, _ := json.Marshal(orEmptySources(sources))
 	if _, err := a.Q.CompleteReport(ctx, db.CompleteReportParams{
 		ID: plan.ReportID, UserID: plan.UserID, Title: plan.Title, Summary: out.Summary, Markdown: out.Markdown,
-		Sources: srcJSON, SourceCount: int32(len(sources)), WordCount: int32(wordCount(plan.Lang, out.Markdown)),
+		Sources: srcJSON, SourceCount: int32(len(sources)), WordCount: int32(wordCount(plan.Lang, reporttemplate.WithoutCharts(out.Markdown))),
 	}); err != nil {
 		return err
 	}
-	step.Detail = fmt.Sprintf(plan.UILang.Pick("%d 字，%d 个来源", "%d words, %d sources"), wordCount(plan.Lang, out.Markdown), len(sources))
+	step.Detail = fmt.Sprintf(plan.UILang.Pick("%d 字，%d 个来源", "%d words, %d sources"), wordCount(plan.Lang, reporttemplate.WithoutCharts(out.Markdown)), len(sources))
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step}); err != nil {
 		return err
 	}
@@ -515,7 +517,7 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 	}, &out); err != nil {
 		return err
 	}
-	out.Answer = lang.Model(out.Answer)
+	out.Answer = reporttemplate.FilterCharts(lang.Model(out.Answer), "", 0)
 	if err := a.streamText(ctx, run.UserID, run.TaskID, out.Answer); err != nil {
 		return err
 	}
