@@ -20,6 +20,7 @@ func TestBriefingSavedNearDelivery(t *testing.T) {
 	for _, mode := range []string{"create", "update", "resume"} {
 		t.Run(mode, func(t *testing.T) {
 			h := setup(t)
+			h.orch.Now = nil // This regression exercises real wall-clock schedule triggers.
 			user := h.login(randomPhone())
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

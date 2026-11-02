@@ -96,7 +96,9 @@ func setup(t *testing.T) *harness {
 	}
 	t.Cleanup(w.Stop)
 
-	oc := &workflows.Client{C: tc, TaskQueue: queue}
+	// General API tests use morning schedules and generate manually. Keep their
+	// schedule saves outside the catchup window regardless of CI's wall-clock time.
+	oc := &workflows.Client{C: tc, TaskQueue: queue, Now: func() time.Time { return noon }}
 	cfg := config.Config{Env: "dev", JWTSecret: "test", AccessTTL: time.Minute, RefreshTTL: time.Hour, DevSMSCode: smsCode}
 	mod, err := moderation.NewKeywords(strings.NewReader(blockedTerm))
 	if err != nil {
