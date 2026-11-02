@@ -2,7 +2,9 @@ package adminapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/market"
 	"github.com/hwq830/zeusai/server/internal/search"
 )
 
@@ -25,6 +28,26 @@ func (s *Server) searchChain(ctx context.Context) (db.SearchSetting, error) {
 		return db.SearchSetting{Chain: []string{}}, nil
 	}
 	return st, err
+}
+
+func searchRegions(st db.SearchSetting) map[string][]string {
+	regions := map[string][]string{}
+	if len(st.RegionalChains) > 0 {
+		_ = json.Unmarshal(st.RegionalChains, &regions)
+	}
+	return regions
+}
+
+func searchUses(st db.SearchSetting, id string) bool {
+	if slices.Contains(st.Chain, id) {
+		return true
+	}
+	for _, chain := range searchRegions(st) {
+		if slices.Contains(chain, id) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) searchKeyProviders(ctx context.Context) []keyProvider {
@@ -42,7 +65,7 @@ func (s *Server) searchKeyProviders(ctx context.Context) []keyProvider {
 		}
 		out = append(out, keyProvider{ID: r.Name, Name: r.DisplayName, Kind: "search", Protocol: r.Protocol,
 			BaseURL: s.searchBaseURL(r.Protocol, r.BaseUrl), EnvName: r.ApiKeyEnv, Source: src, Enabled: r.Enabled,
-			SearchOrder: order, InRoute: s.searchOn() && r.Enabled && order > 0})
+			SearchOrder: order, InRoute: s.searchOn() && r.Enabled && searchUses(st, r.Name)})
 	}
 	return out
 }
@@ -69,7 +92,7 @@ func (s *Server) searchRouting(ctx context.Context) (gen.SearchRouting, error) {
 	for _, p := range search.Protocols {
 		protos = append(protos, gen.SearchProtocol{Id: p.ID, Name: p.Name, DefaultBaseUrl: p.DefaultBaseURL, Region: p.Region, DocsUrl: p.DocsURL})
 	}
-	out := gen.SearchRouting{SearchProvider: s.SearchProvider, On: s.searchOn(), Chain: st.Chain, Protocols: protos}
+	out := gen.SearchRouting{SearchProvider: s.SearchProvider, On: s.searchOn(), Chain: st.Chain, RegionalChains: searchRegions(st), Protocols: protos}
 	if out.SearchProvider == "" {
 		out.SearchProvider = "mock"
 	}
@@ -99,35 +122,60 @@ func (s *Server) SaveSearchRouting(ctx context.Context, req gen.SaveSearchRoutin
 		return nil, err
 	}
 	chain := req.Body.Chain
-	if len(chain) == 0 {
-		return nil, apperr.Invalid("至少要有一个主用搜索服务商")
-	}
-	if len(chain) > 5 {
-		return nil, apperr.Invalid("最多 1 个主用加 4 个备用")
-	}
 	rows, err := s.Q.ListSearchProviders(ctx)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
-	seen := map[string]bool{}
-	for _, id := range chain {
-		if seen[id] {
-			return nil, apperr.Invalid("同一个服务商不能出现两次")
+	validate := func(ids []string) error {
+		if len(ids) == 0 || len(ids) > 5 {
+			return apperr.Invalid("每条搜索链需要 1–5 个服务商")
 		}
-		seen[id] = true
-		i := slices.IndexFunc(rows, func(r db.SearchProvider) bool { return r.Name == id })
-		if i < 0 {
-			return nil, apperr.Invalid("没有搜索服务商 " + id)
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if seen[id] {
+				return apperr.Invalid("同一个服务商不能出现两次")
+			}
+			seen[id] = true
+			i := slices.IndexFunc(rows, func(r db.SearchProvider) bool { return r.Name == id })
+			if i < 0 {
+				return apperr.Invalid("没有搜索服务商 " + id)
+			}
+			if !rows[i].Enabled {
+				return apperr.Invalid(rows[i].DisplayName + " 已停用，先启用再选")
+			}
 		}
-		if !rows[i].Enabled {
-			return nil, apperr.Invalid(rows[i].DisplayName + " 已停用，先启用再选")
+		return nil
+	}
+	if err := validate(chain); err != nil {
+		return nil, err
+	}
+	var regional json.RawMessage
+	if req.Body.RegionalChains != nil {
+		for region, ids := range *req.Body.RegionalChains {
+			if !market.Valid(region) {
+				return nil, apperr.Invalid(fmt.Sprintf("搜索地区 %q 无效", region))
+			}
+			if err := validate(ids); err != nil {
+				return nil, err
+			}
+		}
+		regional, err = json.Marshal(*req.Body.RegionalChains)
+		if err != nil {
+			return nil, apperr.Internal(err)
 		}
 	}
-	before, _ := s.searchChain(ctx)
-	if _, err := s.Q.SaveSearchSettings(ctx, db.SaveSearchSettingsParams{Chain: chain, UpdatedBy: &a.ID}); err != nil {
+	before, err := s.searchChain(ctx)
+	if err != nil {
 		return nil, apperr.Internal(err)
 	}
-	s.audit(ctx, "search_routing.save", "search_routing", "search", map[string]any{"before": before.Chain, "after": chain})
+	after, err := s.Q.SaveSearchSettings(ctx, db.SaveSearchSettingsParams{Chain: chain, RegionalChains: regional, UpdatedBy: &a.ID})
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	s.audit(ctx, "search_routing.save", "search_routing", "search", map[string]any{
+		"before": before.Chain, "after": after.Chain,
+		"beforeRegions": searchRegions(before), "afterRegions": searchRegions(after),
+	})
 	r, err := s.searchRouting(ctx)
 	if err != nil {
 		return nil, err
@@ -234,7 +282,7 @@ func (s *Server) UpdateSearchProvider(ctx context.Context, req gen.UpdateSearchP
 		if err != nil {
 			return nil, apperr.Internal(err)
 		}
-		if slices.Contains(st.Chain, cur.Name) {
+		if searchUses(st, cur.Name) {
 			return nil, apperr.Conflict("这个服务商正在主用或备用，先在搜索顺序里去掉再停用")
 		}
 	}
@@ -267,7 +315,7 @@ func (s *Server) DeleteSearchProvider(ctx context.Context, req gen.DeleteSearchP
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
-	if slices.Contains(st.Chain, cur.Name) {
+	if searchUses(st, cur.Name) {
 		return nil, apperr.Conflict("这个服务商正在主用或备用，先在搜索顺序里去掉再删除")
 	}
 	keys, err := s.Q.DeleteProviderKeysFor(ctx, cur.Name)

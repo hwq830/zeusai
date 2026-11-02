@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
@@ -62,7 +63,7 @@ func (q *Queries) DeleteSearchProvider(ctx context.Context, name string) (int64,
 }
 
 const getSearchSettings = `-- name: GetSearchSettings :one
-SELECT id, chain, updated_by, updated_at FROM search_settings WHERE id
+SELECT id, chain, updated_by, updated_at, regional_chains FROM search_settings WHERE id
 `
 
 func (q *Queries) GetSearchSettings(ctx context.Context) (SearchSetting, error) {
@@ -73,6 +74,7 @@ func (q *Queries) GetSearchSettings(ctx context.Context) (SearchSetting, error) 
 		&i.Chain,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.RegionalChains,
 	)
 	return i, err
 }
@@ -113,24 +115,29 @@ func (q *Queries) ListSearchProviders(ctx context.Context) ([]SearchProvider, er
 }
 
 const saveSearchSettings = `-- name: SaveSearchSettings :one
-INSERT INTO search_settings (id, chain, updated_by, updated_at) VALUES (true, $1, $2, now())
-ON CONFLICT (id) DO UPDATE SET chain = EXCLUDED.chain, updated_by = EXCLUDED.updated_by, updated_at = now()
-RETURNING id, chain, updated_by, updated_at
+INSERT INTO search_settings (id, chain, updated_by, updated_at, regional_chains)
+VALUES (true, $1, $2, now(), COALESCE($3::jsonb, '{}'::jsonb))
+ON CONFLICT (id) DO UPDATE SET chain = EXCLUDED.chain,
+regional_chains = COALESCE($3::jsonb, search_settings.regional_chains),
+updated_by = EXCLUDED.updated_by, updated_at = now()
+RETURNING id, chain, updated_by, updated_at, regional_chains
 `
 
 type SaveSearchSettingsParams struct {
-	Chain     []string
-	UpdatedBy *uuid.UUID
+	Chain          []string
+	UpdatedBy      *uuid.UUID
+	RegionalChains json.RawMessage
 }
 
 func (q *Queries) SaveSearchSettings(ctx context.Context, arg SaveSearchSettingsParams) (SearchSetting, error) {
-	row := q.db.QueryRow(ctx, saveSearchSettings, arg.Chain, arg.UpdatedBy)
+	row := q.db.QueryRow(ctx, saveSearchSettings, arg.Chain, arg.UpdatedBy, arg.RegionalChains)
 	var i SearchSetting
 	err := row.Scan(
 		&i.ID,
 		&i.Chain,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.RegionalChains,
 	)
 	return i, err
 }

@@ -108,6 +108,8 @@ var messagesEN = map[string]string{
 	"地区无效":                              "Invalid region",
 	"字段类型 %q 无效":                        "Field type %s is invalid",
 	"字段 %q 需要选项":                        "Field %s needs options",
+	"模板内容地区无效":                          "Invalid template content region",
+	"栏目内容地区无效":                          "Invalid section content region",
 	"栏目标题不能为空":                          "Section titles can't be empty",
 	"信息来源无效":                            "Invalid source",
 	"篇幅应为 short / standard / long":      "Length must be short, standard or long",

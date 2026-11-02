@@ -162,16 +162,16 @@ SELECT * FROM templates WHERE id = $1;
 -- name: AdminCreateOfficialTemplate :one
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
                        default_schedule, default_length, required_connectors, published, sort_order, translations,
-                       markets, market_sources, admin_managed)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true)
+                       markets, market_sources, admin_managed, search_region)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, sqlc.arg(search_region))
 RETURNING *;
 
 -- name: AdminUpdateTemplate :one
 UPDATE templates SET
     name = $2, description = $3, category = $4, icon = $5, fields = $6, sections = $7, sources = $8,
     default_schedule = $9, default_length = $10, required_connectors = $11, published = $12, sort_order = $13,
-    translations = $14, markets = $15, market_sources = $16,
-    version = CASE WHEN (fields, sections, sources, market_sources) IS DISTINCT FROM ($6::jsonb, $7::jsonb, $8::jsonb, $16::jsonb)
+    translations = $14, markets = $15, market_sources = $16, search_region = sqlc.arg(search_region),
+    version = CASE WHEN (fields, sections, sources, market_sources, search_region) IS DISTINCT FROM ($6::jsonb, $7::jsonb, $8::jsonb, $16::jsonb, sqlc.arg(search_region)::text)
                    THEN version + 1 ELSE version END,
     admin_managed = true, updated_at = now()
 WHERE id = $1

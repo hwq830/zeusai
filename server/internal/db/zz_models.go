@@ -498,10 +498,11 @@ type SearchProvider struct {
 }
 
 type SearchSetting struct {
-	ID        bool
-	Chain     []string
-	UpdatedBy *uuid.UUID
-	UpdatedAt time.Time
+	ID             bool
+	Chain          []string
+	UpdatedBy      *uuid.UUID
+	UpdatedAt      time.Time
+	RegionalChains json.RawMessage
 }
 
 type Share struct {
@@ -576,6 +577,7 @@ type Template struct {
 	Translations       json.RawMessage
 	Markets            []string
 	MarketSources      json.RawMessage
+	SearchRegion       string
 }
 
 type User struct {

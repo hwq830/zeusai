@@ -1352,7 +1352,7 @@ components:
       description: |
         用户所在地区，决定能看到哪些官方简报模板、简报用哪些信源和搜索地区。App 按手机的地区设置上报
         （和时区一样），用户也可以在「语言与地区」里手动改；不在列表里的地区报 other。
-      enum: [TW, HK, MO, SG, MY, US, other]
+      enum: [CN, TW, HK, MO, SG, MY, US, other]
     Language:
       type: string
       description: 简体中文 / 繁體中文 / English
@@ -1510,6 +1510,10 @@ components:
           type: string
           description: 给 Agent 的本节写作要求，可引用字段 {{companies}}
         maxItems: { type: integer, default: 5 }
+        searchRegion:
+          type: string
+          enum: [CN, TW, HK, MO, SG, MY, US, other, global]
+          description: 本栏目的内容地区；不填继承模板或用户地区，global 表示全球
         private:
           type: boolean
           default: false
@@ -1556,6 +1560,10 @@ components:
       type: object
       required: [name, fields, sections]
       properties:
+        searchRegion:
+          type: string
+          enum: [CN, TW, HK, MO, SG, MY, US, other, global]
+          description: 模板内容地区；不填跟随用户，global 为全球；栏目可单独覆盖
         name: { type: string, maxLength: 40 }
         description: { type: string, maxLength: 200 }
         category: { type: string }

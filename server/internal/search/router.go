@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,10 +23,36 @@ type KeySource interface {
 	BaseURL(ctx context.Context, provider string) string
 }
 
-// Router sends each search to the first provider of the current chain (primary, then the
-// fallbacks in order) and moves on when one fails. The chain is reloaded about once a minute,
-// so a switch in the admin console needs no restart.
+// Routing is an immutable snapshot shared by all content regions.
+type Routing struct {
+	Default []Provider
+	Regions map[string][]Provider
+}
+
+func (c Routing) Chain(country string) []Provider {
+	region := strings.TrimSpace(country)
+	if strings.EqualFold(region, "global") {
+		return c.Default
+	}
+	if strings.EqualFold(region, "other") {
+		region = "other"
+	} else {
+		region = strings.ToUpper(region)
+	}
+	if chain, ok := c.Regions[region]; ok {
+		return chain
+	}
+	return c.Default
+}
+
+// Router selects a regional chain and tries providers within a bounded time budget.
+// Configuration reloads about once a minute without restarting.
 type Router struct {
+	LoadRouting func(context.Context) (Routing, error)
+	routing     *Routing
+	// Per-attempt and total search budgets; defaults 8s and 30s.
+	AttemptTimeout time.Duration
+	TotalTimeout   time.Duration
 	// Load returns the chain, primary first. On error the last good chain is kept, and
 	// Fallback is used when there is none yet.
 	Load     func(ctx context.Context) ([]Provider, error)
@@ -50,13 +77,27 @@ func (r *Router) now() time.Time {
 	return time.Now()
 }
 
-func (r *Router) current(ctx context.Context) []Provider {
+func (r *Router) current(ctx context.Context, country string) []Provider {
 	every := r.Every
 	if every <= 0 {
 		every = time.Minute
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.LoadRouting != nil {
+		if r.routing == nil || r.now().Sub(r.loaded) >= every {
+			c, err := r.LoadRouting(ctx)
+			if err == nil {
+				r.routing, r.loaded = &c, r.now()
+			} else if r.Log != nil {
+				r.Log.Warn("search routing reload failed")
+			}
+		}
+		if r.routing != nil {
+			return r.routing.Chain(country)
+		}
+		return r.Fallback
+	}
 	if r.chain != nil && r.now().Sub(r.loaded) < every {
 		return r.chain
 	}
@@ -111,7 +152,23 @@ func (r *Router) mark(name string, failed bool) {
 var ErrNoProvider = errors.New("search: no search provider is configured")
 
 func (r *Router) Search(ctx context.Context, q Query) ([]Result, error) {
-	chain := r.current(ctx)
+	total := r.TotalTimeout
+	if total <= 0 {
+		total = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, total)
+	defer cancel()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	region := q.Region
+	if region == "" {
+		region = q.Country
+	}
+	if strings.EqualFold(region, "global") {
+		q.Country = ""
+	}
+	chain := r.current(ctx, region)
 	// Providers that failed recently go last, so a dead primary does not slow every search.
 	ordered := make([]Provider, 0, len(chain))
 	var cooling []Provider
@@ -124,7 +181,14 @@ func (r *Router) Search(ctx context.Context, q Query) ([]Result, error) {
 	}
 	ordered = append(ordered, cooling...)
 	var errs []error
+	attempts, empties, maxAttempts := 0, 0, 5
 	for _, p := range ordered {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if attempts >= maxAttempts {
+			break
+		}
 		var key, base string
 		if r.Keys != nil {
 			key, base = r.Keys.Key(ctx, p.Name, p.KeyEnv), r.Keys.BaseURL(ctx, p.Name)
@@ -141,19 +205,46 @@ func (r *Router) Search(ctx context.Context, q Query) ([]Result, error) {
 			errs = append(errs, err)
 			continue
 		}
-		res, err := s.Search(ctx, q)
+		attempt := r.AttemptTimeout
+		if attempt <= 0 {
+			attempt = 8 * time.Second
+		}
+		callCtx, stop := context.WithTimeout(ctx, attempt)
+		started := time.Now()
+		attempts++
+		res, err := s.Search(callCtx, q)
+		stop()
+		outcome := "success"
+		if err != nil {
+			outcome = "error"
+		} else if len(res) == 0 {
+			outcome = "empty"
+		}
+		if r.Log != nil {
+			r.Log.Info("search attempt", "region", region, "country", q.Country, "provider", p.Name, "attempt", attempts, "outcome", outcome, "results", len(res), "duration_ms", time.Since(started).Milliseconds())
+		}
 		if err == nil {
 			r.mark(p.Name, false)
-			return res, nil
+			if len(res) > 0 {
+				return res, nil
+			}
+			empties++
+			if empties == 1 {
+				maxAttempts = min(maxAttempts, attempts+1)
+			}
+			continue
 		}
 		if ctx.Err() != nil {
-			return nil, err
+			return nil, ctx.Err()
 		}
 		r.mark(p.Name, true)
 		errs = append(errs, err)
 		if r.Log != nil {
-			r.Log.Warn("search provider failed; trying the next one", "provider", p.Name, "err", err)
+			r.Log.Warn("search provider failed; trying the next one", "provider", p.Name)
 		}
+	}
+	if empties > 0 {
+		return []Result{}, nil
 	}
 	if len(errs) == 0 {
 		return nil, ErrNoProvider

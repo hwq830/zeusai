@@ -192,13 +192,17 @@ func clip(s string, n int) string {
 // subscriber's market: it picks the template's sources and the search region; Traditional
 // Chinese markets search in Traditional Chinese.
 func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i18n.Lang, mkt string) []SectionPlan {
-	q := func(text, site string) search.Query {
+	contentRegion := mkt
+	if t != nil {
+		contentRegion = market.SearchRegion(t.SearchRegion, mkt)
+	}
+	q := func(text, site, region string) search.Query {
 		text = strings.TrimSpace(text)
-		if market.Traditional(mkt) {
+		if market.Traditional(region) {
 			text = i18n.Hant(text)
 		}
-		return search.Query{Q: clip(text, 60), Site: site, FreshDays: fresh, Limit: 6,
-			Country: market.Country(mkt), Lang: market.SearchLang(mkt)}
+		return search.Query{Q: clip(text, 400), Site: site, FreshDays: fresh, Limit: 6,
+			Region: region, Country: market.Country(region), Lang: market.SearchLang(region)}
 	}
 	if t == nil {
 		var out []SectionPlan
@@ -208,7 +212,7 @@ func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i
 			}
 			out = append(out, SectionPlan{
 				Key: fmt.Sprintf("t%d", i+1), Title: topic, MaxItems: 4,
-				Queries: []search.Query{q(topic+lang.Pick(" 最新", " latest"), "")},
+				Queries: []search.Query{q(topic+lang.Pick(" 最新", " latest"), "", contentRegion)},
 			})
 		}
 		return out
@@ -220,29 +224,33 @@ func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i
 		if strings.TrimSpace(strings.Trim(text, "、 ")) == "" {
 			text = s.Title
 		}
-		out = append(out, SectionPlan{Key: s.Key, Title: s.Title, Instruction: instr, MaxItems: s.MaxItems, Private: s.Private, Queries: []search.Query{q(text, "")}})
+		out = append(out, SectionPlan{Key: s.Key, Title: s.Title, Instruction: instr, MaxItems: s.MaxItems, Private: s.Private, Queries: []search.Query{q(text, "", market.SearchRegion(s.SearchRegion, contentRegion))}})
 	}
-	// Template-level sources are spread over the sections.
-	i := 0
-	for _, src := range t.SourcesFor(mkt) {
-		var query search.Query
-		switch src.Type {
-		case "search":
-			text := tpl.Expand(src.Value, sub.FieldValues)
-			if strings.TrimSpace(text) == "" {
+	// Spread each region's sources over sections; explicit content regions also select sources.
+	for sectionIndex := range out {
+		region := market.SearchRegion(t.Sections[sectionIndex].SearchRegion, contentRegion)
+		for sourceIndex, src := range t.SourcesFor(region) {
+			if sourceIndex%len(out) != sectionIndex {
 				continue
 			}
-			query = q(text, "")
-		case "site":
-			query = q(tpl.Expand(out[i%len(out)].Instruction, sub.FieldValues), src.Value)
-		default: // rss and connector sources are read by the report agent, not the briefing path
-			continue
+			var query search.Query
+			switch src.Type {
+			case "search":
+				text := tpl.Expand(src.Value, sub.FieldValues)
+				if strings.TrimSpace(text) == "" {
+					continue
+				}
+				query = q(text, "", region)
+			case "site":
+				query = q(tpl.Expand(out[sectionIndex].Instruction, sub.FieldValues), src.Value, region)
+			default:
+				continue
+			}
+			out[sectionIndex].Queries = append(out[sectionIndex].Queries, query)
 		}
-		out[i%len(out)].Queries = append(out[i%len(out)].Queries, query)
-		i++
 	}
 	if len(sub.Topics) > 0 {
-		out[0].Queries = append(out[0].Queries, q(strings.Join(sub.Topics, " "), ""))
+		out[0].Queries = append(out[0].Queries, q(strings.Join(sub.Topics, " "), "", market.SearchRegion(t.Sections[0].SearchRegion, contentRegion)))
 	}
 	return out
 }

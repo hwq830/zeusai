@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -110,7 +111,9 @@ func Search(cfg config.Config, q *db.Queries, keys *secrets.Keys, log *slog.Logg
 	r := &search.Router{Keys: keys, Log: log,
 		Fallback: []search.Provider{{Name: BochaProvider, Protocol: search.ProtocolBocha, KeyEnv: "ZEUS_BOCHA_API_KEY"}}}
 	if q != nil {
-		r.Load = func(ctx context.Context) ([]search.Provider, error) { return SearchChain(ctx, q) }
+		// A cold-start database error must not send global requests to the legacy Bocha route.
+		r.Fallback = nil
+		r.LoadRouting = func(ctx context.Context) (search.Routing, error) { return SearchRouting(ctx, q) }
 	}
 	return r, nil
 }
@@ -118,25 +121,41 @@ func Search(cfg config.Config, q *db.Queries, keys *secrets.Keys, log *slog.Logg
 // SearchChain is the configured search order: enabled providers named in search_settings,
 // primary first.
 func SearchChain(ctx context.Context, q *db.Queries) ([]search.Provider, error) {
+	c, err := SearchRouting(ctx, q)
+	return c.Default, err
+}
+
+func SearchRouting(ctx context.Context, q *db.Queries) (search.Routing, error) {
 	st, err := q.GetSearchSettings(ctx)
 	if err != nil {
-		return nil, err
+		return search.Routing{}, err
 	}
 	rows, err := q.ListSearchProviders(ctx)
 	if err != nil {
-		return nil, err
+		return search.Routing{}, err
 	}
 	byName := make(map[string]db.SearchProvider, len(rows))
 	for _, p := range rows {
 		byName[p.Name] = p
 	}
-	out := make([]search.Provider, 0, len(st.Chain))
-	for _, n := range st.Chain {
-		if p, ok := byName[n]; ok && p.Enabled {
-			out = append(out, search.Provider{Name: p.Name, Protocol: p.Protocol, BaseURL: p.BaseUrl, KeyEnv: p.ApiKeyEnv})
+	resolve := func(ids []string) []search.Provider {
+		out := make([]search.Provider, 0, len(ids))
+		for _, n := range ids {
+			if p, ok := byName[n]; ok && p.Enabled {
+				out = append(out, search.Provider{Name: p.Name, Protocol: p.Protocol, BaseURL: p.BaseUrl, KeyEnv: p.ApiKeyEnv})
+			}
 		}
+		return out
 	}
-	return out, nil
+	var regions map[string][]string
+	if err := json.Unmarshal(st.RegionalChains, &regions); err != nil {
+		return search.Routing{}, err
+	}
+	c := search.Routing{Default: resolve(st.Chain), Regions: make(map[string][]search.Provider)}
+	for region, ids := range regions {
+		c.Regions[region] = resolve(ids)
+	}
+	return c, nil
 }
 
 // Browse returns the page reader, or nil with mock search: fake result URLs do not resolve.

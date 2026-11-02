@@ -36,3 +36,39 @@ func TestBuildSectionsUsesMarket(t *testing.T) {
 		t.Fatalf("US queries %+v", us)
 	}
 }
+
+func TestBuildSectionsContentRegionOverridesUser(t *testing.T) {
+	tp := &tpl.Template{Input: tpl.Input{SearchRegion: "US", Sections: []tpl.Section{
+		{Key: "us", Title: "美国"}, {Key: "cn", Title: "大陆", SearchRegion: "CN"}, {Key: "world", Title: "全球", SearchRegion: "global"},
+	}, Sources: []tpl.Source{{Type: "site", Value: "example.com"}, {Type: "search", Value: "大陆 新闻"}, {Type: "search", Value: "global news"}}}}
+	sections := buildSections(briefing.Subscription{}, tp, 1, i18n.ZHHant, "TW")
+	for i, want := range []string{"US", "CN", "global"} {
+		for _, q := range sections[i].Queries {
+			if q.Region != want {
+				t.Errorf("section %d: %+v", i, q)
+			}
+		}
+	}
+	if sections[1].Queries[0].Lang != "zh-hans" || sections[2].Queries[0].Country != "" {
+		t.Fatal("search locale must follow content, not output language")
+	}
+}
+
+func TestReportQuestionRegions(t *testing.T) {
+	for _, tc := range []struct {
+		values   []string
+		fallback string
+		want     string
+	}{
+		{nil, "CN", "CN"}, {[]string{"US"}, "CN", "US"}, {[]string{"global"}, "CN", "global"}, {[]string{"bogus"}, "TW", "TW"},
+	} {
+		got := questionRegions(tc.values, tc.fallback)
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("%+v got %+v", tc, got)
+		}
+	}
+	got := questionRegions([]string{"CN", "CN", "TW", "US", "HK"}, "other")
+	if len(got) != 3 || got[0] != "CN" || got[1] != "TW" || got[2] != "US" {
+		t.Fatalf("invalid bounded region plan: %v", got)
+	}
+}
