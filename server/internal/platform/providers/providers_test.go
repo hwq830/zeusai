@@ -33,3 +33,27 @@ func TestIdentities(t *testing.T) {
 		t.Errorf("wechat %T", full.Wechat)
 	}
 }
+
+func TestInternationalIdentityProviders(t *testing.T) {
+	dev := Identities(config.Config{Env: "dev"}, nil)
+	if _, ok := dev.Email.(auth.DevEmail); !ok {
+		t.Fatalf("dev email: %T", dev.Email)
+	}
+	if _, ok := dev.Google.(auth.DevGoogle); !ok {
+		t.Fatalf("dev Google: %T", dev.Google)
+	}
+	prod := Identities(config.Config{Env: "prod"}, nil)
+	if _, err := prod.Google.VerifyGoogle(context.Background(), "dev:person@example.com"); err == nil {
+		t.Fatal("production accepted dev credential")
+	}
+	if err := prod.Email.SendCode(context.Background(), "person@example.com", "123456"); err == nil {
+		t.Fatal("production silently fake-sent email")
+	}
+	full := Identities(config.Config{Env: "prod", GoogleClientIDs: "web1, web2", SMTPHost: "smtp.example.com", SMTPFrom: "Zeus <noreply@example.com>"}, nil)
+	if google, ok := full.Google.(*auth.Google); !ok || len(google.ClientIDs) != 2 {
+		t.Fatalf("Google: %#v", full.Google)
+	}
+	if sender, ok := full.Email.(auth.SMTPEmail); !ok || sender.Port != 587 {
+		t.Fatalf("SMTP: %#v", full.Email)
+	}
+}

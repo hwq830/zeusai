@@ -48,6 +48,48 @@ tags:
 
 paths:
   # ---------------------------------------------------------------- auth
+  /v1/auth/email/send:
+    post:
+      tags: [auth]
+      operationId: sendEmailCode
+      summary: 发送邮箱验证码
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendEmailCodeRequest' }
+      responses:
+        '204': { description: 已发送 }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/email/verify:
+    post:
+      tags: [auth]
+      operationId: verifyEmailCode
+      summary: 邮箱验证码登录，新用户自动注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyEmailCodeRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/auth/google:
+    post:
+      tags: [auth]
+      operationId: loginGoogle
+      summary: Google ID Token 登录，新用户自动注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GoogleLoginRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Session' }
+        default: { $ref: '#/components/responses/Error' }
   /v1/auth/sms/send:
     post:
       tags: [auth]
@@ -1293,6 +1335,22 @@ components:
           format: date-time
 
     # ------------------------------------------------------------ auth
+    SendEmailCodeRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+    VerifyEmailCodeRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        code: { type: string, minLength: 6, maxLength: 6 }
+    GoogleLoginRequest:
+      type: object
+      required: [identityToken]
+      properties:
+        identityToken: { type: string, minLength: 1 }
     SendSmsCodeRequest:
       type: object
       required: [phone]
@@ -1359,6 +1417,7 @@ components:
         id: { type: string }
         nickname: { type: string }
         avatarUrl: { type: string, format: uri }
+        email: { type: string, format: email }
         phoneMasked:
           type: string
           example: 138****8000
@@ -1369,7 +1428,7 @@ components:
           type: array
           items:
             type: string
-            enum: [phone, wechat, apple]
+            enum: [phone, wechat, apple, email, google]
         uiLanguage: { $ref: '#/components/schemas/Language' }
         reportLanguage: { $ref: '#/components/schemas/ReportLanguage' }
         market: { $ref: '#/components/schemas/Market' }

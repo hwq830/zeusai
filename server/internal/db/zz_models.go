@@ -630,6 +630,9 @@ type User struct {
 	UiLanguage     string
 	ReportLanguage string
 	Market         string
+	Email          *string
+	GoogleSub      *string
+	GoogleEmail    *string
 }
 
 type UserConnector struct {

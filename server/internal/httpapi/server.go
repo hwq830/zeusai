@@ -68,7 +68,7 @@ var _ gen.StrictServerInterface = (*Server)(nil)
 // Handler returns the full HTTP handler: health check plus the /v1 API.
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, s.configVersionHeader, requestLanguage)
+	r.Use(middleware.RequestID, middleware.RealIP, middleware.Recoverer, s.configVersionHeader, requestLanguage, s.limitInternationalAuth)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	r.Get("/s/{token}", s.sharePage)
 	r.Get("/s/{token}/go", s.shareCTA)

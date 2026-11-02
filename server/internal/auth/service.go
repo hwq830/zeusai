@@ -19,14 +19,17 @@ import (
 )
 
 type Service struct {
-	Q          *db.Queries
-	Redis      *redis.Client
-	Tokens     *Tokens
-	RefreshTTL time.Duration
-	SMS        SMSSender
-	Apple      AppleVerifier
-	Wechat     WechatExchanger
-	OneClick   OneClickVerifier
+	Email          EmailSender
+	Google         GoogleVerifier
+	FixedEmailCode string
+	Q              *db.Queries
+	Redis          *redis.Client
+	Tokens         *Tokens
+	RefreshTTL     time.Duration
+	SMS            SMSSender
+	Apple          AppleVerifier
+	Wechat         WechatExchanger
+	OneClick       OneClickVerifier
 	// FixedSMSCode, when set (dev only), is sent instead of a random code.
 	FixedSMSCode string
 }

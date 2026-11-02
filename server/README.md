@@ -185,3 +185,17 @@ CI 会检查生成代码与 `api/openapi.yaml`、`queries/*.sql` 一致。
 管理后台「调用记录」支持按类型、服务商、请求/响应模型、状态、任务、用户和时间查询，游标分页；任务抽屉以及简报/报告生成过程也展示这份账本。原有成功响应计费用量单独保留，用户额度退款规则保持不变。历史未记录的厂商调用无法凭空补齐，账本从上线后开始积累。
 
 「模型路由」页可直接修改服务商调用超时（10–600 秒），影响该服务商的所有档位和环节；修改通过既有服务商接口审计并热加载，超时不属于路由历史版本恢复的字段。千问运行时配置已按要求调整为 180 秒。
+
+
+### 海外邮箱与 Google 登录
+
+海外 iOS 构建提供 Apple、邮箱验证码和 Google 登录；中国大陆构建保留手机号、微信和 Apple 登录。
+
+- 邮箱：`POST /v1/auth/email/send` 后调用 `/v1/auth/email/verify`；验证码有效期 5 分钟、重发间隔 60 秒、最多 5 次验证尝试，成功后立即失效。Redis 只保存验证码摘要。
+- 开发测试：`ZEUS_ENV=dev` 且未配置 SMTP 时，默认验证码为 `123456`，不发送邮件。可通过 `ZEUS_DEV_EMAIL_CODE` 覆盖；非 dev 环境禁止此配置。
+- Google：`POST /v1/auth/google` 接收原生 SDK 的 `identityToken`。`ZEUS_GOOGLE_CLIENT_IDS` 填允许的 Web OAuth Client ID，多个值用逗号分隔。服务端验证 Google 签名、issuer、audience、有效期和已验证邮箱。只有 dev 环境支持 `dev:<email>` 测试 token。
+- 邮箱登录和 Google 登录按各自验证的身份创建账户，暂不根据相同邮箱自动合并账户。
+- 上线发信配置：`ZEUS_SMTP_HOST`、`ZEUS_SMTP_PORT`（默认 587）、`ZEUS_SMTP_USERNAME`、`ZEUS_SMTP_PASSWORD`、`ZEUS_SMTP_FROM`。465 使用隐式 TLS，其余端口要求 STARTTLS。密码仅配置到服务端环境，不写入 App 或代码库。
+- iOS 配置：`ZEUS_GOOGLE_IOS_CLIENT_ID`、`ZEUS_GOOGLE_SERVER_CLIENT_ID`（Web Client ID）、`ZEUS_GOOGLE_URL_SCHEME`（反向 iOS Client ID）。无需 Client Secret。
+
+依赖迁移 `00023_international_auth.sql`。需先部署服务端，再合并使用新接口的 iOS PR。
