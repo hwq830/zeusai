@@ -420,7 +420,7 @@ paths:
     post:
       tags: [subscriptions]
       operationId: runSubscription
-      summary: 立即生成一期（预览）。返回任务，进度走 SSE，完成事件带 briefingId
+      summary: 立即生成一期。需先保存订阅，返回任务，进度走 SSE，完成事件带 briefingId
       responses:
         '202':
           description: Accepted
@@ -430,6 +430,24 @@ paths:
         default: { $ref: '#/components/responses/Error' }
 
   # ---------------------------------------------------------------- briefings
+  /v1/briefings/subscriptions:
+    get:
+      tags: [briefings]
+      operationId: listBriefingHistorySubscriptions
+      summary: 历史筛选用的订阅，包含已删除但仍有历史内容的订阅
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BriefingHistorySubscription' }
+        default: { $ref: '#/components/responses/Error' }
   /v1/briefings:
     get:
       tags: [briefings]
@@ -441,6 +459,15 @@ paths:
           schema: { type: string }
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - name: dateFrom
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: dateTo
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: unreadOnly
+          in: query
+          schema: { type: boolean, default: false }
       responses:
         '200':
           description: OK
@@ -1709,6 +1736,13 @@ components:
     BriefingStatus:
       type: string
       enum: [generating, ready, failed]
+    BriefingHistorySubscription:
+      type: object
+      required: [id, name, deleted]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        deleted: { type: boolean }
     BriefingSummary:
       type: object
       required: [id, subscriptionId, title, date, status, itemCount, sourceCount]

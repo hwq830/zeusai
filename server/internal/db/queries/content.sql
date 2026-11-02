@@ -94,7 +94,7 @@ WITH x AS (
     LEFT JOIN templates tp ON tp.id = s.template_id
     LEFT JOIN LATERAL (SELECT b.status, b.date, b.item_count FROM briefings b WHERE b.subscription_id = s.id
                        ORDER BY b.date DESC LIMIT 1) lb ON true
-    WHERE (sqlc.narg(id)::uuid IS NULL OR s.id = sqlc.narg(id))
+    WHERE s.status <> 'deleted' AND (sqlc.narg(id)::uuid IS NULL OR s.id = sqlc.narg(id))
       AND (sqlc.narg(user_id)::uuid IS NULL OR s.user_id = sqlc.narg(user_id))
       AND (sqlc.narg(template_id)::uuid IS NULL OR s.template_id = sqlc.narg(template_id))
       AND (sqlc.narg(status)::text IS NULL OR s.status = sqlc.narg(status))
@@ -108,11 +108,11 @@ ORDER BY x.created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: AdminGetSubscription :one
-SELECT * FROM briefing_subscriptions WHERE id = $1;
+SELECT * FROM briefing_subscriptions WHERE id = $1 AND status <> 'deleted';
 
 -- name: AdminSetSubscriptionStatus :one
 UPDATE briefing_subscriptions SET status = $2, paused_reason = $3, next_run_at = $4, updated_at = now()
-WHERE id = $1 RETURNING *;
+WHERE id = $1 AND status <> 'deleted' RETURNING *;
 
 -- ------------------------------------------------------------------ briefings
 

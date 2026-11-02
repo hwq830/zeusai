@@ -144,12 +144,12 @@ WHERE user_id = $1 AND status = 'paused' AND paused_reason = 'account_disabled'
 RETURNING *;
 
 -- name: SetSubscriptionNextRun :exec
-UPDATE briefing_subscriptions SET next_run_at = $2 WHERE id = $1;
+UPDATE briefing_subscriptions SET next_run_at = $2 WHERE id = $1 AND status <> 'deleted';
 
 -- ------------------------------------------------------------------ templates
 
 -- name: AdminListTemplates :many
-SELECT t.*, (SELECT count(*) FROM briefing_subscriptions s WHERE s.template_id = t.id)::int AS subscription_count
+SELECT t.*, (SELECT count(*) FROM briefing_subscriptions s WHERE s.template_id = t.id AND s.status <> 'deleted')::int AS subscription_count
 FROM templates t
 WHERE ((sqlc.arg(scope)::text = 'official' AND t.owner_id IS NULL) OR (sqlc.arg(scope)::text = 'custom' AND t.owner_id IS NOT NULL))
   AND (sqlc.narg(q)::text IS NULL OR t.name ILIKE '%' || sqlc.narg(q) || '%' OR t.description ILIKE '%' || sqlc.narg(q) || '%')

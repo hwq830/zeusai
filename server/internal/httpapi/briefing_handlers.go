@@ -168,7 +168,7 @@ func (s *Server) RunSubscription(ctx context.Context, req gen.RunSubscriptionReq
 
 func (s *Server) ListBriefings(ctx context.Context, req gen.ListBriefingsRequestObject) (gen.ListBriefingsResponseObject, error) {
 	lim, off := page(req.Params.Cursor, req.Params.Limit)
-	items, err := s.Briefings.ListBriefings(ctx, userID(ctx), briefing.ListParams{SubscriptionID: deref(req.Params.SubscriptionId), Limit: lim, Offset: off})
+	items, err := s.Briefings.ListBriefings(ctx, userID(ctx), briefing.ListParams{SubscriptionID: deref(req.Params.SubscriptionId), Limit: lim, Offset: off, DateFrom: deref(req.Params.DateFrom), DateTo: deref(req.Params.DateTo), UnreadOnly: req.Params.UnreadOnly != nil && *req.Params.UnreadOnly})
 	if err != nil {
 		return nil, err
 	}
@@ -219,4 +219,12 @@ func (s *Server) GetBriefingPdf(ctx context.Context, req gen.GetBriefingPdfReque
 		return nil, err
 	}
 	return gen.GetBriefingPdf200JSONResponse(recode[gen.FileLink](link)), nil
+}
+
+func (s *Server) ListBriefingHistorySubscriptions(ctx context.Context, _ gen.ListBriefingHistorySubscriptionsRequestObject) (gen.ListBriefingHistorySubscriptionsResponseObject, error) {
+	rows, err := s.Q.ListBriefingHistorySubscriptions(ctx, userID(ctx))
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	return gen.ListBriefingHistorySubscriptions200JSONResponse{Items: recode[[]gen.BriefingHistorySubscription](rows)}, nil
 }

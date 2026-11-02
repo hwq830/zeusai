@@ -334,7 +334,7 @@ func (q *Queries) AdminGetReportFeedback(ctx context.Context, reportID uuid.UUID
 }
 
 const adminGetSubscription = `-- name: AdminGetSubscription :one
-SELECT id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at FROM briefing_subscriptions WHERE id = $1
+SELECT id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at FROM briefing_subscriptions WHERE id = $1 AND status <> 'deleted'
 `
 
 func (q *Queries) AdminGetSubscription(ctx context.Context, id uuid.UUID) (BriefingSubscription, error) {
@@ -821,7 +821,7 @@ WITH x AS (
     LEFT JOIN templates tp ON tp.id = s.template_id
     LEFT JOIN LATERAL (SELECT b.status, b.date, b.item_count FROM briefings b WHERE b.subscription_id = s.id
                        ORDER BY b.date DESC LIMIT 1) lb ON true
-    WHERE ($4::uuid IS NULL OR s.id = $4)
+    WHERE s.status <> 'deleted' AND ($4::uuid IS NULL OR s.id = $4)
       AND ($5::uuid IS NULL OR s.user_id = $5)
       AND ($6::uuid IS NULL OR s.template_id = $6)
       AND ($7::text IS NULL OR s.status = $7)
@@ -1094,7 +1094,7 @@ func (q *Queries) AdminSetReportHidden(ctx context.Context, arg AdminSetReportHi
 
 const adminSetSubscriptionStatus = `-- name: AdminSetSubscriptionStatus :one
 UPDATE briefing_subscriptions SET status = $2, paused_reason = $3, next_run_at = $4, updated_at = now()
-WHERE id = $1 RETURNING id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at
+WHERE id = $1 AND status <> 'deleted' RETURNING id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at
 `
 
 type AdminSetSubscriptionStatusParams struct {

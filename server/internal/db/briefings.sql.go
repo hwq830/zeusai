@@ -65,7 +65,7 @@ func (q *Queries) CompleteBriefing(ctx context.Context, arg CompleteBriefingPara
 }
 
 const countActiveSubscriptions = `-- name: CountActiveSubscriptions :one
-SELECT count(*)::int FROM briefing_subscriptions WHERE user_id = $1
+SELECT count(*)::int FROM briefing_subscriptions WHERE user_id = $1 AND status <> 'deleted'
 `
 
 func (q *Queries) CountActiveSubscriptions(ctx context.Context, userID uuid.UUID) (int32, error) {
@@ -132,7 +132,9 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 }
 
 const deleteSubscription = `-- name: DeleteSubscription :execrows
-DELETE FROM briefing_subscriptions WHERE id = $1 AND user_id = $2
+UPDATE briefing_subscriptions SET status = 'deleted', paused_reason = 'user_deleted',
+    next_run_at = NULL, push_enabled = false, updated_at = now()
+WHERE id = $1 AND user_id = $2
 `
 
 type DeleteSubscriptionParams struct {
@@ -140,6 +142,7 @@ type DeleteSubscriptionParams struct {
 	UserID uuid.UUID
 }
 
+// Keep the subscription identity and all issues for history and existing shares.
 func (q *Queries) DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSubscription, arg.ID, arg.UserID)
 	if err != nil {
@@ -216,7 +219,7 @@ func (q *Queries) GetBriefingFeedback(ctx context.Context, arg GetBriefingFeedba
 }
 
 const getSubscription = `-- name: GetSubscription :one
-SELECT id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at FROM briefing_subscriptions WHERE id = $1 AND user_id = $2
+SELECT id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at FROM briefing_subscriptions WHERE id = $1 AND user_id = $2 AND status <> 'deleted'
 `
 
 type GetSubscriptionParams struct {
@@ -249,10 +252,47 @@ func (q *Queries) GetSubscription(ctx context.Context, arg GetSubscriptionParams
 	return i, err
 }
 
+const listBriefingHistorySubscriptions = `-- name: ListBriefingHistorySubscriptions :many
+SELECT s.id, s.name, (s.status = 'deleted')::boolean AS deleted
+FROM briefing_subscriptions s
+WHERE s.user_id = $1
+  AND EXISTS (SELECT 1 FROM briefings b WHERE b.subscription_id = s.id AND b.user_id = $1)
+ORDER BY s.created_at, s.id
+`
+
+type ListBriefingHistorySubscriptionsRow struct {
+	ID      uuid.UUID
+	Name    string
+	Deleted bool
+}
+
+func (q *Queries) ListBriefingHistorySubscriptions(ctx context.Context, userID uuid.UUID) ([]ListBriefingHistorySubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listBriefingHistorySubscriptions, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBriefingHistorySubscriptionsRow{}
+	for rows.Next() {
+		var i ListBriefingHistorySubscriptionsRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Deleted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBriefings = `-- name: ListBriefings :many
 SELECT id, user_id, subscription_id, task_id, title, date, status, headline, sections, item_count, source_count, read_at, generated_at, created_at, language, pdf_status, pdf_key, hidden_at, hidden_reason, hidden_by FROM briefings
 WHERE user_id = $1 AND ($4::uuid IS NULL OR subscription_id = $4)
-ORDER BY date DESC, created_at DESC
+  AND ($5::date IS NULL OR date >= $5)
+  AND ($6::date IS NULL OR date <= $6)
+  AND (NOT $7::boolean OR read_at IS NULL)
+ORDER BY date DESC, created_at DESC, id DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -261,6 +301,9 @@ type ListBriefingsParams struct {
 	Limit          int32
 	Offset         int32
 	SubscriptionID *uuid.UUID
+	DateFrom       *time.Time
+	DateTo         *time.Time
+	UnreadOnly     bool
 }
 
 func (q *Queries) ListBriefings(ctx context.Context, arg ListBriefingsParams) ([]Briefing, error) {
@@ -269,6 +312,9 @@ func (q *Queries) ListBriefings(ctx context.Context, arg ListBriefingsParams) ([
 		arg.Limit,
 		arg.Offset,
 		arg.SubscriptionID,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.UnreadOnly,
 	)
 	if err != nil {
 		return nil, err
@@ -360,7 +406,7 @@ func (q *Queries) ListBriefingsOnDate(ctx context.Context, arg ListBriefingsOnDa
 }
 
 const listSubscriptions = `-- name: ListSubscriptions :many
-SELECT id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at FROM briefing_subscriptions WHERE user_id = $1 ORDER BY created_at
+SELECT id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at FROM briefing_subscriptions WHERE user_id = $1 AND status <> 'deleted' ORDER BY created_at
 `
 
 func (q *Queries) ListSubscriptions(ctx context.Context, userID uuid.UUID) ([]BriefingSubscription, error) {
@@ -438,7 +484,7 @@ func (q *Queries) SetBriefingPDF(ctx context.Context, arg SetBriefingPDFParams) 
 
 const setSubscriptionLastBriefing = `-- name: SetSubscriptionLastBriefing :exec
 UPDATE briefing_subscriptions SET last_briefing_id = $3, next_run_at = $4, updated_at = now()
-WHERE id = $1 AND user_id = $2
+WHERE id = $1 AND user_id = $2 AND status <> 'deleted'
 `
 
 type SetSubscriptionLastBriefingParams struct {
@@ -512,7 +558,7 @@ func (q *Queries) StartBriefing(ctx context.Context, arg StartBriefingParams) (B
 }
 
 const touchSubscriptionOpened = `-- name: TouchSubscriptionOpened :exec
-UPDATE briefing_subscriptions SET last_opened_at = now() WHERE id = $1 AND user_id = $2
+UPDATE briefing_subscriptions SET last_opened_at = now() WHERE id = $1 AND user_id = $2 AND status <> 'deleted'
 `
 
 type TouchSubscriptionOpenedParams struct {
@@ -529,7 +575,7 @@ const updateSubscription = `-- name: UpdateSubscription :one
 UPDATE briefing_subscriptions SET
     name = $3, field_values = $4, topics = $5, schedule = $6, length = $7, push_enabled = $8,
     status = $9, paused_reason = $10, next_run_at = $11, updated_at = now()
-WHERE id = $1 AND user_id = $2
+WHERE id = $1 AND user_id = $2 AND status <> 'deleted'
 RETURNING id, user_id, template_id, template_version, name, field_values, topics, schedule, length, push_enabled, status, paused_reason, next_run_at, last_briefing_id, last_opened_at, created_at, updated_at
 `
 

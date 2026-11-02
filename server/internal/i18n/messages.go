@@ -12,6 +12,8 @@ import (
 // in the same order. The admin console is Chinese-only, so its messages are not listed.
 // TestCatalogCoversErrors fails when a new user-facing message has no entry here.
 var messagesEN = map[string]string{
+	"开始日期不能晚于结束日期":                      "The start date must not be later than the end date",
+	"日期格式不正确，请使用 YYYY-MM-DD":            "Invalid date. Use YYYY-MM-DD",
 	"请求格式不正确":                           "The request is malformed",
 	"参数不正确":                             "Invalid parameters",
 	"该功能尚未开放":                           "This feature is not available yet",
