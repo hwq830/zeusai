@@ -484,6 +484,26 @@ type RoutingVersion struct {
 	CreatedAt time.Time
 }
 
+type SearchProvider struct {
+	Name        string
+	DisplayName string
+	Protocol    string
+	BaseUrl     string
+	ApiKeyEnv   string
+	Enabled     bool
+	Builtin     bool
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type SearchSetting struct {
+	ID        bool
+	Chain     []string
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
+}
+
 type Share struct {
 	ID              uuid.UUID
 	UserID          uuid.UUID

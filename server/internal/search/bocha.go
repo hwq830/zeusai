@@ -6,21 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"time"
 )
 
 // Bocha calls the 博查 Web Search API. Field names follow its public docs
 // (https://open.bochaai.com); re-check them when the account is opened.
 type Bocha struct {
-	APIKey string
-	// KeyFunc, when set, supplies the key per call instead of APIKey.
-	KeyFunc func(context.Context) string
+	APIKey  string
 	BaseURL string // default https://api.bochaai.com
-	// BaseURLFunc, when set and non-empty, overrides BaseURL per call.
-	BaseURLFunc func(context.Context) string
-	HTTP        *http.Client
+	HTTP    *http.Client
 }
 
 type bochaRequest struct {
@@ -70,40 +64,19 @@ func (b Bocha) Search(ctx context.Context, q Query) ([]Result, error) {
 		n = 8
 	}
 	body, _ := json.Marshal(bochaRequest{Query: q.Q, Freshness: freshness(q.FreshDays), Summary: true, Count: n, Include: q.Site})
-	base := b.BaseURL
-	if b.BaseURLFunc != nil {
-		if u := b.BaseURLFunc(ctx); u != "" {
-			base = u
-		}
-	}
-	if base == "" {
-		base = "https://api.bochaai.com"
-	}
+	base := orDefault(b.BaseURL, ProtocolBocha)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/web-search", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	key := b.APIKey
-	if b.KeyFunc != nil {
-		key = b.KeyFunc(ctx)
-	}
-	if key == "" {
+	if b.APIKey == "" {
 		return nil, errors.New("bocha: API key is not configured")
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	hc := b.HTTP
-	if hc == nil {
-		hc = &http.Client{Timeout: 20 * time.Second}
-	}
-	resp, err := hc.Do(req)
+	req.Header.Set("Authorization", "Bearer "+b.APIKey)
+	raw, err := do(b.HTTP, req, "bocha")
 	if err != nil {
 		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("bocha: HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(raw[:min(len(raw), 300)]))
 	}
 	var br bochaResponse
 	if err := json.Unmarshal(raw, &br); err != nil {
@@ -118,13 +91,7 @@ func (b Bocha) Search(ctx context.Context, q Query) ([]Result, error) {
 		if r.Snippet == "" {
 			r.Snippet = v.Snippet
 		}
-		for _, d := range []string{v.DatePublished, v.DateLastCrawled} {
-			if t, err := time.Parse(time.RFC3339, d); err == nil {
-				t = t.UTC()
-				r.PublishedAt = &t
-				break
-			}
-		}
+		r.PublishedAt = parseTime(v.DatePublished, v.DateLastCrawled)
 		out = append(out, r)
 	}
 	return out, nil

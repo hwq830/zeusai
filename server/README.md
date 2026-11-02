@@ -109,7 +109,7 @@ API Key：owner 在控制台“API Key”页为路由文件里的每个模型服
 | --- | --- |
 | 模型网关 | `ZEUS_LLM_PROVIDER=gateway`、`ZEUS_MODELGW_CONFIG=deploy/modelgw.example.yaml`，以及该文件里 `api_key_env` 指定的 key（如 `ZEUS_QWEN_API_KEY`），或设 `ZEUS_SECRETS_KEY` 后在控制台“服务商”页填写；路由文件只在首次启动时导入，之后在控制台“模型路由”页修改 |
 | 内容审核词表 | `ZEUS_MODERATION_KEYWORDS_FILE`（每行一个词；非 dev 环境必填） |
-| 博查搜索 | `ZEUS_SEARCH_PROVIDER=bocha`、`ZEUS_BOCHA_API_KEY`（或在控制台“API Key”页填写）；网页读取走 `ZEUS_EGRESS_PROXY`（可选） |
+| 联网搜索 | `ZEUS_SEARCH_PROVIDER=console`（旧值 `bocha` 等同）：用控制台「服务商」页配置的搜索服务商，支持博查 / Tavily / Brave / Serper，可设主用和备用，主用出错自动换备用，约 1 分钟生效；内置博查仍可用 `ZEUS_BOCHA_API_KEY`。网页读取走 `ZEUS_EGRESS_PROXY`（可选） |
 | 高德 MCP | `ZEUS_MCP_AMAP_URL`（含 key 的完整 Streamable HTTP 地址） |
 | PDF 导出 | api 和 orchestrator 都设 `ZEUS_BLOB_DIR`（同一目录）；orchestrator 设 `ZEUS_CHROMIUM_PATH`，容器里以 root 运行时加 `ZEUS_CHROMIUM_NO_SANDBOX=true` |
 | 反馈截图 | api 设 `ZEUS_BLOB_DIR` 才能上传；admin 也设同一个 `ZEUS_BLOB_DIR`，并与 api 使用相同的 `ZEUS_FILES_SECRET`（或相同的 `ZEUS_JWT_SECRET`）和 `ZEUS_PUBLIC_BASE_URL`，控制台里的截图链接才能打开 |
