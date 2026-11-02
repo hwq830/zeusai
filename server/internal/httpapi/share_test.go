@@ -230,3 +230,35 @@ func TestReportShareExpiry(t *testing.T) {
 func d(x time.Duration) int { return int((x + 12*time.Hour) / (24 * time.Hour)) }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestBriefingTakenDown(t *testing.T) {
+	h := setup(t)
+	s := h.login(randomPhone())
+	b := readyBriefing(t, h, s.Me.User.ID, "")
+	base := "/v1/briefings/" + b.ID.String()
+	var sh shareResp
+	h.do("POST", base+"/shares", map[string]any{"scope": "full"}, 201, &sh)
+
+	now := time.Now()
+	if _, err := h.q.AdminSetBriefingHidden(context.Background(), db.AdminSetBriefingHiddenParams{ID: b.ID, HiddenAt: &now, Reason: "违规"}); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Headline       string            `json:"headline"`
+		Sections       []json.RawMessage `json:"sections"`
+		TakenDown      bool              `json:"takenDown"`
+		TakedownReason string            `json:"takedownReason"`
+	}
+	h.do("GET", base, nil, 200, &got)
+	if !got.TakenDown || got.TakedownReason != "违规" || got.Headline != "" || len(got.Sections) != 0 {
+		t.Fatalf("taken down briefing = %+v", got)
+	}
+	if code, _ := h.raw(base+"/html", true); code != http.StatusGone {
+		t.Fatalf("html = %d", code)
+	}
+	var e apiError
+	h.do("POST", base+"/shares", map[string]any{"scope": "full"}, 410, &e)
+	if code, _ := h.raw(sharePath(sh.URL), false); code != http.StatusNotFound {
+		t.Fatalf("share page = %d", code)
+	}
+}

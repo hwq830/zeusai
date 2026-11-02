@@ -61,6 +61,9 @@ type Briefing struct {
 	Language       string
 	PdfStatus      string
 	PdfKey         *string
+	HiddenAt       *time.Time
+	HiddenReason   string
+	HiddenBy       *uuid.UUID
 }
 
 type BriefingFeedback struct {
@@ -70,6 +73,31 @@ type BriefingFeedback struct {
 	Rating     string
 	Comment    string
 	CreatedAt  time.Time
+}
+
+type BriefingHiddenItem struct {
+	BriefingID uuid.UUID
+	ItemID     string
+	SectionKey string
+	Position   int32
+	Item       json.RawMessage
+	Reason     string
+	HiddenBy   *uuid.UUID
+	CreatedAt  time.Time
+}
+
+type BriefingRevision struct {
+	ID          int64
+	BriefingID  uuid.UUID
+	TaskID      *uuid.UUID
+	Status      string
+	Headline    string
+	Sections    json.RawMessage
+	ItemCount   int32
+	SourceCount int32
+	GeneratedAt *time.Time
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
 }
 
 type BriefingSubscription struct {
@@ -177,6 +205,24 @@ type ConnectorCredential struct {
 	KeyID       string
 	ExpiresAt   *time.Time
 	CreatedAt   time.Time
+}
+
+type ContentIssueResolution struct {
+	TargetType string
+	TargetID   uuid.UUID
+	Kind       string
+	Note       string
+	ResolvedBy *uuid.UUID
+	ResolvedAt time.Time
+}
+
+type ContentNote struct {
+	ID         int64
+	TargetType string
+	TargetID   uuid.UUID
+	AdminID    *uuid.UUID
+	Body       string
+	CreatedAt  time.Time
 }
 
 type Device struct {
@@ -375,6 +421,7 @@ type QuotaGrant struct {
 	Reason    string
 	GrantedBy *uuid.UUID
 	CreatedAt time.Time
+	Ref       string
 }
 
 type QuotaNotice struct {
@@ -413,6 +460,10 @@ type Report struct {
 	CreatedAt            time.Time
 	CompletedAt          *time.Time
 	Language             string
+	HiddenAt             *time.Time
+	HiddenReason         string
+	HiddenBy             *uuid.UUID
+	RegeneratedFrom      *uuid.UUID
 }
 
 type ReportFeedback struct {
@@ -479,6 +530,7 @@ type Task struct {
 	CreatedAt      time.Time
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
+	AdminID        *uuid.UUID
 }
 
 type Template struct {

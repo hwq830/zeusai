@@ -29,14 +29,14 @@ INSERT INTO model_usage (user_id, task_id, provider, model, tier, input_tokens, 
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: SumBilledTokensSince :one
--- Tokens counted against the quota: calls of failed tasks are not charged.
+-- Tokens counted against the quota: calls of failed tasks and of console re-runs are not charged.
 SELECT coalesce(sum(m.billed_tokens), 0)::bigint FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
-WHERE m.user_id = $1 AND m.created_at >= $2 AND (t.status IS NULL OR t.status <> 'failed');
+WHERE m.user_id = $1 AND m.created_at >= $2 AND (t.id IS NULL OR (t.status <> 'failed' AND t.admin_id IS NULL));
 
 -- name: DailyBilledTokens :many
 SELECT (m.created_at AT TIME ZONE sqlc.arg(tz)::text)::date AS day, coalesce(sum(m.billed_tokens), 0)::bigint AS tokens
 FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
-WHERE m.user_id = sqlc.arg(user_id) AND m.created_at >= sqlc.arg(since) AND (t.status IS NULL OR t.status <> 'failed')
+WHERE m.user_id = sqlc.arg(user_id) AND m.created_at >= sqlc.arg(since) AND (t.id IS NULL OR (t.status <> 'failed' AND t.admin_id IS NULL))
 GROUP BY day ORDER BY day;
 
 -- name: TaskBilledTokensSince :many

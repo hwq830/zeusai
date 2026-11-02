@@ -64,6 +64,9 @@ func (s *Service) readyRow(ctx context.Context, userID uuid.UUID, id string) (db
 	if err != nil {
 		return db.Briefing{}, apperr.Internal(err)
 	}
+	if r.HiddenAt != nil {
+		return db.Briefing{}, apperr.TakenDown()
+	}
 	if r.Status != "ready" {
 		return db.Briefing{}, apperr.Conflict("简报还没有生成完")
 	}

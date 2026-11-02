@@ -57,6 +57,9 @@ type Report struct {
 	Feedback    *Feedback  `json:"feedback,omitempty"`
 	// TokensUsed is filled in by Get only.
 	TokensUsed *int64 `json:"tokensUsed,omitempty"`
+	// TakenDown: an operator took the report down; the app shows a placeholder with the reason.
+	TakenDown      bool   `json:"takenDown,omitempty"`
+	TakedownReason string `json:"takedownReason,omitempty"`
 }
 
 // Feedback is the user's satisfaction rating of a report.
@@ -78,6 +81,10 @@ func FromRow(r db.Report) Report {
 	}
 	if r.Status == "done" {
 		out.HTMLURL = "/v1/reports/" + out.ID + "/html"
+	}
+	if r.HiddenAt != nil {
+		out.TakenDown, out.TakedownReason = true, r.HiddenReason
+		out.Summary, out.HTMLURL = "", ""
 	}
 	return out
 }
@@ -362,6 +369,9 @@ func (s *Service) PDF(ctx context.Context, userID uuid.UUID, id string) (FileLin
 	if err != nil {
 		return FileLink{}, err
 	}
+	if r.HiddenAt != nil {
+		return FileLink{}, apperr.TakenDown()
+	}
 	if r.Status != "done" {
 		return FileLink{}, apperr.Conflict("报告还没有生成完")
 	}
@@ -389,6 +399,9 @@ func (s *Service) HTML(ctx context.Context, userID uuid.UUID, id string) ([]byte
 	if err != nil {
 		return nil, err
 	}
+	if r.HiddenAt != nil {
+		return nil, apperr.TakenDown()
+	}
 	if r.Status != "done" {
 		return nil, apperr.Conflict("报告还没有生成完")
 	}
@@ -410,6 +423,9 @@ func (s *Service) Followup(ctx context.Context, userID uuid.UUID, id, question s
 	r, err := s.getRow(ctx, userID, id)
 	if err != nil {
 		return db.Task{}, err
+	}
+	if r.HiddenAt != nil {
+		return db.Task{}, apperr.TakenDown()
 	}
 	if r.Status != "done" {
 		return db.Task{}, apperr.Conflict("报告生成完后才能追问")

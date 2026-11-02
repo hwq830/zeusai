@@ -33,6 +33,8 @@ type Notification struct {
 	BodyEn   string
 	DeepLink string // zeus://briefing/{id}, zeus://report/{id}
 	Image    string // optional https cover image, shown by the iOS notification service extension
+	// InboxOnly saves the message-center entry without pushing it (notify.Service).
+	InboxOnly bool
 	// Set by notify.Service: the message-center entry this push opens, and the app icon badge.
 	MessageID string
 	Badge     *int

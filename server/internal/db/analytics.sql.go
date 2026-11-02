@@ -123,7 +123,7 @@ WITH pu AS (
     SELECT u.id FROM users u LEFT JOIN user_platform p ON p.user_id = u.id
     WHERE $3::text IS NULL OR p.platform = $3
 ), b AS (
-    SELECT b.id, b.user_id, b.subscription_id, b.task_id, b.title, b.date, b.status, b.headline, b.sections, b.item_count, b.source_count, b.read_at, b.generated_at, b.created_at, b.language, b.pdf_status, b.pdf_key FROM briefings b
+    SELECT b.id, b.user_id, b.subscription_id, b.task_id, b.title, b.date, b.status, b.headline, b.sections, b.item_count, b.source_count, b.read_at, b.generated_at, b.created_at, b.language, b.pdf_status, b.pdf_key, b.hidden_at, b.hidden_reason, b.hidden_by FROM briefings b
     WHERE b.user_id IN (SELECT id FROM pu)
       AND (b.created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date
 )
@@ -567,7 +567,7 @@ func (q *Queries) AnalyticsQuotaUse(ctx context.Context, arg AnalyticsQuotaUsePa
 
 const analyticsReportGroups = `-- name: AnalyticsReportGroups :many
 WITH r AS (
-    SELECT r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at, r.language FROM reports r LEFT JOIN user_platform p ON p.user_id = r.user_id
+    SELECT r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at, r.language, r.hidden_at, r.hidden_reason, r.hidden_by, r.regenerated_from FROM reports r LEFT JOIN user_platform p ON p.user_id = r.user_id
     WHERE (r.created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date
       AND ($3::text IS NULL OR p.platform = $3)
 )
@@ -613,7 +613,7 @@ func (q *Queries) AnalyticsReportGroups(ctx context.Context, arg AnalyticsReport
 
 const analyticsReports = `-- name: AnalyticsReports :one
 WITH r AS (
-    SELECT r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at, r.language FROM reports r LEFT JOIN user_platform p ON p.user_id = r.user_id
+    SELECT r.id, r.user_id, r.task_id, r.title, r.topic, r.depth, r.focuses, r.source_briefing_item_id, r.status, r.summary, r.markdown, r.sources, r.source_count, r.word_count, r.pdf_key, r.pdf_status, r.created_at, r.completed_at, r.language, r.hidden_at, r.hidden_reason, r.hidden_by, r.regenerated_from FROM reports r LEFT JOIN user_platform p ON p.user_id = r.user_id
     WHERE (r.created_at AT TIME ZONE 'Asia/Shanghai')::date BETWEEN $1::date AND $2::date
       AND ($3::text IS NULL OR p.platform = $3)
 )

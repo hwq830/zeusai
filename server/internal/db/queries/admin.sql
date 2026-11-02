@@ -310,5 +310,5 @@ SELECT * FROM quota_grants WHERE user_id = $1 AND created_at >= $2 ORDER BY crea
 -- Each user's counted billed tokens since the start of the quota month (failed tasks excluded).
 SELECT m.user_id, coalesce(sum(m.billed_tokens), 0)::bigint AS tokens
 FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
-WHERE m.created_at >= $1 AND m.user_id IS NOT NULL AND (t.status IS NULL OR t.status <> 'failed')
+WHERE m.created_at >= $1 AND m.user_id IS NOT NULL AND (t.id IS NULL OR (t.status <> 'failed' AND t.admin_id IS NULL))
 GROUP BY m.user_id;

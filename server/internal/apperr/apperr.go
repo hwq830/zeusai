@@ -50,6 +50,9 @@ func Forbidden(msg string) *Error { return New(http.StatusForbidden, "forbidden"
 func NotFound(msg string) *Error  { return New(http.StatusNotFound, "not_found", msg, false) }
 func Invalid(msg string) *Error   { return New(http.StatusBadRequest, "invalid_argument", msg, false) }
 func Conflict(msg string) *Error  { return New(http.StatusConflict, "conflict", msg, false) }
+
+// TakenDown is returned for reports and briefings an operator took down (下架).
+func TakenDown() *Error { return New(http.StatusGone, "taken_down", "该内容已下架", false) }
 func RateLimited(msg string) *Error {
 	return New(http.StatusTooManyRequests, "rate_limited", msg, true)
 }

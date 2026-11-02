@@ -186,12 +186,16 @@ const (
 	PermProviderKeys = "provider_keys.write"
 	// Choose which model each tier and call site uses: owners only.
 	PermModels = "models.write"
+	// Read the body of a user's report or briefing (audited as content.view).
+	PermContentRead = "content.read"
+	// Re-run briefings and reports, pause subscriptions, work the exception queue.
+	PermContentWrite = "content.write"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys, PermModels},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig},
-	"moderator": {PermModeration, PermFeedback},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys, PermModels, PermContentRead, PermContentWrite},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig, PermContentRead, PermContentWrite},
+	"moderator": {PermModeration, PermFeedback, PermContentRead},
 	"viewer":    {},
 }
 

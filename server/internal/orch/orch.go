@@ -18,6 +18,8 @@ type BriefingRun struct {
 	SubscriptionID uuid.UUID
 	TaskID         uuid.UUID
 	Scheduled      bool
+	// Push notifies the user as soon as a manual run finishes (console re-runs that ask for it).
+	Push bool
 }
 
 type ReportRun struct {

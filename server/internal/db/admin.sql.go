@@ -93,7 +93,7 @@ func (q *Queries) AdminDeleteTemplate(ctx context.Context, id uuid.UUID) (int64,
 }
 
 const adminGetReport = `-- name: AdminGetReport :one
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language FROM reports WHERE id = $1
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from FROM reports WHERE id = $1
 `
 
 func (q *Queries) AdminGetReport(ctx context.Context, id uuid.UUID) (Report, error) {
@@ -119,12 +119,16 @@ func (q *Queries) AdminGetReport(ctx context.Context, id uuid.UUID) (Report, err
 		&i.CreatedAt,
 		&i.CompletedAt,
 		&i.Language,
+		&i.HiddenAt,
+		&i.HiddenReason,
+		&i.HiddenBy,
+		&i.RegeneratedFrom,
 	)
 	return i, err
 }
 
 const adminGetTask = `-- name: AdminGetTask :one
-SELECT id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at FROM tasks WHERE id = $1
+SELECT id, user_id, kind, status, title, subtitle, input, subscription_id, report_id, briefing_id, plan, current_step, pending_confirm, last_event_id, error, prompt_version, created_at, started_at, finished_at, admin_id FROM tasks WHERE id = $1
 `
 
 func (q *Queries) AdminGetTask(ctx context.Context, id uuid.UUID) (Task, error) {
@@ -150,6 +154,7 @@ func (q *Queries) AdminGetTask(ctx context.Context, id uuid.UUID) (Task, error) 
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.AdminID,
 	)
 	return i, err
 }
@@ -372,7 +377,7 @@ func (q *Queries) AdminListShares(ctx context.Context, arg AdminListSharesParams
 
 const adminListTasks = `-- name: AdminListTasks :many
 
-SELECT t.id, t.user_id, t.kind, t.status, t.title, t.subtitle, t.input, t.subscription_id, t.report_id, t.briefing_id, t.plan, t.current_step, t.pending_confirm, t.last_event_id, t.error, t.prompt_version, t.created_at, t.started_at, t.finished_at, u.nickname, u.phone,
+SELECT t.id, t.user_id, t.kind, t.status, t.title, t.subtitle, t.input, t.subscription_id, t.report_id, t.briefing_id, t.plan, t.current_step, t.pending_confirm, t.last_event_id, t.error, t.prompt_version, t.created_at, t.started_at, t.finished_at, t.admin_id, u.nickname, u.phone,
        coalesce((SELECT sum(cost_micros) FROM model_usage m WHERE m.task_id = t.id), 0)::bigint AS cost_micros
 FROM tasks t JOIN users u ON u.id = t.user_id
 WHERE ($3::text IS NULL OR t.status = $3)
@@ -410,6 +415,7 @@ type AdminListTasksRow struct {
 	CreatedAt      time.Time
 	StartedAt      *time.Time
 	FinishedAt     *time.Time
+	AdminID        *uuid.UUID
 	Nickname       string
 	Phone          *string
 	CostMicros     int64
@@ -451,6 +457,7 @@ func (q *Queries) AdminListTasks(ctx context.Context, arg AdminListTasksParams) 
 			&i.CreatedAt,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.AdminID,
 			&i.Nickname,
 			&i.Phone,
 			&i.CostMicros,
@@ -903,7 +910,7 @@ func (q *Queries) AdminUpdateTemplate(ctx context.Context, arg AdminUpdateTempla
 const billedTokensByUserSince = `-- name: BilledTokensByUserSince :many
 SELECT m.user_id, coalesce(sum(m.billed_tokens), 0)::bigint AS tokens
 FROM model_usage m LEFT JOIN tasks t ON t.id = m.task_id
-WHERE m.created_at >= $1 AND m.user_id IS NOT NULL AND (t.status IS NULL OR t.status <> 'failed')
+WHERE m.created_at >= $1 AND m.user_id IS NOT NULL AND (t.id IS NULL OR (t.status <> 'failed' AND t.admin_id IS NULL))
 GROUP BY m.user_id
 `
 
@@ -1415,7 +1422,7 @@ func (q *Queries) InsertAdminAudit(ctx context.Context, arg InsertAdminAuditPara
 }
 
 const insertQuotaGrant = `-- name: InsertQuotaGrant :one
-INSERT INTO quota_grants (user_id, tokens, reason, granted_by) VALUES ($1, $2, $3, $4) RETURNING id, user_id, tokens, reason, granted_by, created_at
+INSERT INTO quota_grants (user_id, tokens, reason, granted_by) VALUES ($1, $2, $3, $4) RETURNING id, user_id, tokens, reason, granted_by, created_at, ref
 `
 
 type InsertQuotaGrantParams struct {
@@ -1440,6 +1447,7 @@ func (q *Queries) InsertQuotaGrant(ctx context.Context, arg InsertQuotaGrantPara
 		&i.Reason,
 		&i.GrantedBy,
 		&i.CreatedAt,
+		&i.Ref,
 	)
 	return i, err
 }
@@ -1601,7 +1609,7 @@ func (q *Queries) ListModerationEvents(ctx context.Context, arg ListModerationEv
 }
 
 const listQuotaGrantsSince = `-- name: ListQuotaGrantsSince :many
-SELECT id, user_id, tokens, reason, granted_by, created_at FROM quota_grants WHERE user_id = $1 AND created_at >= $2 ORDER BY created_at DESC
+SELECT id, user_id, tokens, reason, granted_by, created_at, ref FROM quota_grants WHERE user_id = $1 AND created_at >= $2 ORDER BY created_at DESC
 `
 
 type ListQuotaGrantsSinceParams struct {
@@ -1625,6 +1633,7 @@ func (q *Queries) ListQuotaGrantsSince(ctx context.Context, arg ListQuotaGrantsS
 			&i.Reason,
 			&i.GrantedBy,
 			&i.CreatedAt,
+			&i.Ref,
 		); err != nil {
 			return nil, err
 		}
