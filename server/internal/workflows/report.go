@@ -22,6 +22,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/market"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/search"
@@ -66,11 +67,13 @@ func writeStep(l i18n.Lang, n int) events.Step {
 }
 
 type Question struct {
+	Regions  []string `json:"regions,omitempty"`
 	Question string   `json:"question"`
 	Queries  []string `json:"queries"`
 }
 
 type ReportPlan struct {
+	Market    string
 	UserID    uuid.UUID
 	TaskID    uuid.UUID
 	ReportID  uuid.UUID
@@ -186,8 +189,12 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 	}
 	b := budgets[r.Depth]
 	lang, ui := i18n.Parse(r.Language), a.uiLang(ctx, run.UserID)
+	userMarket := market.Other
+	if u, err := a.Q.GetUser(ctx, run.UserID); err == nil {
+		userMarket = market.Normalize(u.Market)
+	}
 	interests, _ := a.Q.ListInterestMemories(ctx, db.ListInterestMemoriesParams{UserID: run.UserID, Limit: 10})
-	sys, err := render(lang, "plan.md", map[string]any{"Questions": b.Questions, "Focuses": r.Focuses, "Interests": interests, "Lang": string(lang)})
+	sys, err := render(lang, "plan.md", map[string]any{"Questions": b.Questions, "Focuses": r.Focuses, "Interests": interests, "Lang": string(lang), "Market": userMarket})
 	if err != nil {
 		return ReportPlan{}, err
 	}
@@ -207,7 +214,10 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 	if len(out.Questions) > b.Questions {
 		out.Questions = out.Questions[:b.Questions]
 	}
-	plan := ReportPlan{UserID: run.UserID, TaskID: run.TaskID, ReportID: r.ID, Topic: r.Topic, Depth: r.Depth, Focuses: r.Focuses,
+	for i := range out.Questions {
+		out.Questions[i].Regions = questionRegions(out.Questions[i].Regions, userMarket)
+	}
+	plan := ReportPlan{Market: userMarket, UserID: run.UserID, TaskID: run.TaskID, ReportID: r.ID, Topic: r.Topic, Depth: r.Depth, Focuses: r.Focuses,
 		Title: clip(strings.TrimSpace(lang.Model(out.Title)), lang.ClipLen(30)), Questions: out.Questions, Lang: lang, UILang: ui}
 	if plan.Title == "" {
 		plan.Title = r.Title
@@ -218,6 +228,25 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 	}
 	steps = append(steps, writeStep(ui, len(steps)+1))
 	return plan, a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypePlan, Steps: steps})
+}
+
+func questionRegions(values []string, fallback string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		region := market.SearchRegion(value, fallback)
+		if !seen[region] {
+			seen[region] = true
+			out = append(out, region)
+		}
+		if len(out) == 3 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		out = []string{market.SearchRegion("", fallback)}
+	}
+	return out
 }
 
 func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i int, notes []string) (QuestionNotes, error) {
@@ -233,16 +262,44 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 	if len(queries) == 0 {
 		queries = []string{q.Question}
 	}
-	for _, text := range queries[:min(3, len(queries))] {
-		res, err := a.Search.Search(ctx, search.Query{Q: clip(text, 60), Limit: b.Sources})
-		if err != nil {
-			return QuestionNotes{}, err
-		}
-		for _, r := range res {
-			if !seen[r.URL] && len(sources) < b.Sources {
-				seen[r.URL] = true
-				sources = append(sources, r)
+	// One query per region first, then extra query variants; at most three searches total.
+	regions := questionRegions(q.Regions, plan.Market)
+	count := 0
+	var batches [][]search.Result
+	for variant := 0; variant < len(queries) && count < 3; variant++ {
+		for _, region := range regions {
+			if count >= 3 {
+				break
 			}
+			count++
+			text := queries[variant]
+			if market.Traditional(region) {
+				text = i18n.Hant(text)
+			}
+			res, err := a.Search.Search(ctx, search.Query{Q: clip(text, 400), Limit: b.Sources,
+				Region: region, Country: market.Country(region), Lang: market.SearchLang(region)})
+			if err != nil {
+				return QuestionNotes{}, err
+			}
+			batches = append(batches, res)
+		}
+	}
+	// Interleave sources so a full first region does not crowd out other regions.
+	for row := 0; len(sources) < b.Sources; row++ {
+		added := false
+		for _, batch := range batches {
+			if row >= len(batch) {
+				continue
+			}
+			added = true
+			result := batch[row]
+			if !seen[result.URL] && len(sources) < b.Sources {
+				seen[result.URL] = true
+				sources = append(sources, result)
+			}
+		}
+		if !added {
+			break
 		}
 	}
 	for _, r := range sources {

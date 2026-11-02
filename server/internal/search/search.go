@@ -11,6 +11,8 @@ import (
 )
 
 type Query struct {
+	// Region preserves other/global independently of API country support.
+	Region    string
 	Q         string
 	Site      string
 	FreshDays int

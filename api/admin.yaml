@@ -2482,6 +2482,10 @@ components:
         title: { type: string }
         instruction: { type: string }
         maxItems: { type: integer }
+        searchRegion:
+          type: string
+          enum: [CN, TW, HK, MO, SG, MY, US, other, global]
+          description: 本栏目的内容地区；不填继承模板或用户地区，global 表示全球
         private:
           type: boolean
           description: 本节含个人信息，用户分享简报时自动隐藏
@@ -2507,6 +2511,10 @@ components:
       type: object
       required: [name, fields, sections, published, sortOrder]
       properties:
+        searchRegion:
+          type: string
+          enum: [CN, TW, HK, MO, SG, MY, US, other, global]
+          description: 模板内容地区；不填跟随用户，global 为全球；栏目可单独覆盖
         name: { type: string, maxLength: 40 }
         description: { type: string, maxLength: 200 }
         category: { type: string }
@@ -2547,7 +2555,7 @@ components:
     Market:
       type: string
       description: 用户地区（App 按手机地区设置上报）；other = 其他地区
-      enum: [TW, HK, MO, SG, MY, US, other]
+      enum: [CN, TW, HK, MO, SG, MY, US, other]
     TemplateTranslation:
       type: object
       properties:
@@ -3603,7 +3611,7 @@ components:
         timeoutSeconds: { type: integer }
     SearchRouting:
       type: object
-      required: [searchProvider, on, chain, protocols]
+      required: [searchProvider, on, chain, protocols, regionalChains]
       properties:
         searchProvider: { type: string, description: 服务端 ZEUS_SEARCH_PROVIDER }
         on: { type: boolean, description: 为 false 时服务端还在用假搜索（mock），这里的设置会先保存 }
@@ -3611,6 +3619,14 @@ components:
           type: array
           description: 第一个是主用，其余按顺序作为备用；主用出错时自动换下一个
           items: { type: string }
+        regionalChains:
+          type: object
+          description: 按内容地区覆盖默认链；没配置的地区继承 chain，global 使用默认链
+          additionalProperties:
+            type: array
+            minItems: 1
+            maxItems: 5
+            items: { type: string }
         protocols:
           type: array
           items: { $ref: '#/components/schemas/SearchProtocol' }
@@ -3634,6 +3650,14 @@ components:
           minItems: 1
           maxItems: 5
           items: { type: string }
+        regionalChains:
+          type: object
+          description: 完整替换地区覆盖；省略则保留，空对象清除覆盖
+          additionalProperties:
+            type: array
+            minItems: 1
+            maxItems: 5
+            items: { type: string }
     SearchProviderInput:
       type: object
       required: [id, name, protocol]

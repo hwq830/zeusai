@@ -27,7 +27,7 @@ type tavilyRequest struct {
 }
 
 // tavilyCountries maps ISO codes to the country names Tavily takes (general topic only).
-var tavilyCountries = map[string]string{"tw": "taiwan", "hk": "hong kong", "sg": "singapore", "my": "malaysia", "us": "united states"}
+var tavilyCountries = map[string]string{"cn": "china", "tw": "taiwan", "hk": "hong kong", "sg": "singapore", "my": "malaysia", "us": "united states"}
 
 type tavilyResponse struct {
 	Results []struct {

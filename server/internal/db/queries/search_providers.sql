@@ -18,6 +18,9 @@ DELETE FROM search_providers WHERE name = $1;
 SELECT * FROM search_settings WHERE id;
 
 -- name: SaveSearchSettings :one
-INSERT INTO search_settings (id, chain, updated_by, updated_at) VALUES (true, $1, $2, now())
-ON CONFLICT (id) DO UPDATE SET chain = EXCLUDED.chain, updated_by = EXCLUDED.updated_by, updated_at = now()
+INSERT INTO search_settings (id, chain, updated_by, updated_at, regional_chains)
+VALUES (true, $1, $2, now(), COALESCE(sqlc.narg(regional_chains)::jsonb, '{}'::jsonb))
+ON CONFLICT (id) DO UPDATE SET chain = EXCLUDED.chain,
+regional_chains = COALESCE(sqlc.narg(regional_chains)::jsonb, search_settings.regional_chains),
+updated_by = EXCLUDED.updated_by, updated_at = now()
 RETURNING *;

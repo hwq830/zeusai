@@ -6,6 +6,7 @@ package market
 import "strings"
 
 const (
+	CN    = "CN"
 	TW    = "TW"
 	HK    = "HK"
 	MO    = "MO"
@@ -16,12 +17,12 @@ const (
 )
 
 // All lists the markets in display order; Other is last.
-var All = []string{TW, HK, MO, SG, MY, US, Other}
+var All = []string{CN, TW, HK, MO, SG, MY, US, Other}
 
 // Named are the markets a template can target (all but Other).
 var Named = All[:len(All)-1]
 
-var names = map[string]string{TW: "台湾", HK: "香港", MO: "澳门", SG: "新加坡", MY: "马来西亚", US: "美国", Other: "其他地区"}
+var names = map[string]string{CN: "中国大陆", TW: "台湾", HK: "香港", MO: "澳门", SG: "新加坡", MY: "马来西亚", US: "美国", Other: "其他地区"}
 
 // Valid reports whether s is one of All (exact spelling).
 func Valid(s string) bool {
@@ -61,6 +62,9 @@ func Country(m string) string {
 
 // SearchLang is the language of local results ("zh-hant" for TW / HK / MO), "" for no preference.
 func SearchLang(m string) string {
+	if m == CN {
+		return "zh-hans"
+	}
 	if Traditional(m) {
 		return "zh-hant"
 	}

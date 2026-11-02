@@ -14,9 +14,9 @@ import (
 
 const createTemplate = `-- name: CreateTemplate :one
 INSERT INTO templates (owner_id, slug, name, description, category, icon, fields, sections, sources,
-                       default_schedule, default_length, required_connectors, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources
+                       default_schedule, default_length, required_connectors, sort_order, search_region)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region
 `
 
 type CreateTemplateParams struct {
@@ -33,6 +33,7 @@ type CreateTemplateParams struct {
 	DefaultLength      string
 	RequiredConnectors []string
 	SortOrder          int32
+	SearchRegion       string
 }
 
 func (q *Queries) CreateTemplate(ctx context.Context, arg CreateTemplateParams) (Template, error) {
@@ -50,6 +51,7 @@ func (q *Queries) CreateTemplate(ctx context.Context, arg CreateTemplateParams) 
 		arg.DefaultLength,
 		arg.RequiredConnectors,
 		arg.SortOrder,
+		arg.SearchRegion,
 	)
 	var i Template
 	err := row.Scan(
@@ -75,6 +77,7 @@ func (q *Queries) CreateTemplate(ctx context.Context, arg CreateTemplateParams) 
 		&i.Translations,
 		&i.Markets,
 		&i.MarketSources,
+		&i.SearchRegion,
 	)
 	return i, err
 }
@@ -131,7 +134,7 @@ func (q *Queries) FillOfficialTranslations(ctx context.Context, arg FillOfficial
 }
 
 const getTemplateForUser = `-- name: GetTemplateForUser :one
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources FROM templates WHERE id = $1 AND (owner_id IS NULL OR owner_id = $2)
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region FROM templates WHERE id = $1 AND (owner_id IS NULL OR owner_id = $2)
 `
 
 type GetTemplateForUserParams struct {
@@ -166,6 +169,7 @@ func (q *Queries) GetTemplateForUser(ctx context.Context, arg GetTemplateForUser
 		&i.Translations,
 		&i.Markets,
 		&i.MarketSources,
+		&i.SearchRegion,
 	)
 	return i, err
 }
@@ -206,7 +210,7 @@ func (q *Queries) ListOfficialCategories(ctx context.Context, market string) ([]
 }
 
 const listOfficialTemplates = `-- name: ListOfficialTemplates :many
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources FROM templates
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region FROM templates
 WHERE owner_id IS NULL AND published
   AND (cardinality(markets) = 0 OR $3::text = ANY(markets))
   AND ($4::text IS NULL OR category = $4)
@@ -261,6 +265,7 @@ func (q *Queries) ListOfficialTemplates(ctx context.Context, arg ListOfficialTem
 			&i.Translations,
 			&i.Markets,
 			&i.MarketSources,
+			&i.SearchRegion,
 		); err != nil {
 			return nil, err
 		}
@@ -273,7 +278,7 @@ func (q *Queries) ListOfficialTemplates(ctx context.Context, arg ListOfficialTem
 }
 
 const listUserTemplates = `-- name: ListUserTemplates :many
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources FROM templates
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region FROM templates
 WHERE owner_id = $1
   AND ($4::text IS NULL OR name ILIKE '%' || $4 || '%')
 ORDER BY updated_at DESC
@@ -324,6 +329,7 @@ func (q *Queries) ListUserTemplates(ctx context.Context, arg ListUserTemplatesPa
 			&i.Translations,
 			&i.Markets,
 			&i.MarketSources,
+			&i.SearchRegion,
 		); err != nil {
 			return nil, err
 		}
@@ -338,10 +344,10 @@ func (q *Queries) ListUserTemplates(ctx context.Context, arg ListUserTemplatesPa
 const updateUserTemplate = `-- name: UpdateUserTemplate :one
 UPDATE templates SET
     name = $3, description = $4, category = $5, icon = $6, fields = $7, sections = $8, sources = $9,
-    default_schedule = $10, default_length = $11, required_connectors = $12,
+    default_schedule = $10, default_length = $11, required_connectors = $12, search_region = $13,
     version = version + 1, updated_at = now()
 WHERE id = $1 AND owner_id = $2
-RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources
+RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region
 `
 
 type UpdateUserTemplateParams struct {
@@ -357,6 +363,7 @@ type UpdateUserTemplateParams struct {
 	DefaultSchedule    json.RawMessage
 	DefaultLength      string
 	RequiredConnectors []string
+	SearchRegion       string
 }
 
 func (q *Queries) UpdateUserTemplate(ctx context.Context, arg UpdateUserTemplateParams) (Template, error) {
@@ -373,6 +380,7 @@ func (q *Queries) UpdateUserTemplate(ctx context.Context, arg UpdateUserTemplate
 		arg.DefaultSchedule,
 		arg.DefaultLength,
 		arg.RequiredConnectors,
+		arg.SearchRegion,
 	)
 	var i Template
 	err := row.Scan(
@@ -398,6 +406,7 @@ func (q *Queries) UpdateUserTemplate(ctx context.Context, arg UpdateUserTemplate
 		&i.Translations,
 		&i.Markets,
 		&i.MarketSources,
+		&i.SearchRegion,
 	)
 	return i, err
 }
@@ -405,18 +414,18 @@ func (q *Queries) UpdateUserTemplate(ctx context.Context, arg UpdateUserTemplate
 const upsertOfficialTemplate = `-- name: UpsertOfficialTemplate :exec
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
                        default_schedule, default_length, required_connectors, sort_order, translations,
-                       markets, market_sources)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                       markets, market_sources, search_region)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 ON CONFLICT (slug) DO UPDATE SET
-    markets = excluded.markets, market_sources = excluded.market_sources,
+    search_region = excluded.search_region, markets = excluded.markets, market_sources = excluded.market_sources,
     name = excluded.name, description = excluded.description, category = excluded.category,
     translations = excluded.translations,
     icon = excluded.icon, fields = excluded.fields, sections = excluded.sections,
     sources = excluded.sources, default_schedule = excluded.default_schedule,
     default_length = excluded.default_length, required_connectors = excluded.required_connectors,
     sort_order = excluded.sort_order,
-    version = CASE WHEN (templates.fields, templates.sections, templates.sources, templates.market_sources)
-                     IS DISTINCT FROM (excluded.fields, excluded.sections, excluded.sources, excluded.market_sources)
+    version = CASE WHEN (templates.fields, templates.sections, templates.sources, templates.market_sources, templates.search_region)
+                     IS DISTINCT FROM (excluded.fields, excluded.sections, excluded.sources, excluded.market_sources, excluded.search_region)
                    THEN templates.version + 1 ELSE templates.version END,
     updated_at = now()
 WHERE NOT templates.admin_managed
@@ -438,6 +447,7 @@ type UpsertOfficialTemplateParams struct {
 	Translations       json.RawMessage
 	Markets            []string
 	MarketSources      json.RawMessage
+	SearchRegion       string
 }
 
 // Templates edited in the admin console keep their edits.
@@ -458,6 +468,7 @@ func (q *Queries) UpsertOfficialTemplate(ctx context.Context, arg UpsertOfficial
 		arg.Translations,
 		arg.Markets,
 		arg.MarketSources,
+		arg.SearchRegion,
 	)
 	return err
 }

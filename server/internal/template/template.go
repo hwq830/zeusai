@@ -40,10 +40,11 @@ type Field struct {
 }
 
 type Section struct {
-	Key         string `json:"key" yaml:"key"`
-	Title       string `json:"title" yaml:"title"`
-	Instruction string `json:"instruction,omitempty" yaml:"instruction"`
-	MaxItems    int    `json:"maxItems,omitempty" yaml:"max_items"`
+	SearchRegion string `json:"searchRegion,omitempty" yaml:"search_region"`
+	Key          string `json:"key" yaml:"key"`
+	Title        string `json:"title" yaml:"title"`
+	Instruction  string `json:"instruction,omitempty" yaml:"instruction"`
+	MaxItems     int    `json:"maxItems,omitempty" yaml:"max_items"`
 	// Private marks personal content (location weather, calendar…) left out of shared briefings.
 	Private bool `json:"private,omitempty" yaml:"private"`
 }
@@ -56,6 +57,7 @@ type Source struct {
 
 // Input is the editable part of a template (TemplateInput in the contract).
 type Input struct {
+	SearchRegion       string             `json:"searchRegion,omitempty" yaml:"search_region"`
 	Name               string             `json:"name" yaml:"name"`
 	Description        string             `json:"description,omitempty" yaml:"description"`
 	Category           string             `json:"category,omitempty" yaml:"category"`
@@ -219,6 +221,9 @@ var (
 )
 
 func (in *Input) Validate() error {
+	if in.SearchRegion != "" && in.SearchRegion != market.Global && !market.Valid(in.SearchRegion) {
+		return apperr.Invalid("模板内容地区无效")
+	}
 	if strings.TrimSpace(in.Name) == "" || len([]rune(in.Name)) > 40 {
 		return apperr.Invalid("模板名称不能为空且不超过 40 字")
 	}
@@ -248,6 +253,9 @@ func (in *Input) Validate() error {
 		}
 		if strings.TrimSpace(s.Title) == "" {
 			return apperr.Invalid("栏目标题不能为空")
+		}
+		if s.SearchRegion != "" && s.SearchRegion != market.Global && !market.Valid(s.SearchRegion) {
+			return apperr.Invalid("栏目内容地区无效")
 		}
 		if s.MaxItems <= 0 || s.MaxItems > 10 {
 			s.MaxItems = 5
@@ -334,7 +342,7 @@ func FromRow(r db.Template) (Template, error) {
 	t := Template{
 		ID: r.ID.String(), Version: int(r.Version), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, OwnerID: r.OwnerID,
 		Input: Input{
-			Name: r.Name, Description: r.Description, Category: r.Category, Icon: r.Icon,
+			SearchRegion: r.SearchRegion, Name: r.Name, Description: r.Description, Category: r.Category, Icon: r.Icon,
 			DefaultLength: r.DefaultLength, RequiredConnectors: r.RequiredConnectors,
 		},
 	}
@@ -521,7 +529,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in Input) (Templ
 	r, err := s.Q.CreateTemplate(ctx, db.CreateTemplateParams{
 		OwnerID: &userID, Name: in.Name, Description: in.Description, Category: in.Category, Icon: in.Icon,
 		Fields: e.fields, Sections: e.sections, Sources: e.sources, DefaultSchedule: e.sched,
-		DefaultLength: in.DefaultLength, RequiredConnectors: orEmpty(in.RequiredConnectors),
+		SearchRegion: in.SearchRegion, DefaultLength: in.DefaultLength, RequiredConnectors: orEmpty(in.RequiredConnectors),
 	})
 	if err != nil {
 		return Template{}, apperr.Internal(err)
@@ -546,7 +554,7 @@ func (s *Service) Update(ctx context.Context, userID uuid.UUID, id string, in In
 	r, err := s.Q.UpdateUserTemplate(ctx, db.UpdateUserTemplateParams{
 		ID: tid, OwnerID: &userID, Name: in.Name, Description: in.Description, Category: in.Category, Icon: in.Icon,
 		Fields: e.fields, Sections: e.sections, Sources: e.sources, DefaultSchedule: e.sched,
-		DefaultLength: in.DefaultLength, RequiredConnectors: orEmpty(in.RequiredConnectors),
+		SearchRegion: in.SearchRegion, DefaultLength: in.DefaultLength, RequiredConnectors: orEmpty(in.RequiredConnectors),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Template{}, apperr.NotFound("模板不存在或不可修改")
@@ -628,7 +636,7 @@ func (s *Service) SeedOfficial(ctx context.Context) (int, error) {
 		if err := s.Q.UpsertOfficialTemplate(ctx, db.UpsertOfficialTemplateParams{
 			Slug: &sf.Slug, Name: sf.Name, Description: sf.Description, Category: sf.Category, Icon: sf.Icon,
 			Fields: e.fields, Sections: e.sections, Sources: e.sources, DefaultSchedule: e.sched,
-			DefaultLength: sf.DefaultLength, RequiredConnectors: orEmpty(sf.RequiredConnectors), SortOrder: int32(sf.SortOrder),
+			SearchRegion: sf.SearchRegion, DefaultLength: sf.DefaultLength, RequiredConnectors: orEmpty(sf.RequiredConnectors), SortOrder: int32(sf.SortOrder),
 			Translations: trs, Markets: e.markets, MarketSources: e.marketSources,
 		}); err != nil {
 			return 0, fmt.Errorf("%s: %w", f, err)

@@ -16,9 +16,9 @@ import (
 const adminCreateOfficialTemplate = `-- name: AdminCreateOfficialTemplate :one
 INSERT INTO templates (slug, name, description, category, icon, fields, sections, sources,
                        default_schedule, default_length, required_connectors, published, sort_order, translations,
-                       markets, market_sources, admin_managed)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true)
-RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources
+                       markets, market_sources, admin_managed, search_region)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, true, $17)
+RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region
 `
 
 type AdminCreateOfficialTemplateParams struct {
@@ -38,6 +38,7 @@ type AdminCreateOfficialTemplateParams struct {
 	Translations       json.RawMessage
 	Markets            []string
 	MarketSources      json.RawMessage
+	SearchRegion       string
 }
 
 func (q *Queries) AdminCreateOfficialTemplate(ctx context.Context, arg AdminCreateOfficialTemplateParams) (Template, error) {
@@ -58,6 +59,7 @@ func (q *Queries) AdminCreateOfficialTemplate(ctx context.Context, arg AdminCrea
 		arg.Translations,
 		arg.Markets,
 		arg.MarketSources,
+		arg.SearchRegion,
 	)
 	var i Template
 	err := row.Scan(
@@ -83,6 +85,7 @@ func (q *Queries) AdminCreateOfficialTemplate(ctx context.Context, arg AdminCrea
 		&i.Translations,
 		&i.Markets,
 		&i.MarketSources,
+		&i.SearchRegion,
 	)
 	return i, err
 }
@@ -167,7 +170,7 @@ func (q *Queries) AdminGetTask(ctx context.Context, id uuid.UUID) (Task, error) 
 }
 
 const adminGetTemplate = `-- name: AdminGetTemplate :one
-SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources FROM templates WHERE id = $1
+SELECT id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region FROM templates WHERE id = $1
 `
 
 func (q *Queries) AdminGetTemplate(ctx context.Context, id uuid.UUID) (Template, error) {
@@ -196,6 +199,7 @@ func (q *Queries) AdminGetTemplate(ctx context.Context, id uuid.UUID) (Template,
 		&i.Translations,
 		&i.Markets,
 		&i.MarketSources,
+		&i.SearchRegion,
 	)
 	return i, err
 }
@@ -483,7 +487,7 @@ func (q *Queries) AdminListTasks(ctx context.Context, arg AdminListTasksParams) 
 
 const adminListTemplates = `-- name: AdminListTemplates :many
 
-SELECT t.id, t.owner_id, t.slug, t.name, t.description, t.category, t.icon, t.fields, t.sections, t.sources, t.default_schedule, t.default_length, t.required_connectors, t.version, t.published, t.sort_order, t.created_at, t.updated_at, t.admin_managed, t.translations, t.markets, t.market_sources, (SELECT count(*) FROM briefing_subscriptions s WHERE s.template_id = t.id)::int AS subscription_count
+SELECT t.id, t.owner_id, t.slug, t.name, t.description, t.category, t.icon, t.fields, t.sections, t.sources, t.default_schedule, t.default_length, t.required_connectors, t.version, t.published, t.sort_order, t.created_at, t.updated_at, t.admin_managed, t.translations, t.markets, t.market_sources, t.search_region, (SELECT count(*) FROM briefing_subscriptions s WHERE s.template_id = t.id)::int AS subscription_count
 FROM templates t
 WHERE (($3::text = 'official' AND t.owner_id IS NULL) OR ($3::text = 'custom' AND t.owner_id IS NOT NULL))
   AND ($4::text IS NULL OR t.name ILIKE '%' || $4 || '%' OR t.description ILIKE '%' || $4 || '%')
@@ -521,6 +525,7 @@ type AdminListTemplatesRow struct {
 	Translations       json.RawMessage
 	Markets            []string
 	MarketSources      json.RawMessage
+	SearchRegion       string
 	SubscriptionCount  int32
 }
 
@@ -562,6 +567,7 @@ func (q *Queries) AdminListTemplates(ctx context.Context, arg AdminListTemplates
 			&i.Translations,
 			&i.Markets,
 			&i.MarketSources,
+			&i.SearchRegion,
 			&i.SubscriptionCount,
 		); err != nil {
 			return nil, err
@@ -858,12 +864,12 @@ const adminUpdateTemplate = `-- name: AdminUpdateTemplate :one
 UPDATE templates SET
     name = $2, description = $3, category = $4, icon = $5, fields = $6, sections = $7, sources = $8,
     default_schedule = $9, default_length = $10, required_connectors = $11, published = $12, sort_order = $13,
-    translations = $14, markets = $15, market_sources = $16,
-    version = CASE WHEN (fields, sections, sources, market_sources) IS DISTINCT FROM ($6::jsonb, $7::jsonb, $8::jsonb, $16::jsonb)
+    translations = $14, markets = $15, market_sources = $16, search_region = $17,
+    version = CASE WHEN (fields, sections, sources, market_sources, search_region) IS DISTINCT FROM ($6::jsonb, $7::jsonb, $8::jsonb, $16::jsonb, $17::text)
                    THEN version + 1 ELSE version END,
     admin_managed = true, updated_at = now()
 WHERE id = $1
-RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources
+RETURNING id, owner_id, slug, name, description, category, icon, fields, sections, sources, default_schedule, default_length, required_connectors, version, published, sort_order, created_at, updated_at, admin_managed, translations, markets, market_sources, search_region
 `
 
 type AdminUpdateTemplateParams struct {
@@ -883,6 +889,7 @@ type AdminUpdateTemplateParams struct {
 	Translations       json.RawMessage
 	Markets            []string
 	MarketSources      json.RawMessage
+	SearchRegion       string
 }
 
 func (q *Queries) AdminUpdateTemplate(ctx context.Context, arg AdminUpdateTemplateParams) (Template, error) {
@@ -903,6 +910,7 @@ func (q *Queries) AdminUpdateTemplate(ctx context.Context, arg AdminUpdateTempla
 		arg.Translations,
 		arg.Markets,
 		arg.MarketSources,
+		arg.SearchRegion,
 	)
 	var i Template
 	err := row.Scan(
@@ -928,6 +936,7 @@ func (q *Queries) AdminUpdateTemplate(ctx context.Context, arg AdminUpdateTempla
 		&i.Translations,
 		&i.Markets,
 		&i.MarketSources,
+		&i.SearchRegion,
 	)
 	return i, err
 }
