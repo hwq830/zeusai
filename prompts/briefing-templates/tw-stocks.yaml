@@ -1,0 +1,47 @@
+slug: tw-stocks
+name: 台股早报
+description: 开盘前看加权指数、三大法人动向和你关注的个股
+category: 商业财经
+icon: chart.bar.xaxis
+sort_order: 21
+markets: [TW]
+fields:
+  - key: stocks
+    label: 关注的个股
+    type: tags
+    required: false
+    placeholder: 如 台积电、联发科、鸿海
+    max: 8
+sections:
+  - key: market
+    title: 大盘与资金
+    instruction: 前一交易日加权指数、柜买指数的涨跌和成交量，外资、投信、自营商的买卖超
+    max_items: 4
+  - key: stocks
+    title: 关注的个股
+    instruction: '{{stocks}} 的股价表现、重大讯息、法说会和相关新闻'
+    max_items: 6
+  - key: news
+    title: 产业与国际要闻
+    instruction: 影响台股的产业和国际要闻，如半导体、AI 供应链、美股科技股、汇率
+    max_items: 4
+sources:
+  - { type: site, value: cnyes.com }
+  - { type: site, value: money.udn.com }
+  - { type: site, value: ctee.com.tw }
+  - { type: search, value: 台股 加权指数 外资 买卖超 }
+  - { type: search, value: '{{stocks}} 股价 新闻' }
+  - { type: site, value: mops.twse.com.tw }
+default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '08:00', tz: Asia/Taipei }
+default_length: standard
+translations:
+  en:
+    name: Taiwan Stocks Morning
+    description: Before the open — TAIEX, institutional flows and the stocks you follow
+    category: Business
+    fields:
+      stocks: { label: Stocks to follow, placeholder: 'e.g. TSMC, MediaTek, Foxconn' }
+    sections:
+      market: { title: Market and flows, instruction: 'TAIEX and OTC index moves and turnover in the last session; net buying by foreign investors, investment trusts and dealers' }
+      stocks: { title: Your stocks, instruction: 'Price moves, material announcements, investor conferences and news for {{stocks}}' }
+      news: { title: Industry and world news, instruction: 'Industry and global news that moves Taiwan stocks: semiconductors, the AI supply chain, US tech stocks, the currency' }

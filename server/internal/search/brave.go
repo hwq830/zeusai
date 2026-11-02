@@ -8,7 +8,11 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
+
+// braveCountries are the country codes Brave accepts (others are rejected with 422).
+var braveCountries = map[string]bool{"TW": true, "HK": true, "MY": true, "US": true, "CN": true, "JP": true, "KR": true, "GB": true, "AU": true, "CA": true}
 
 // Brave calls the Brave Search web API (https://api-dashboard.search.brave.com).
 type Brave struct {
@@ -53,6 +57,12 @@ func (b Brave) Search(ctx context.Context, q Query) ([]Result, error) {
 	v := url.Values{"q": {withSite(q)}, "count": {strconv.Itoa(limit(q.Limit, 8, 20))}}
 	if f := braveFreshness(q.FreshDays); f != "" {
 		v.Set("freshness", f)
+	}
+	if c := strings.ToUpper(q.Country); braveCountries[c] {
+		v.Set("country", c)
+	}
+	if q.Lang != "" {
+		v.Set("search_lang", q.Lang) // Brave uses zh-hant / zh-hans / en as well
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, orDefault(b.BaseURL, ProtocolBrave)+"/res/v1/web/search?"+v.Encode(), nil)
 	if err != nil {

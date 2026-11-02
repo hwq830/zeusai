@@ -21,6 +21,7 @@ UPDATE users SET
     timezone = coalesce(sqlc.narg(timezone), timezone),
     ui_language = coalesce(sqlc.narg(ui_language), ui_language),
     report_language = coalesce(sqlc.narg(report_language), report_language),
+    market = coalesce(sqlc.narg(market), market),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

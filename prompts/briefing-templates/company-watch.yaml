@@ -30,6 +30,44 @@ sources:
     value: '{{companies}} 新闻'
   - type: search
     value: '{{companies}} 公告 财报'
+# 按地区加本地财经网站和公告来源（台港澳的搜索词会自动转成繁体）。没写的地区用默认 sources。
+market_sources:
+  TW:
+    - { type: search, value: '{{companies}} 新闻' }
+    - { type: search, value: '{{companies}} 公告 财报' }
+    - { type: site, value: money.udn.com }
+    - { type: site, value: cnyes.com }
+    - { type: site, value: mops.twse.com.tw }
+  HK:
+    - { type: search, value: '{{companies}} 新闻' }
+    - { type: search, value: '{{companies}} 公告 财报' }
+    - { type: site, value: hket.com }
+    - { type: site, value: hkej.com }
+    - { type: site, value: hkexnews.hk }
+  MO:
+    - { type: search, value: '{{companies}} 新闻' }
+    - { type: search, value: '{{companies}} 公告 财报' }
+    - { type: site, value: hket.com }
+    - { type: site, value: macaodaily.com }
+    - { type: site, value: hkexnews.hk }
+  SG:
+    - { type: search, value: '{{companies}} 新闻' }
+    - { type: search, value: '{{companies}} 公告 财报' }
+    - { type: site, value: zaobao.com.sg }
+    - { type: site, value: businesstimes.com.sg }
+    - { type: site, value: straitstimes.com }
+  MY:
+    - { type: search, value: '{{companies}} 新闻' }
+    - { type: search, value: '{{companies}} 公告 财报' }
+    - { type: site, value: sinchew.com.my }
+    - { type: site, value: enanyang.my }
+    - { type: site, value: theedgemalaysia.com }
+  US:
+    - { type: search, value: '{{companies}} news' }
+    - { type: search, value: '{{companies}} earnings SEC filing' }
+    - { type: site, value: reuters.com }
+    - { type: site, value: cnbc.com }
+    - { type: site, value: sec.gov }
 default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '08:30', tz: Asia/Shanghai }
 default_length: standard
 translations:

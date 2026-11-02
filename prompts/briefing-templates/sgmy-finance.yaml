@@ -1,0 +1,67 @@
+slug: sgmy-finance
+name: 新马财经早报
+description: 新加坡和马来西亚股市、汇率与本地财经要闻
+category: 商业财经
+icon: chart.bar.xaxis
+sort_order: 23
+markets: [SG, MY]
+fields:
+  - key: stocks
+    label: 关注的公司
+    type: tags
+    required: false
+    placeholder: 如 星展银行、大众银行、云顶
+    max: 8
+sections:
+  - key: market
+    title: 股市
+    instruction: 前一交易日新加坡海峡时报指数（STI）和富时大马综合指数（KLCI）的表现和主要涨跌股
+    max_items: 4
+  - key: fx
+    title: 汇率与利率
+    instruction: 新元、令吉兑美元和人民币的汇率变化，金管局和国家银行的动向
+    max_items: 3
+  - key: news
+    title: 本地财经要闻
+    instruction: 新加坡和马来西亚的重要财经、地产和政策新闻
+    max_items: 5
+  - key: stocks
+    title: 关注的公司
+    instruction: '{{stocks}} 的新闻、公告和业绩'
+    max_items: 5
+sources:
+  - { type: site, value: zaobao.com.sg }
+  - { type: site, value: businesstimes.com.sg }
+  - { type: site, value: sinchew.com.my }
+  - { type: site, value: theedgemalaysia.com }
+  - { type: search, value: 海峡时报指数 富时大马 今日 }
+  - { type: search, value: '{{stocks}} 新闻' }
+market_sources:
+  SG:
+    - { type: site, value: zaobao.com.sg }
+    - { type: site, value: businesstimes.com.sg }
+    - { type: site, value: straitstimes.com }
+    - { type: search, value: 新加坡 海峡时报指数 今日 }
+    - { type: search, value: 新元 汇率 }
+    - { type: search, value: '{{stocks}} 新闻' }
+  MY:
+    - { type: site, value: sinchew.com.my }
+    - { type: site, value: enanyang.my }
+    - { type: site, value: theedgemalaysia.com }
+    - { type: search, value: 马来西亚 富时大马 综合指数 今日 }
+    - { type: search, value: 令吉 汇率 }
+    - { type: search, value: '{{stocks}} 新闻' }
+default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '08:00', tz: Asia/Singapore }
+default_length: standard
+translations:
+  en:
+    name: Singapore & Malaysia Finance Morning
+    description: Singapore and Malaysia markets, currencies and local business news
+    category: Business
+    fields:
+      stocks: { label: Companies to follow, placeholder: 'e.g. DBS, Public Bank, Genting' }
+    sections:
+      market: { title: Markets, instruction: 'How the STI and the FBM KLCI did in the last session, and the biggest movers' }
+      fx: { title: Currencies and rates, instruction: 'SGD and MYR against the US dollar and the yuan; moves by MAS and Bank Negara' }
+      news: { title: Local business news, instruction: 'Key business, property and policy news in Singapore and Malaysia' }
+      stocks: { title: Your companies, instruction: 'News, announcements and results for {{stocks}}' }

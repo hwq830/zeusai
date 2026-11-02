@@ -25,6 +25,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/market"
 	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/pdf"
@@ -187,10 +188,17 @@ func clip(s string, n int) string {
 	return string([]rune(s)[:n])
 }
 
-// buildSections turns a subscription (and its template, if any) into section plans.
-func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i18n.Lang) []SectionPlan {
+// buildSections turns a subscription (and its template, if any) into section plans. mkt is the
+// subscriber's market: it picks the template's sources and the search region; Traditional
+// Chinese markets search in Traditional Chinese.
+func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i18n.Lang, mkt string) []SectionPlan {
 	q := func(text, site string) search.Query {
-		return search.Query{Q: clip(strings.TrimSpace(text), 60), Site: site, FreshDays: fresh, Limit: 6}
+		text = strings.TrimSpace(text)
+		if market.Traditional(mkt) {
+			text = i18n.Hant(text)
+		}
+		return search.Query{Q: clip(text, 60), Site: site, FreshDays: fresh, Limit: 6,
+			Country: market.Country(mkt), Lang: market.SearchLang(mkt)}
 	}
 	if t == nil {
 		var out []SectionPlan
@@ -216,7 +224,7 @@ func buildSections(sub briefing.Subscription, t *tpl.Template, fresh int, lang i
 	}
 	// Template-level sources are spread over the sections.
 	i := 0
-	for _, src := range t.Sources {
+	for _, src := range t.SourcesFor(mkt) {
 		var query search.Query
 		switch src.Type {
 		case "search":
@@ -250,6 +258,10 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 	sub := briefing.FromRow(row)
 	now := a.now()
 	lang := a.uiLang(ctx, run.UserID)
+	mkt := market.Other
+	if u, err := a.Q.GetUser(ctx, run.UserID); err == nil {
+		mkt = market.Normalize(u.Market)
+	}
 
 	taskID := run.TaskID
 	if run.Scheduled {
@@ -299,7 +311,7 @@ func (a *Activities) PrepareBriefing(ctx context.Context, run orch.BriefingRun) 
 	fresh := freshDays(sub.Schedule.Freq)
 	plan := BriefingPlan{
 		UserID: run.UserID, TaskID: taskID, BriefingID: b.ID, SubID: row.ID, Title: row.Name, Length: row.Length,
-		FreshDays: fresh, Interests: interests, Sections: buildSections(sub, t, fresh, lang), PushEnabled: row.PushEnabled, PushAt: now, Lang: lang,
+		FreshDays: fresh, Interests: interests, Sections: buildSections(sub, t, fresh, lang, mkt), PushEnabled: row.PushEnabled, PushAt: now, Lang: lang,
 	}
 	h, m := sub.Schedule.Clock()
 	l := now.In(loc)

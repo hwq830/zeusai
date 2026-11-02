@@ -1327,7 +1327,7 @@ components:
         quota: { $ref: '#/components/schemas/Quota' }
     User:
       type: object
-      required: [id, nickname, timezone, createdAt, loginMethods, uiLanguage, reportLanguage]
+      required: [id, nickname, timezone, createdAt, loginMethods, uiLanguage, reportLanguage, market]
       properties:
         id: { type: string }
         nickname: { type: string }
@@ -1345,7 +1345,14 @@ components:
             enum: [phone, wechat, apple]
         uiLanguage: { $ref: '#/components/schemas/Language' }
         reportLanguage: { $ref: '#/components/schemas/ReportLanguage' }
+        market: { $ref: '#/components/schemas/Market' }
         createdAt: { type: string, format: date-time }
+    Market:
+      type: string
+      description: |
+        用户所在地区，决定能看到哪些官方简报模板、简报用哪些信源和搜索地区。App 按手机的地区设置上报
+        （和时区一样），用户也可以在「语言与地区」里手动改；不在列表里的地区报 other。
+      enum: [TW, HK, MO, SG, MY, US, other]
     Language:
       type: string
       description: 简体中文 / 繁體中文 / English
@@ -1364,6 +1371,7 @@ components:
             - $ref: '#/components/schemas/Language'
           description: App 的显示语言（"跟随系统"时由 App 换算成 zh / zh-Hant / en 再上报）；简报、推送和消息中心跟随它
         reportLanguage: { $ref: '#/components/schemas/ReportLanguage' }
+        market: { $ref: '#/components/schemas/Market' }
     Plan:
       type: object
       required: [code, name]

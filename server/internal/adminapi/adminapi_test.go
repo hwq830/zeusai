@@ -320,7 +320,8 @@ func TestAdminConsole(t *testing.T) {
 	}
 	first := tp.Items[0]
 	in := gen.AdminTemplateInput{Name: "改过的名字", Fields: first.Fields, Sections: first.Sections, Sources: first.Sources,
-		DefaultSchedule: first.DefaultSchedule, Published: false, SortOrder: first.SortOrder}
+		DefaultSchedule: first.DefaultSchedule, Published: false, SortOrder: first.SortOrder,
+		Markets: first.Markets, MarketSources: first.MarketSources}
 	var tpl gen.AdminTemplate
 	h.do("PUT", "/admin/v1/templates/"+first.Id, in, 200, &tpl)
 	if !tpl.AdminManaged || tpl.Published || tpl.Version != first.Version {

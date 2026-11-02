@@ -22,6 +22,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/llm"
+	"github.com/hwq830/zeusai/server/internal/market"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 )
@@ -65,6 +66,25 @@ type Input struct {
 	DefaultSchedule    *schedule.Schedule `json:"defaultSchedule,omitempty" yaml:"default_schedule"`
 	DefaultLength      string             `json:"defaultLength,omitempty" yaml:"default_length"`
 	RequiredConnectors []string           `json:"requiredConnectors,omitempty" yaml:"required_connectors"`
+	// Markets limits an official template to these regions (empty: everywhere).
+	Markets []string `json:"markets,omitempty" yaml:"markets"`
+	// MarketSources replaces Sources for subscribers in a region (official templates only).
+	MarketSources map[string][]Source `json:"marketSources,omitempty" yaml:"market_sources"`
+}
+
+// SourcesFor is the sources a subscriber in market m uses: the market's own list if the
+// template has one, else the default sources.
+func (in Input) SourcesFor(m string) []Source {
+	if ss := in.MarketSources[m]; len(ss) > 0 {
+		return ss
+	}
+	return in.Sources
+}
+
+// ForUser drops the per-market settings, which only official templates have.
+func (in Input) ForUser() Input {
+	in.Markets, in.MarketSources = nil, nil
+	return in
 }
 
 type Template struct {
@@ -238,6 +258,29 @@ func (in *Input) Validate() error {
 			return apperr.Invalid("信息来源无效")
 		}
 	}
+	seenMarket := map[string]bool{}
+	for _, m := range in.Markets {
+		if !market.Valid(m) || m == market.Other || seenMarket[m] {
+			return apperr.Invalid(fmt.Sprintf("地区 %q 无效或重复", m))
+		}
+		seenMarket[m] = true
+	}
+	for m, ss := range in.MarketSources {
+		if !market.Valid(m) {
+			return apperr.Invalid(fmt.Sprintf("地区 %q 无效", m))
+		}
+		if len(ss) > 20 {
+			return apperr.Invalid("每个地区的信息来源最多 20 条")
+		}
+		for _, s := range ss {
+			if !sourceTypes[s.Type] || s.Value == "" {
+				return apperr.Invalid(market.Name(m) + "的信息来源无效")
+			}
+		}
+		if len(ss) == 0 {
+			delete(in.MarketSources, m)
+		}
+	}
 	if in.DefaultLength == "" {
 		in.DefaultLength = "standard"
 	}
@@ -295,6 +338,14 @@ func FromRow(r db.Template) (Template, error) {
 			DefaultLength: r.DefaultLength, RequiredConnectors: r.RequiredConnectors,
 		},
 	}
+	if len(r.Markets) > 0 {
+		t.Markets = r.Markets
+	}
+	if len(r.MarketSources) > 0 && string(r.MarketSources) != "{}" {
+		if err := json.Unmarshal(r.MarketSources, &t.MarketSources); err != nil {
+			return t, err
+		}
+	}
 	t.Kind = "official"
 	if r.OwnerID != nil {
 		t.Kind = "custom"
@@ -323,16 +374,27 @@ func FromRow(r db.Template) (Template, error) {
 }
 
 type encoded struct {
-	fields, sections, sources, sched json.RawMessage
+	fields, sections, sources, sched, marketSources json.RawMessage
+	markets                                         []string
 }
 
 func encode(in Input) encoded {
 	m := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
-	e := encoded{fields: m(orEmpty(in.Fields)), sections: m(orEmpty(in.Sections)), sources: m(orEmpty(in.Sources))}
+	e := encoded{fields: m(orEmpty(in.Fields)), sections: m(orEmpty(in.Sections)), sources: m(orEmpty(in.Sources)),
+		markets: orEmpty(in.Markets), marketSources: EncodeMarketSources(in.MarketSources)}
 	if in.DefaultSchedule != nil {
 		e.sched = m(in.DefaultSchedule)
 	}
 	return e
+}
+
+// EncodeMarketSources is the market_sources column value.
+func EncodeMarketSources(ms map[string][]Source) json.RawMessage {
+	if len(ms) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	b, _ := json.Marshal(ms)
+	return b
 }
 
 func orEmpty[T any](s []T) []T {
@@ -360,11 +422,17 @@ func (in Input) texts() []string {
 	for _, s := range in.Sources {
 		t = append(t, s.Value, s.Label)
 	}
+	for _, ss := range in.MarketSources {
+		for _, s := range ss {
+			t = append(t, s.Value, s.Label)
+		}
+	}
 	return t
 }
 
 type ListParams struct {
 	Scope, Category, Q string
+	Market             string // the user's region; official templates for other regions are left out
 	Limit, Offset      int
 }
 
@@ -377,7 +445,8 @@ func strPtr(s string) *string {
 
 func (s *Service) List(ctx context.Context, userID uuid.UUID, p ListParams) ([]Template, []string, error) {
 	lang := i18n.FromContext(ctx)
-	cats, err := s.Q.ListOfficialCategories(ctx)
+	mkt := market.Normalize(p.Market)
+	cats, err := s.Q.ListOfficialCategories(ctx, mkt)
 	if err != nil {
 		return nil, nil, apperr.Internal(err)
 	}
@@ -392,7 +461,7 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID, p ListParams) ([]T
 	if p.Scope == "mine" {
 		rows, err = s.Q.ListUserTemplates(ctx, db.ListUserTemplatesParams{OwnerID: &userID, Q: strPtr(p.Q), Limit: int32(p.Limit), Offset: int32(p.Offset)})
 	} else {
-		rows, err = s.Q.ListOfficialTemplates(ctx, db.ListOfficialTemplatesParams{Category: strPtr(p.Category), Q: strPtr(p.Q), Limit: int32(p.Limit), Offset: int32(p.Offset)})
+		rows, err = s.Q.ListOfficialTemplates(ctx, db.ListOfficialTemplatesParams{Market: mkt, Category: strPtr(p.Category), Q: strPtr(p.Q), Limit: int32(p.Limit), Offset: int32(p.Offset)})
 	}
 	if err != nil {
 		return nil, nil, apperr.Internal(err)
@@ -434,6 +503,7 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, id string) (Templat
 const maxCustomTemplates = 20
 
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, in Input) (Template, error) {
+	in = in.ForUser()
 	if err := in.Validate(); err != nil {
 		return Template{}, err
 	}
@@ -461,6 +531,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in Input) (Templ
 }
 
 func (s *Service) Update(ctx context.Context, userID uuid.UUID, id string, in Input) (Template, error) {
+	in = in.ForUser()
 	if err := in.Validate(); err != nil {
 		return Template{}, err
 	}
@@ -502,12 +573,15 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID, id string) error
 	return nil
 }
 
-func (s *Service) Copy(ctx context.Context, userID uuid.UUID, id string) (Template, error) {
+// Copy saves a private copy; an official template's sources for the user's market become the
+// copy's sources.
+func (s *Service) Copy(ctx context.Context, userID uuid.UUID, mkt, id string) (Template, error) {
 	t, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return Template{}, err
 	}
 	in := t.Input
+	in.Sources = in.SourcesFor(market.Normalize(mkt))
 	in.Name = truncate(in.Name+i18n.T(ctx, "（副本）", " (copy)"), 40)
 	return s.Create(ctx, userID, in)
 }
@@ -555,11 +629,14 @@ func (s *Service) SeedOfficial(ctx context.Context) (int, error) {
 			Slug: &sf.Slug, Name: sf.Name, Description: sf.Description, Category: sf.Category, Icon: sf.Icon,
 			Fields: e.fields, Sections: e.sections, Sources: e.sources, DefaultSchedule: e.sched,
 			DefaultLength: sf.DefaultLength, RequiredConnectors: orEmpty(sf.RequiredConnectors), SortOrder: int32(sf.SortOrder),
-			Translations: trs,
+			Translations: trs, Markets: e.markets, MarketSources: e.marketSources,
 		}); err != nil {
 			return 0, fmt.Errorf("%s: %w", f, err)
 		}
 		if err := s.Q.FillOfficialTranslations(ctx, db.FillOfficialTranslationsParams{Slug: &sf.Slug, Translations: trs}); err != nil {
+			return 0, fmt.Errorf("%s: %w", f, err)
+		}
+		if err := s.Q.FillOfficialMarkets(ctx, db.FillOfficialMarketsParams{Slug: &sf.Slug, Markets: e.markets, MarketSources: e.marketSources}); err != nil {
 			return 0, fmt.Errorf("%s: %w", f, err)
 		}
 	}

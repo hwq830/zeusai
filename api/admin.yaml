@@ -125,6 +125,10 @@ paths:
           in: query
           description: 按 App 显示语言筛选
           schema: { type: string, enum: [zh, zh-Hant, en] }
+        - name: market
+          in: query
+          description: 按地区筛选
+          schema: { $ref: '#/components/schemas/Market' }
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -2325,7 +2329,7 @@ components:
     # ------------------------------------------------------------ users
     UserSummary:
       type: object
-      required: [id, nickname, phoneMasked, loginMethods, planCode, timezone, uiLanguage, reportLanguage, disabled, createdAt]
+      required: [id, nickname, phoneMasked, loginMethods, planCode, timezone, uiLanguage, reportLanguage, market, disabled, createdAt]
       properties:
         id: { type: string }
         nickname: { type: string }
@@ -2338,6 +2342,7 @@ components:
         timezone: { type: string }
         uiLanguage: { type: string, enum: [zh, zh-Hant, en], description: App 显示语言，简报和推送跟随它 }
         reportLanguage: { type: string, enum: [auto, zh, zh-Hant, en], description: 报告生成语言，auto 跟随显示语言 }
+        market: { $ref: '#/components/schemas/Market' }
         disabled: { type: boolean }
         disabledReason: { type: string }
         disabledAt: { type: string, format: date-time, nullable: true }
@@ -2529,6 +2534,20 @@ components:
           type: object
           description: 其他语言的文案，键为语言（目前只有 en）；缺的字段回落中文
           additionalProperties: { $ref: '#/components/schemas/TemplateTranslation' }
+        markets:
+          type: array
+          description: 只对这些地区的用户显示；不填表示所有地区
+          items: { $ref: '#/components/schemas/Market' }
+        marketSources:
+          type: object
+          description: 按地区替换信息来源，键为地区；没写的地区用默认 sources。台港澳的搜索词会自动转成繁体
+          additionalProperties:
+            type: array
+            items: { $ref: '#/components/schemas/TemplateSource' }
+    Market:
+      type: string
+      description: 用户地区（App 按手机地区设置上报）；other = 其他地区
+      enum: [TW, HK, MO, SG, MY, US, other]
     TemplateTranslation:
       type: object
       properties:

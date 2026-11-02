@@ -20,6 +20,8 @@ type serperRequest struct {
 	Q   string `json:"q"`
 	Num int    `json:"num"`
 	TBS string `json:"tbs,omitempty"`
+	GL  string `json:"gl,omitempty"`
+	HL  string `json:"hl,omitempty"`
 }
 
 type serperResponse struct {
@@ -34,7 +36,7 @@ func (s Serper) Search(ctx context.Context, q Query) ([]Result, error) {
 	if s.APIKey == "" {
 		return nil, errors.New("serper: API key is not configured")
 	}
-	r := serperRequest{Q: withSite(q), Num: limit(q.Limit, 8, 20)}
+	r := serperRequest{Q: withSite(q), Num: limit(q.Limit, 8, 20), GL: q.Country, HL: googleLang(q.Lang)}
 	if tr := timeRange(q.FreshDays); tr != "" {
 		r.TBS = "qdr:" + tr[:1] // qdr:d / w / m / y
 	}

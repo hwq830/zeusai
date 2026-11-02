@@ -48,8 +48,9 @@ func toAdminTemplate(r db.Template, subs int) (gen.AdminTemplate, error) {
 }
 
 type templateColumns struct {
-	in                                             template.Input
-	fields, sections, sources, sched, translations json.RawMessage
+	in                                                            template.Input
+	fields, sections, sources, sched, translations, marketSources json.RawMessage
+	markets                                                       []string
 }
 
 func templateInput(body gen.AdminTemplateInput) (templateColumns, error) {
@@ -66,7 +67,7 @@ func templateInput(body gen.AdminTemplateInput) (templateColumns, error) {
 	}
 	m := func(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 	c := templateColumns{in: in, fields: m(orEmpty(in.Fields)), sections: m(orEmpty(in.Sections)), sources: m(orEmpty(in.Sources)),
-		translations: template.EncodeTranslations(trs)}
+		translations: template.EncodeTranslations(trs), markets: orEmpty(in.Markets), marketSources: template.EncodeMarketSources(in.MarketSources)}
 	if in.DefaultSchedule != nil {
 		c.sched = m(in.DefaultSchedule)
 	}
@@ -98,7 +99,7 @@ func (s *Server) ListTemplates(ctx context.Context, req gen.ListTemplatesRequest
 			Icon: r.Icon, Fields: r.Fields, Sections: r.Sections, Sources: r.Sources, DefaultSchedule: r.DefaultSchedule,
 			DefaultLength: r.DefaultLength, RequiredConnectors: r.RequiredConnectors, Version: r.Version,
 			Published: r.Published, SortOrder: r.SortOrder, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-			AdminManaged: r.AdminManaged, Translations: r.Translations,
+			AdminManaged: r.AdminManaged, Translations: r.Translations, Markets: r.Markets, MarketSources: r.MarketSources,
 		}, int(r.SubscriptionCount))
 		if err != nil {
 			return nil, err
@@ -144,7 +145,7 @@ func (s *Server) CreateTemplate(ctx context.Context, req gen.CreateTemplateReque
 		Slug: strPtr(req.Body.Slug), Name: c.in.Name, Description: c.in.Description, Category: c.in.Category, Icon: c.in.Icon,
 		Fields: c.fields, Sections: c.sections, Sources: c.sources, DefaultSchedule: c.sched, DefaultLength: c.in.DefaultLength,
 		RequiredConnectors: orEmpty(c.in.RequiredConnectors), Published: req.Body.Published, SortOrder: int32(req.Body.SortOrder),
-		Translations: c.translations,
+		Translations: c.translations, Markets: c.markets, MarketSources: c.marketSources,
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -177,7 +178,7 @@ func (s *Server) UpdateTemplate(ctx context.Context, req gen.UpdateTemplateReque
 		ID: cur.ID, Name: c.in.Name, Description: c.in.Description, Category: c.in.Category, Icon: c.in.Icon,
 		Fields: c.fields, Sections: c.sections, Sources: c.sources, DefaultSchedule: c.sched, DefaultLength: c.in.DefaultLength,
 		RequiredConnectors: orEmpty(c.in.RequiredConnectors), Published: req.Body.Published, SortOrder: int32(req.Body.SortOrder),
-		Translations: c.translations,
+		Translations: c.translations, Markets: c.markets, MarketSources: c.marketSources,
 	})
 	if err != nil {
 		return nil, apperr.Internal(err)

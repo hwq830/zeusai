@@ -1,0 +1,47 @@
+slug: hk-stocks
+name: 港股早报
+description: 开盘前看恒指、南向资金和你关注的个股
+category: 商业财经
+icon: chart.bar.xaxis
+sort_order: 22
+markets: [HK, MO]
+fields:
+  - key: stocks
+    label: 关注的个股
+    type: tags
+    required: false
+    placeholder: 如 腾讯、汇丰控股、友邦保险
+    max: 8
+sections:
+  - key: market
+    title: 恒指与资金
+    instruction: 前一交易日恒生指数、恒生科技指数的涨跌和成交额，南向资金净流入流出
+    max_items: 4
+  - key: stocks
+    title: 关注的个股
+    instruction: '{{stocks}} 的股价表现、公告、业绩和相关新闻'
+    max_items: 6
+  - key: news
+    title: 政策与国际要闻
+    instruction: 影响港股的内地政策、美联储和国际要闻
+    max_items: 4
+sources:
+  - { type: site, value: hket.com }
+  - { type: site, value: hkej.com }
+  - { type: site, value: aastocks.com }
+  - { type: search, value: 恒生指数 南向资金 今日 }
+  - { type: search, value: '{{stocks}} 股价 公告' }
+  - { type: site, value: hkexnews.hk }
+default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '08:30', tz: Asia/Hong_Kong }
+default_length: standard
+translations:
+  en:
+    name: Hong Kong Stocks Morning
+    description: Before the open — Hang Seng, Southbound flows and the stocks you follow
+    category: Business
+    fields:
+      stocks: { label: Stocks to follow, placeholder: 'e.g. Tencent, HSBC, AIA' }
+    sections:
+      market: { title: Index and flows, instruction: 'Hang Seng and Hang Seng Tech moves and turnover in the last session; net Southbound flows' }
+      stocks: { title: Your stocks, instruction: 'Price moves, announcements, results and news for {{stocks}}' }
+      news: { title: Policy and world news, instruction: 'Mainland policy, the Fed and world news that moves Hong Kong stocks' }
