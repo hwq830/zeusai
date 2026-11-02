@@ -12,6 +12,10 @@ import (
 // in the same order. The admin console is Chinese-only, so its messages are not listed.
 // TestCatalogCoversErrors fails when a new user-facing message has no entry here.
 var messagesEN = map[string]string{
+	"邮箱格式不正确":                           "Enter a valid email address",
+	"邮件发送失败，请稍后重试":                      "Could not send the email. Please try again later",
+	"邮箱验证码错误或已过期":                       "The email code is incorrect or has expired",
+	"Google 登录失败":                       "Google sign-in failed",
 	"请求格式不正确":                           "The request is malformed",
 	"参数不正确":                             "Invalid parameters",
 	"该功能尚未开放":                           "This feature is not available yet",

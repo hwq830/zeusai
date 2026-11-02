@@ -18,6 +18,7 @@ DEV=.dev
 mkdir -p "$DEV/bin" "$DEV/logs" "$DEV/pids" "$DEV/blob"
 
 export ZEUS_DEV_SMS_CODE=${ZEUS_DEV_SMS_CODE:-246810}
+export ZEUS_DEV_EMAIL_CODE=${ZEUS_DEV_EMAIL_CODE:-123456}
 export ZEUS_BLOB_DIR=${ZEUS_BLOB_DIR:-$PWD/$DEV/blob}
 ADMIN_EMAIL=${ZEUS_ADMIN_EMAIL:-admin@zeus.local}
 ADMIN_PASSWORD=${ZEUS_ADMIN_PASSWORD:-zeus-admin-dev}

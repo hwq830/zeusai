@@ -9,6 +9,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/i18n"
 	"github.com/hwq830/zeusai/server/internal/market"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 func (s *Server) session(ctx context.Context, ss auth.Session, err error) (gen.Session, error) {
@@ -38,6 +39,12 @@ func (s *Server) me(ctx context.Context, u db.User) (gen.Me, error) {
 		return gen.Me{}, err
 	}
 	methods := []gen.UserLoginMethods{}
+	if u.Email != nil {
+		methods = append(methods, gen.Email)
+	}
+	if u.GoogleSub != nil {
+		methods = append(methods, gen.Google)
+	}
 	if u.Phone != nil {
 		methods = append(methods, gen.Phone)
 	}
@@ -50,6 +57,13 @@ func (s *Server) me(ctx context.Context, u db.User) (gen.Me, error) {
 	user := gen.User{Id: u.ID.String(), Nickname: u.Nickname, Timezone: u.Timezone, CreatedAt: u.CreatedAt, LoginMethods: methods,
 		UiLanguage: gen.Language(i18n.Parse(u.UiLanguage)), ReportLanguage: gen.ReportLanguage(u.ReportLanguage),
 		Market: gen.Market(market.Normalize(u.Market))}
+	if u.Email != nil {
+		email := openapi_types.Email(*u.Email)
+		user.Email = &email
+	} else if u.GoogleEmail != nil {
+		email := openapi_types.Email(*u.GoogleEmail)
+		user.Email = &email
+	}
 	if u.Phone != nil {
 		m := auth.MaskPhone(*u.Phone)
 		user.PhoneMasked = &m
@@ -217,4 +231,27 @@ func (s *Server) UnregisterDevice(ctx context.Context, req gen.UnregisterDeviceR
 		return nil, err
 	}
 	return gen.UnregisterDevice204Response{}, nil
+}
+
+func (s *Server) SendEmailCode(ctx context.Context, req gen.SendEmailCodeRequestObject) (gen.SendEmailCodeResponseObject, error) {
+	if err := s.Auth.SendEmailCode(ctx, string(req.Body.Email)); err != nil {
+		return nil, err
+	}
+	return gen.SendEmailCode204Response{}, nil
+}
+func (s *Server) VerifyEmailCode(ctx context.Context, req gen.VerifyEmailCodeRequestObject) (gen.VerifyEmailCodeResponseObject, error) {
+	ss, err := s.Auth.VerifyEmailCode(ctx, string(req.Body.Email), req.Body.Code)
+	out, err := s.session(ctx, ss, err)
+	if err != nil {
+		return nil, err
+	}
+	return gen.VerifyEmailCode200JSONResponse{SessionJSONResponse: gen.SessionJSONResponse(out)}, nil
+}
+func (s *Server) LoginGoogle(ctx context.Context, req gen.LoginGoogleRequestObject) (gen.LoginGoogleResponseObject, error) {
+	ss, err := s.Auth.LoginGoogle(ctx, req.Body.IdentityToken)
+	out, err := s.session(ctx, ss, err)
+	if err != nil {
+		return nil, err
+	}
+	return gen.LoginGoogle200JSONResponse{SessionJSONResponse: gen.SessionJSONResponse(out)}, nil
 }

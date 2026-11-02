@@ -29,13 +29,15 @@ import (
 )
 
 type Deps struct {
-	Log   *slog.Logger
-	Pool  *pgxpool.Pool
-	Redis *redis.Client
-	Orch  orch.Client
-	LLM   llm.Provider
-	Mod   moderation.Checker // nil allows everything (dev)
-	Blob  blob.Store         // nil: PDF export and feedback screenshots unavailable
+	Email  auth.EmailSender
+	Google auth.GoogleVerifier
+	Log    *slog.Logger
+	Pool   *pgxpool.Pool
+	Redis  *redis.Client
+	Orch   orch.Client
+	LLM    llm.Provider
+	Mod    moderation.Checker // nil allows everything (dev)
+	Blob   blob.Store         // nil: PDF export and feedback screenshots unavailable
 	// Identity providers; nil fields fall back to the dev fakes (tests).
 	SMS      auth.SMSSender
 	Apple    auth.AppleVerifier
@@ -61,6 +63,23 @@ func New(d Deps) *Server {
 	if d.OneClick == nil {
 		d.OneClick = auth.DevOneClick{}
 	}
+	if d.Email == nil {
+		if d.Config.IsDev() {
+			d.Email = auth.DevEmail{}
+		} else {
+			d.Email = auth.Unconfigured{}
+		}
+	}
+	if d.Config.IsDev() && d.Config.SMTPHost == "" && d.Config.DevEmailCode == "" {
+		d.Config.DevEmailCode = "123456"
+	}
+	if d.Google == nil {
+		if d.Config.IsDev() {
+			d.Google = auth.DevGoogle{}
+		} else {
+			d.Google = auth.Unconfigured{}
+		}
+	}
 	q := db.New(d.Pool)
 	tokens := auth.NewTokens(d.Config.JWTSecret, d.Config.AccessTTL)
 	rc := d.RemoteConfig
@@ -73,7 +92,7 @@ func New(d Deps) *Server {
 		Log: d.Log, Q: q, Tokens: tokens, Quota: qs, Templates: tpl,
 		Auth: &auth.Service{
 			Q: q, Redis: d.Redis, Tokens: tokens, RefreshTTL: d.Config.RefreshTTL,
-			SMS: d.SMS, Apple: d.Apple, Wechat: d.Wechat, OneClick: d.OneClick,
+			Email: d.Email, Google: d.Google, FixedEmailCode: d.Config.DevEmailCode, SMS: d.SMS, Apple: d.Apple, Wechat: d.Wechat, OneClick: d.OneClick,
 			FixedSMSCode: d.Config.DevSMSCode,
 		},
 		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Blob: d.Blob, Config: rc, Now: d.Now},

@@ -65,3 +65,17 @@ INSERT INTO moderation_events (user_id, kind, reason, excerpt) VALUES ($1, $2, $
 
 -- name: ListModerationTerms :many
 SELECT term FROM moderation_terms ORDER BY id;
+
+-- name: GetUserByEmail :one
+SELECT * FROM users WHERE email = $1;
+
+-- name: GetUserByGoogleSub :one
+SELECT * FROM users WHERE google_sub = $1;
+
+-- name: CreateEmailUser :one
+INSERT INTO users (nickname, email, timezone) VALUES ($1, $2, $3)
+ON CONFLICT (email) DO NOTHING RETURNING *;
+
+-- name: CreateGoogleUser :one
+INSERT INTO users (nickname, google_sub, google_email, timezone) VALUES ($1, $2, $3, $4)
+ON CONFLICT (google_sub) DO NOTHING RETURNING *;

@@ -199,6 +199,8 @@ func PDF(cfg config.Config) pdf.Renderer {
 }
 
 type Identity struct {
+	Email    auth.EmailSender
+	Google   auth.GoogleVerifier
 	SMS      auth.SMSSender
 	Apple    auth.AppleVerifier
 	Wechat   auth.WechatExchanger
@@ -209,10 +211,26 @@ type Identity struct {
 func Identities(cfg config.Config, log *slog.Logger) Identity {
 	var id Identity
 	if cfg.IsDev() {
-		id = Identity{SMS: auth.LogSMSSender{Log: log}, Apple: auth.DevApple{}, Wechat: auth.DevWechat{}, OneClick: auth.DevOneClick{}}
+		id = Identity{Email: auth.DevEmail{}, Google: auth.DevGoogle{}, SMS: auth.LogSMSSender{Log: log}, Apple: auth.DevApple{}, Wechat: auth.DevWechat{}, OneClick: auth.DevOneClick{}}
 	} else {
 		u := auth.Unconfigured{}
-		id = Identity{SMS: u, Apple: u, Wechat: u, OneClick: u}
+		id = Identity{Email: u, Google: u, SMS: u, Apple: u, Wechat: u, OneClick: u}
+	}
+	if cfg.GoogleClientIDs != "" {
+		var ids []string
+		for _, id := range strings.Split(cfg.GoogleClientIDs, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		id.Google = &auth.Google{ClientIDs: ids, Keys: auth.Apple{KeysURL: "https://www.googleapis.com/oauth2/v3/certs"}}
+	}
+	if cfg.SMTPHost != "" && cfg.SMTPFrom != "" {
+		port := cfg.SMTPPort
+		if port == 0 {
+			port = 587
+		}
+		id.Email = auth.SMTPEmail{Host: cfg.SMTPHost, Port: port, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom}
 	}
 	rpc := auth.AliyunRPC{AccessKeyID: cfg.AliyunAccessKeyID, AccessKeySecret: cfg.AliyunAccessKeySecret}
 	hasAliyun := cfg.AliyunAccessKeyID != "" && cfg.AliyunAccessKeySecret != ""
