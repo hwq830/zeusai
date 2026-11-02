@@ -76,7 +76,7 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	searcher, err := providers.Search(cfg, keys)
+	searcher, err := providers.Search(cfg, q, keys, log)
 	if err != nil {
 		return err
 	}

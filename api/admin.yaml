@@ -1262,6 +1262,80 @@ paths:
       responses:
         '204': { description: 已删除 }
         default: { $ref: '#/components/responses/Error' }
+  /admin/v1/search-routing:
+    get:
+      tags: [providerKeys]
+      operationId: getSearchRouting
+      summary: 搜索路由：主用和备用搜索服务商的顺序，以及支持的搜索接口
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchRouting' }
+        default: { $ref: '#/components/responses/Error' }
+    put:
+      tags: [providerKeys]
+      operationId: saveSearchRouting
+      summary: 设置主用和备用搜索服务商（仅 owner），约 1 分钟内生效
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchRoutingInput' }
+      responses:
+        '200':
+          description: 保存后的路由
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchRouting' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/search-providers:
+    post:
+      tags: [providerKeys]
+      operationId: createSearchProvider
+      summary: 新增搜索服务商（仅 owner）；可同时保存 Key、加入备用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchProviderInput' }
+      responses:
+        '201':
+          description: 新服务商
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KeyProvider' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/search-providers/{providerId}:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [providerKeys]
+      operationId: updateSearchProvider
+      summary: 修改搜索服务商（仅 owner）；正在主用或备用的不能停用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchProviderUpdate' }
+      responses:
+        '200':
+          description: 更新后的服务商
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KeyProvider' }
+        default: { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [providerKeys]
+      operationId: deleteSearchProvider
+      summary: 删除后台新增的搜索服务商及其 Key（仅 owner）；正在主用或备用的不能删，内置的博查不能删
+      responses:
+        '204': { description: 已删除 }
+        default: { $ref: '#/components/responses/Error' }
   /admin/v1/provider-keys:
     get:
       tags: [providerKeys]
@@ -3497,15 +3571,66 @@ components:
         keySource:
           type: string
           enum: [console, env, none]
-        inRoute: { type: boolean, description: 当前是否在用（模型：在「模型路由」的档位顺序或环节指定里，且 ZEUS_LLM_PROVIDER=gateway；搜索：ZEUS_SEARCH_PROVIDER=bocha） }
+        inRoute: { type: boolean, description: 当前是否在用（模型：在「模型路由」的档位顺序或环节指定里，且 ZEUS_LLM_PROVIDER=gateway；搜索：在主用或备用里，且 ZEUS_SEARCH_PROVIDER 不是 mock） }
         source:
           type: string
           enum: [console, builtin]
-          description: console = 模型服务商（存在数据库里，可改可停用可删）；builtin = 内置（搜索）
+          description: console = 存在数据库里，可改可停用可删；builtin = 内置的博查搜索（可改可停用，不能删）
+        protocol: { type: string, description: 搜索服务商用的接口（bocha / tavily / brave / serper），只有搜索服务商有 }
+        searchOrder: { type: integer, nullable: true, description: '搜索顺序：1 = 主用，2 起为备用；不在顺序里为空' }
         imported: { type: boolean, description: 是否从服务端路由文件导入（导入后和后台新增的一样可改） }
         enabled: { type: boolean }
         models: { $ref: '#/components/schemas/ProviderTierModels' }
         timeoutSeconds: { type: integer }
+    SearchRouting:
+      type: object
+      required: [searchProvider, on, chain, protocols]
+      properties:
+        searchProvider: { type: string, description: 服务端 ZEUS_SEARCH_PROVIDER }
+        on: { type: boolean, description: 为 false 时服务端还在用假搜索（mock），这里的设置会先保存 }
+        chain:
+          type: array
+          description: 第一个是主用，其余按顺序作为备用；主用出错时自动换下一个
+          items: { type: string }
+        protocols:
+          type: array
+          items: { $ref: '#/components/schemas/SearchProtocol' }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        updatedBy: { type: string, description: 最后修改人邮箱 }
+    SearchProtocol:
+      type: object
+      required: [id, name, defaultBaseUrl, region, docsUrl]
+      properties:
+        id: { type: string, example: tavily }
+        name: { type: string, example: Tavily }
+        defaultBaseUrl: { type: string }
+        region: { type: string, description: 适用范围说明 }
+        docsUrl: { type: string }
+    SearchRoutingInput:
+      type: object
+      required: [chain]
+      properties:
+        chain:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items: { type: string }
+    SearchProviderInput:
+      type: object
+      required: [id, name, protocol]
+      properties:
+        id: { type: string, pattern: '^[a-z][a-z0-9-]{1,31}$', description: '服务商标识，如 tavily；创建后不能改' }
+        name: { type: string, minLength: 1, maxLength: 40, description: 显示名称 }
+        protocol: { type: string, enum: [bocha, tavily, brave, serper] }
+        baseUrl: { type: string, maxLength: 300, description: 不填用该接口的默认地址 }
+        apiKey: { type: string, minLength: 8, maxLength: 512, description: '可同时保存一把 Key 并启用' }
+        addToChain: { type: boolean, default: false, description: 加到搜索顺序末尾作为备用 }
+    SearchProviderUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 40 }
+        baseUrl: { type: string, maxLength: 300, description: 空字符串表示用默认地址 }
+        enabled: { type: boolean }
     ProviderKey:
       type: object
       required: [id, provider, label, last4, baseUrl, active, createdAt]

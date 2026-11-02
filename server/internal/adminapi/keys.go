@@ -26,6 +26,8 @@ import (
 // in the console or imported from the routing file) and the search provider.
 type keyProvider struct {
 	ID, Name, Kind, BaseURL, EnvName string
+	Protocol                         string // search only
+	SearchOrder                      int    // search only: 1 = primary, 2+ = fallback, 0 = unused
 	Source                           string // console or builtin
 	Imported, Enabled                bool
 	Models                           map[llm.Tier]string
@@ -78,8 +80,7 @@ func (s *Server) keyProviders(ctx context.Context) []keyProvider {
 				Models: pc.Models, Timeout: pc.Timeout, InRoute: gateway && r.ModelProvider.Enabled && len(used[pc.Name]) > 0})
 		}
 	}
-	return append(out, keyProvider{ID: providers.BochaProvider, Name: displayName(providers.BochaProvider), Kind: "search",
-		BaseURL: s.bochaBaseURL(), EnvName: "ZEUS_BOCHA_API_KEY", Source: "builtin", Enabled: true, InRoute: s.SearchProvider == "bocha"})
+	return append(out, s.searchKeyProviders(ctx)...)
 }
 
 func providerDisplayName(p modelgw.ProviderConfig) string {
@@ -99,11 +100,20 @@ func displayName(id string) string {
 	return id
 }
 
-func (s *Server) bochaBaseURL() string {
-	if s.BochaBaseURL != "" {
+// searchBaseURL is where a search provider is called when its key has no address of its own.
+func (s *Server) searchBaseURL(protocol, base string) string {
+	if base != "" {
+		return base
+	}
+	if protocol == search.ProtocolBocha && s.BochaBaseURL != "" {
 		return s.BochaBaseURL
 	}
-	return "https://api.bochaai.com"
+	for _, p := range search.Protocols {
+		if p.ID == protocol {
+			return p.DefaultBaseURL
+		}
+	}
+	return ""
 }
 
 func (s *Server) keyProvider(ctx context.Context, id string) (keyProvider, bool) {
@@ -127,6 +137,12 @@ func (s *Server) toKeyProvider(ctx context.Context, p keyProvider) gen.KeyProvid
 	kp := gen.KeyProvider{Id: p.ID, Name: p.Name, Kind: gen.KeyProviderKind(p.Kind), BaseUrl: &base, ApiKeyEnv: p.EnvName,
 		EnvKeyPresent: p.EnvName != "" && os.Getenv(p.EnvName) != "", KeySource: keySource(s.Keys.Source(ctx, p.ID, p.EnvName)),
 		InRoute: p.InRoute, Source: gen.KeyProviderSource(p.Source), Enabled: p.Enabled, Imported: &p.Imported}
+	if p.Kind == "search" {
+		kp.Protocol = &p.Protocol
+		if p.SearchOrder > 0 {
+			kp.SearchOrder = &p.SearchOrder
+		}
+	}
 	if p.Kind == "llm" {
 		strong, fast := p.Models[llm.TierStrong], p.Models[llm.TierFast]
 		kp.Models = &gen.ProviderTierModels{Strong: &strong, Fast: &fast}
@@ -452,7 +468,10 @@ func (s *Server) testKey(ctx context.Context, p keyProvider, key string, params 
 		}
 		n := min(max(deref(tp.Count), 1), 10)
 		var rs []search.Result
-		rs, err = search.Bocha{APIKey: key, BaseURL: p.BaseURL, HTTP: hc}.Search(ctx, search.Query{Q: q, Limit: n})
+		var sr search.Searcher
+		if sr, err = search.New(p.Protocol, key, p.BaseURL, hc); err == nil {
+			rs, err = sr.Search(ctx, search.Query{Q: q, Limit: n})
+		}
 		if err == nil {
 			detail = "返回 " + strconv.Itoa(len(rs)) + " 条结果"
 			results := make([]searchHit, 0, len(rs))
@@ -495,11 +514,18 @@ func (s *Server) testKey(ctx context.Context, p keyProvider, key string, params 
 }
 
 func testError(err error) string {
+	status := 0
 	var se *llm.StatusError
+	var sse *search.StatusError
 	if errors.As(err, &se) {
-		switch se.Status {
+		status = se.Status
+	} else if errors.As(err, &sse) {
+		status = sse.Status
+	}
+	if status != 0 {
+		switch status {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return "Key 无效或没有权限（HTTP " + strconv.Itoa(se.Status) + "）"
+			return "Key 无效或没有权限（HTTP " + strconv.Itoa(status) + "）"
 		case http.StatusTooManyRequests:
 			return "被限流或余额不足（HTTP 429）"
 		}
