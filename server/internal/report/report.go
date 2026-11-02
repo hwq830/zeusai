@@ -346,8 +346,11 @@ func TemplateData(r db.Report, full bool) reporttemplate.Data {
 	return d
 }
 
+// RenderHTML renders the full report using the shared App, console and PDF template.
+func RenderHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(TemplateData(r, true)) }
+
 // PrintHTML renders a report for PDF printing.
-func PrintHTML(r db.Report) ([]byte, error) { return reporttemplate.Render(TemplateData(r, true)) }
+func PrintHTML(r db.Report) ([]byte, error) { return RenderHTML(r) }
 
 // PDFKey names the stored PDF for the report's current content, so a follow-up (which
 // appends to the markdown) makes the old file stale.
@@ -412,7 +415,7 @@ func (s *Service) HTML(ctx context.Context, userID uuid.UUID, id string) ([]byte
 	if r.Status != "done" {
 		return nil, apperr.Conflict("报告还没有生成完")
 	}
-	b, err := reporttemplate.Render(TemplateData(r, true))
+	b, err := RenderHTML(r)
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}

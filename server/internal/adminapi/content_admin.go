@@ -287,6 +287,14 @@ func (s *Server) reportDetail(ctx context.Context, id uuid.UUID) (gen.AdminRepor
 		Sources: toSources(r.Sources), HiddenReason: r.HiddenReason, HiddenAt: r.HiddenAt, SourceBriefingItemId: r.SourceBriefingItemID,
 		Tasks: []gen.TaskDetail{}, Shares: []gen.AdminShare{}, Regenerations: []gen.ContentRef{},
 	}
+	if r.Markdown != "" {
+		html, err := report.RenderHTML(r)
+		if err != nil {
+			return d, apperr.Internal(err)
+		}
+		rendered := string(html)
+		d.RenderedHtml = &rendered
+	}
 	tasks, err := s.Q.AdminListReportTasks(ctx, &id)
 	if err != nil {
 		return d, apperr.Internal(err)
