@@ -36,9 +36,15 @@ func TestSearchRegionalConfigurationCompatibility(t *testing.T) {
 	} {
 		h.do("PUT", "/admin/v1/search-routing", map[string]any{"chain": []string{"tavily"}, "regionalChains": regions}, 400, nil)
 	}
-	h.do("PUT", "/admin/v1/search-routing", map[string]any{"chain": []string{"tavily"}, "regionalChains": map[string][]string{}}, 200, &rt)
-	if len(rt.RegionalChains) != 0 {
+	// Decode into a fresh map: encoding/json intentionally retains keys in reused maps.
+	var cleared gen.SearchRouting
+	h.do("PUT", "/admin/v1/search-routing", map[string]any{"chain": []string{"tavily"}, "regionalChains": map[string][]string{}}, 200, &cleared)
+	if len(cleared.RegionalChains) != 0 {
 		t.Fatal("explicit empty map must clear overrides")
+	}
+	cfg, err = providers.SearchRouting(context.Background(), srv.Q)
+	if err != nil || len(cfg.Regions) != 0 {
+		t.Fatalf("stored overrides were not cleared: %+v %v", cfg, err)
 	}
 	h.do("PATCH", "/admin/v1/search-providers/bocha", map[string]any{"enabled": false}, 200, nil)
 }
