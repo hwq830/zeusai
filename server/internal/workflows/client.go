@@ -25,6 +25,7 @@ const (
 type Client struct {
 	C         client.Client
 	TaskQueue string
+	Now       func() time.Time
 }
 
 var _ orch.Client = (*Client)(nil)
@@ -54,27 +55,41 @@ func calendar(s schedule.Schedule) client.ScheduleCalendarSpec {
 }
 
 func (c *Client) UpsertBriefingSchedule(ctx context.Context, userID, subID uuid.UUID, s schedule.Schedule, paused bool) error {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	catchup := !paused && needsBriefingCatchup(s, now)
 	id := orch.ScheduleID(subID)
 	spec := client.ScheduleSpec{Calendars: []client.ScheduleCalendarSpec{calendar(s)}, TimeZoneName: s.TZ, Jitter: Jitter}
 	action := &client.ScheduleWorkflowAction{
 		ID:        "briefing-run-" + subID.String(),
-		Workflow:  BriefingWorkflowName,
-		Args:      []any{orch.BriefingRun{UserID: userID, SubscriptionID: subID, Scheduled: true}},
+		Workflow:  ScheduledBriefingWorkflowName,
+		Args:      []any{orch.BriefingRun{UserID: userID, SubscriptionID: subID, Scheduled: true}, s},
 		TaskQueue: c.TaskQueue,
 	}
 	h := c.C.ScheduleClient().GetHandle(ctx, id)
-	_, err := h.Describe(ctx)
+	desc, err := h.Describe(ctx)
 	var nf *serviceerror.NotFound
 	if errors.As(err, &nf) {
 		_, err = c.C.ScheduleClient().Create(ctx, client.ScheduleOptions{
 			ID: id, Spec: spec, Action: action, Paused: paused, Overlap: enums.SCHEDULE_OVERLAP_POLICY_SKIP,
+			TriggerImmediately: catchup,
 		})
 		return err
 	}
 	if err != nil {
 		return err
 	}
-	return h.Update(ctx, client.ScheduleUpdateOptions{DoUpdate: func(in client.ScheduleUpdateInput) (*client.ScheduleUpdate, error) {
+	// Avoid redundant catches, including legacy runs that predate the daily child
+	// ID. The child ID still arbitrates triggers racing with this snapshot.
+	for _, action := range desc.Info.RecentActions {
+		if action.ActualTime.In(s.Location()).Format("2006-01-02") == now.In(s.Location()).Format("2006-01-02") {
+			catchup = false
+			break
+		}
+	}
+	err = h.Update(ctx, client.ScheduleUpdateOptions{DoUpdate: func(in client.ScheduleUpdateInput) (*client.ScheduleUpdate, error) {
 		sch := in.Description.Schedule
 		sch.Spec = &spec
 		sch.Action = action
@@ -84,6 +99,10 @@ func (c *Client) UpsertBriefingSchedule(ctx context.Context, userID, subID uuid.
 		sch.State.Paused = paused
 		return &client.ScheduleUpdate{Schedule: &sch}, nil
 	}})
+	if err != nil || !catchup {
+		return err
+	}
+	return h.Trigger(ctx, client.ScheduleTriggerOptions{Overlap: enums.SCHEDULE_OVERLAP_POLICY_SKIP})
 }
 
 func (c *Client) DeleteBriefingSchedule(ctx context.Context, subID uuid.UUID) error {
