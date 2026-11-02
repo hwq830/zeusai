@@ -272,8 +272,10 @@ func (s *Service) RunNow(ctx context.Context, userID uuid.UUID, id string) (db.T
 const MaxConcurrentTasks = 2
 
 type ListParams struct {
-	SubscriptionID string
-	Limit, Offset  int
+	DateFrom, DateTo string
+	UnreadOnly       bool
+	SubscriptionID   string
+	Limit, Offset    int
 }
 
 func (s *Service) ListBriefings(ctx context.Context, userID uuid.UUID, p ListParams) ([]Briefing, error) {
@@ -285,7 +287,18 @@ func (s *Service) ListBriefings(ctx context.Context, userID uuid.UUID, p ListPar
 		}
 		sub = &id
 	}
-	rows, err := s.Q.ListBriefings(ctx, db.ListBriefingsParams{UserID: userID, SubscriptionID: sub, Limit: int32(p.Limit), Offset: int32(p.Offset)})
+	from, err := historyDate(p.DateFrom)
+	if err != nil {
+		return nil, err
+	}
+	to, err := historyDate(p.DateTo)
+	if err != nil {
+		return nil, err
+	}
+	if from != nil && to != nil && from.After(*to) {
+		return nil, apperr.Invalid("开始日期不能晚于结束日期")
+	}
+	rows, err := s.Q.ListBriefings(ctx, db.ListBriefingsParams{UserID: userID, SubscriptionID: sub, Limit: int32(p.Limit), Offset: int32(p.Offset), DateFrom: from, DateTo: to, UnreadOnly: p.UnreadOnly})
 	if err != nil {
 		return nil, apperr.Internal(err)
 	}
@@ -436,4 +449,15 @@ func orEmpty[T any](s []T) []T {
 		return []T{}
 	}
 	return s
+}
+
+func historyDate(raw string) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	date, err := time.Parse(time.DateOnly, raw)
+	if err != nil {
+		return nil, apperr.Invalid("日期格式不正确，请使用 YYYY-MM-DD")
+	}
+	return &date, nil
 }

@@ -12,6 +12,8 @@ import (
 // in the same order. The admin console is Chinese-only, so its messages are not listed.
 // TestCatalogCoversErrors fails when a new user-facing message has no entry here.
 var messagesEN = map[string]string{
+	"开始日期不能晚于结束日期":                      "The start date must not be later than the end date",
+	"日期格式不正确，请使用 YYYY-MM-DD":            "Invalid date. Use YYYY-MM-DD",
 	"邮箱格式不正确":                           "Enter a valid email address",
 	"邮件发送失败，请稍后重试":                      "Could not send the email. Please try again later",
 	"邮箱验证码错误或已过期":                       "The email code is incorrect or has expired",

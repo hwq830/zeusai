@@ -487,7 +487,7 @@ func (q *Queries) AdminListTasks(ctx context.Context, arg AdminListTasksParams) 
 
 const adminListTemplates = `-- name: AdminListTemplates :many
 
-SELECT t.id, t.owner_id, t.slug, t.name, t.description, t.category, t.icon, t.fields, t.sections, t.sources, t.default_schedule, t.default_length, t.required_connectors, t.version, t.published, t.sort_order, t.created_at, t.updated_at, t.admin_managed, t.translations, t.markets, t.market_sources, t.search_region, (SELECT count(*) FROM briefing_subscriptions s WHERE s.template_id = t.id)::int AS subscription_count
+SELECT t.id, t.owner_id, t.slug, t.name, t.description, t.category, t.icon, t.fields, t.sections, t.sources, t.default_schedule, t.default_length, t.required_connectors, t.version, t.published, t.sort_order, t.created_at, t.updated_at, t.admin_managed, t.translations, t.markets, t.market_sources, t.search_region, (SELECT count(*) FROM briefing_subscriptions s WHERE s.template_id = t.id AND s.status <> 'deleted')::int AS subscription_count
 FROM templates t
 WHERE (($3::text = 'official' AND t.owner_id IS NULL) OR ($3::text = 'custom' AND t.owner_id IS NOT NULL))
   AND ($4::text IS NULL OR t.name ILIKE '%' || $4 || '%' OR t.description ILIKE '%' || $4 || '%')
@@ -1785,7 +1785,7 @@ func (q *Queries) SetAdminPassword(ctx context.Context, arg SetAdminPasswordPara
 }
 
 const setSubscriptionNextRun = `-- name: SetSubscriptionNextRun :exec
-UPDATE briefing_subscriptions SET next_run_at = $2 WHERE id = $1
+UPDATE briefing_subscriptions SET next_run_at = $2 WHERE id = $1 AND status <> 'deleted'
 `
 
 type SetSubscriptionNextRunParams struct {

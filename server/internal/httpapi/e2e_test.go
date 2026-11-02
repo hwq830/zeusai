@@ -425,11 +425,52 @@ func TestBriefingEndToEnd(t *testing.T) {
 		t.Fatal("schedule should be deleted")
 	}
 
+	// Removing a subscription frees its quota but preserves all generated issues.
+	h.do("GET", "/v1/briefings?subscriptionId="+s1.ID, nil, 200, &list)
+	if len(list.Items) != 1 || list.Items[0].ItemCount == 0 {
+		t.Fatalf("deleted subscription lost history: %+v", list)
+	}
+	h.do("GET", "/v1/briefings/"+today.Items[0].ID, nil, 200, nil)
+	h.do("PATCH", "/v1/briefing-subscriptions/"+s1.ID, map[string]any{"paused": false}, 404, nil)
+	var options struct {
+		Items []struct {
+			ID      string
+			Deleted bool
+		}
+	}
+	h.do("GET", "/v1/briefings/subscriptions", nil, 200, &options)
+	if len(options.Items) != 1 || options.Items[0].ID != s1.ID || !options.Items[0].Deleted {
+		t.Fatalf("history filter lost deleted subscription: %+v", options)
+	}
+	h.do("GET", "/v1/briefings?unreadOnly=true", nil, 200, &list)
+	if len(list.Items) != 0 {
+		t.Fatalf("read issue in unread list: %+v", list)
+	}
+	h.do("GET", "/v1/briefings?dateFrom=2099-01-01", nil, 200, &list)
+	if len(list.Items) != 0 {
+		t.Fatalf("date filter ignored: %+v", list)
+	}
+	h.do("GET", "/v1/briefings?dateFrom=2026-11-02&dateTo=2026-11-01", nil, 400, nil)
+	// Deletion is retryable when removing the external schedule previously failed.
+	h.do("DELETE", "/v1/briefing-subscriptions/"+s1.ID, nil, 204, nil)
+	var afterDelete struct {
+		User  struct{ ID string }
+		Quota struct{ BriefingSubscriptions struct{ Used int } }
+	}
+	h.do("GET", "/v1/me", nil, 200, &afterDelete)
+	if afterDelete.Quota.BriefingSubscriptions.Used != 1 {
+		t.Fatalf("deleted subscription still consumes quota: %+v", afterDelete)
+	}
+
 	// Another user sees none of it.
 	other := *h
 	other.login(randomPhone())
 	other.do("GET", "/v1/briefings/"+today.Items[0].ID, nil, 404, nil)
 	other.do("GET", "/v1/tasks/"+tk.ID, nil, 404, nil)
+	other.do("GET", "/v1/briefings/subscriptions", nil, 200, &options)
+	if len(options.Items) != 0 {
+		t.Fatalf("other user sees history subscriptions: %+v", options)
+	}
 
 	// Refresh rotates the token; the old one stops working.
 	var s3 session
