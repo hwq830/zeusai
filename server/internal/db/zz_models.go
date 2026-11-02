@@ -235,6 +235,37 @@ type Device struct {
 	UpdatedAt  time.Time
 }
 
+type ExternalCall struct {
+	ID            uuid.UUID
+	Seq           int64
+	GroupID       uuid.UUID
+	Attempt       int32
+	Kind          string
+	Provider      string
+	Model         string
+	Protocol      string
+	QueryText     string
+	ResponseModel string
+	Purpose       string
+	Origin        string
+	UserID        *uuid.UUID
+	TaskID        *uuid.UUID
+	Region        string
+	Dispatched    bool
+	Status        string
+	ErrorCode     string
+	RequestID     string
+	HttpStatus    *int32
+	InputTokens   *int32
+	OutputTokens  *int32
+	CachedTokens  *int32
+	ResultCount   *int32
+	StartedAt     time.Time
+	DeadlineAt    time.Time
+	FinishedAt    *time.Time
+	DurationMs    *int64
+}
+
 type Feedback struct {
 	ID            uuid.UUID
 	UserID        uuid.UUID

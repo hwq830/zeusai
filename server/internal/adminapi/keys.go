@@ -14,6 +14,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
@@ -453,6 +454,7 @@ func (s *Server) testKey(ctx context.Context, p keyProvider, key string, params 
 	if deref(tp.MaxTokens) > 64 {
 		timeout = 120 * time.Second // longer answers take longer
 	}
+	ctx = calllog.WithScope(ctx, calllog.Scope{Purpose: "key_test", Origin: "admin_test"})
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	hc := &http.Client{Timeout: timeout}
@@ -470,7 +472,7 @@ func (s *Server) testKey(ctx context.Context, p keyProvider, key string, params 
 		var rs []search.Result
 		var sr search.Searcher
 		if sr, err = search.New(p.Protocol, key, p.BaseURL, hc); err == nil {
-			rs, err = sr.Search(ctx, search.Query{Q: q, Limit: n})
+			rs, err = (search.Observed{Searcher: sr, Calls: calllog.New(s.Q, s.Log), Provider: p.ID, Protocol: p.Protocol, Timeout: timeout}).Search(ctx, search.Query{Q: q, Limit: n})
 		}
 		if err == nil {
 			detail = "返回 " + strconv.Itoa(len(rs)) + " 条结果"
@@ -486,14 +488,14 @@ func (s *Server) testKey(ctx context.Context, p keyProvider, key string, params 
 			prompt = "ping"
 		}
 		maxTokens := min(max(deref(tp.MaxTokens), 1), 2048)
-		req := llm.Request{Purpose: "key_test", Tier: llm.TierFast, Model: strings.TrimSpace(deref(tp.Model)),
+		req := llm.Request{Origin: "admin_test", Purpose: "key_test", Tier: llm.TierFast, Model: strings.TrimSpace(deref(tp.Model)),
 			System: deref(tp.System), JSON: deref(tp.Json), MaxTokens: maxTokens, Messages: []llm.Message{{Role: "user", Content: prompt}}}
 		if tp.Temperature != nil {
 			t := float64(*tp.Temperature)
 			req.Temperature = &t
 		}
 		var resp llm.Response
-		resp, err = llm.OpenAICompat{BaseURL: p.BaseURL, APIKey: key, Name: p.ID, Models: p.Models, HTTP: hc}.Complete(ctx, req)
+		resp, err = llm.OpenAICompat{Calls: calllog.New(s.Q, s.Log), BaseURL: p.BaseURL, APIKey: key, Name: p.ID, Models: p.Models, HTTP: hc}.Complete(ctx, req)
 		if err == nil {
 			detail = "模型 " + resp.Model + " 正常响应"
 			reply := resp.Content

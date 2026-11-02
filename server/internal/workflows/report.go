@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 
 	"github.com/hwq830/zeusai/prompts"
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/i18n"
@@ -101,7 +102,7 @@ type QuestionNotes struct {
 func ReportWorkflow(ctx workflow.Context, run orch.ReportRun) error {
 	var a *Activities
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 5 * time.Minute,
+		StartToCloseTimeout: modelActivityTimeout,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	})
 
@@ -250,6 +251,7 @@ func questionRegions(values []string, fallback string) []string {
 }
 
 func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i int, notes []string) (QuestionNotes, error) {
+	ctx = calllog.WithScope(ctx, calllog.Scope{UserID: &plan.UserID, TaskID: &plan.TaskID, Purpose: "report.research"})
 	q := plan.Questions[i]
 	step := researchStep(plan.UILang, i, q.Question)
 	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
@@ -461,7 +463,7 @@ func (a *Activities) AbortReport(ctx context.Context, run orch.ReportRun, kind s
 func FollowupWorkflow(ctx workflow.Context, run orch.FollowupRun) error {
 	var a *Activities
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 3 * time.Minute,
+		StartToCloseTimeout: modelActivityTimeout,
 		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 3},
 	})
 	err := workflow.ExecuteActivity(ctx, a.AnswerFollowup, run).Get(ctx, nil)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/modelgw"
@@ -209,7 +210,7 @@ func (s *Server) routingView(ctx context.Context) (map[string]any, error) {
 			}
 		}
 		providers = append(providers, map[string]any{"name": p.Name, "displayName": providerDisplayName(p),
-			"keyPresent": keyOK[p.Name], "models": models, "bailian": modelgw.IsBailian(p.BaseURL)})
+			"timeoutSeconds": int(p.Timeout / time.Second), "keyPresent": keyOK[p.Name], "models": models, "bailian": modelgw.IsBailian(p.BaseURL)})
 	}
 	cat := map[string]any{"source": modelgw.BailianSource(), "updated": pl.BuiltinUpdated}
 	if pl.SyncedAt != nil {
@@ -511,7 +512,7 @@ func (s *Server) ListProviderModels(ctx context.Context, req gen.ListProviderMod
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	models, err := llm.OpenAICompat{BaseURL: base, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.ListModels(ctx)
+	models, err := llm.OpenAICompat{Calls: calllog.New(s.Q, s.Log), BaseURL: base, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.ListModels(ctx)
 	if err != nil {
 		return none(testError(err))
 	}
@@ -547,8 +548,8 @@ func (s *Server) TestModel(ctx context.Context, req gen.TestModelRequestObject) 
 	if u := s.Keys.BaseURL(ctx, p.Name); u != "" {
 		base = u
 	}
-	resp, err := llm.OpenAICompat{BaseURL: base, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.Complete(ctx,
-		llm.Request{Purpose: "model_test", Model: model, MaxTokens: 1, Messages: []llm.Message{{Role: "user", Content: "ping"}}})
+	resp, err := llm.OpenAICompat{Calls: calllog.New(s.Q, s.Log), BaseURL: base, APIKey: key, Name: p.Name, HTTP: &http.Client{Timeout: 30 * time.Second}}.Complete(ctx,
+		llm.Request{Origin: "admin_test", Purpose: "model_test", Model: model, MaxTokens: 1, Messages: []llm.Message{{Role: "user", Content: "ping"}}})
 	res := gen.ProviderKeyTest{LatencyMs: int(time.Since(start).Milliseconds())}
 	if err != nil {
 		res.Message = testError(err)

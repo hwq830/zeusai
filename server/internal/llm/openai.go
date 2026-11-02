@@ -8,11 +8,14 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/hwq830/zeusai/server/internal/calllog"
 )
 
 // OpenAICompat calls an OpenAI-compatible /chat/completions endpoint. Models maps a tier to
 // the model name on that endpoint.
 type OpenAICompat struct {
+	Calls   *calllog.Recorder
 	BaseURL string
 	APIKey  string
 	// KeyFunc, when set, supplies the key per call instead of APIKey (keys switched in the
@@ -35,11 +38,12 @@ type chatRequest struct {
 }
 
 type chatResponse struct {
+	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
 		Message Message `json:"message"`
 	} `json:"choices"`
-	Usage struct {
+	Usage *struct {
 		PromptTokens        int `json:"prompt_tokens"`
 		CompletionTokens    int `json:"completion_tokens"`
 		PromptTokensDetails struct {
@@ -64,7 +68,7 @@ func (e *StatusError) Retryable() bool {
 	return e.Status == http.StatusTooManyRequests || e.Status >= 500
 }
 
-func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, error) {
+func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, err error) {
 	msgs := req.Messages
 	if req.System != "" {
 		msgs = append([]Message{{Role: "system", Content: req.System}}, msgs...)
@@ -92,12 +96,45 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 	if hc == nil {
 		hc = &http.Client{Timeout: 120 * time.Second}
 	}
+	scope := calllog.FromContext(ctx)
+	if req.UserID != nil {
+		scope.UserID = req.UserID
+	}
+	if req.TaskID != nil {
+		scope.TaskID = req.TaskID
+	}
+	if req.Purpose != "" {
+		scope.Purpose = req.Purpose
+	}
+	if req.Origin != "" {
+		scope.Origin = req.Origin
+	}
+	trace, err := c.Calls.Start(ctx, calllog.Begin{GroupID: req.CallGroupID, Attempt: req.Attempt, Scope: scope,
+		Kind: "model", Provider: c.Name, Model: body.Model, Dispatched: true}, hc.Timeout)
+	if err != nil {
+		return Response{}, err
+	}
+	httpStatus := 0
+	requestID := ""
+	defer func() {
+		status, code := calllog.Failure(err, httpStatus)
+		if requestID == "" && out.RequestID != "" {
+			requestID = out.RequestID
+		}
+		trace.Finish(ctx, calllog.End{Status: status, ResponseModel: out.Model, ErrorCode: code, RequestID: requestID, HTTPStatus: httpStatus,
+			UsageKnown: out.UsageKnown, InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens, CachedTokens: out.Usage.CachedTokens})
+	}()
 	resp, err := hc.Do(hreq)
 	if err != nil {
 		return Response{}, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	httpStatus = resp.StatusCode
+	requestID = resp.Header.Get("X-Request-Id")
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if readErr != nil {
+		return Response{}, readErr
+	}
 	if resp.StatusCode != http.StatusOK {
 		return Response{}, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 512)]))}
 	}
@@ -105,13 +142,15 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (Response, erro
 	if err := json.Unmarshal(raw, &cr); err != nil {
 		return Response{}, err
 	}
-	if len(cr.Choices) == 0 {
-		return Response{}, fmt.Errorf("%s: empty choices", c.Name)
+	out = Response{Provider: c.Name, Model: cr.Model, RequestID: cr.ID, UsageKnown: cr.Usage != nil}
+	if cr.Usage != nil {
+		out.Usage = Usage{InputTokens: cr.Usage.PromptTokens, OutputTokens: cr.Usage.CompletionTokens, CachedTokens: cr.Usage.PromptTokensDetails.CachedTokens}
 	}
-	return Response{
-		Content: cr.Choices[0].Message.Content, Provider: c.Name, Model: cr.Model,
-		Usage: Usage{InputTokens: cr.Usage.PromptTokens, OutputTokens: cr.Usage.CompletionTokens, CachedTokens: cr.Usage.PromptTokensDetails.CachedTokens},
-	}, nil
+	if len(cr.Choices) == 0 {
+		return out, fmt.Errorf("%s: empty choices", c.Name)
+	}
+	out.Content = cr.Choices[0].Message.Content
+	return out, nil
 }
 
 func (c OpenAICompat) key(ctx context.Context) string {

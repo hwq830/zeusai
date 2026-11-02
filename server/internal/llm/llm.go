@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -31,6 +33,9 @@ type Message struct {
 }
 
 type Request struct {
+	CallGroupID uuid.UUID
+	Attempt     int
+	Origin      string
 	// Purpose names the call site ("briefing.section"); used for metering, routing and mocks.
 	Purpose string
 	Tier    Tier
@@ -52,10 +57,12 @@ type Usage struct {
 }
 
 type Response struct {
-	Content  string
-	Provider string
-	Model    string
-	Usage    Usage
+	RequestID  string
+	UsageKnown bool
+	Content    string
+	Provider   string
+	Model      string
+	Usage      Usage
 	// CostMicros is in 1e-6 CNY, filled in by the gateway when known.
 	CostMicros int64
 }
@@ -115,11 +122,15 @@ func (m Metered) Complete(ctx context.Context, req Request) (Response, error) {
 	if err != nil {
 		return resp, err
 	}
-	_ = m.Q.RecordModelUsage(ctx, db.RecordModelUsageParams{
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := m.Q.RecordModelUsage(writeCtx, db.RecordModelUsageParams{
 		UserID: req.UserID, TaskID: req.TaskID, Provider: resp.Provider, Model: resp.Model, Tier: string(req.Tier),
 		InputTokens: int32(resp.Usage.InputTokens), OutputTokens: int32(resp.Usage.OutputTokens),
 		CachedTokens: int32(resp.Usage.CachedTokens), CostMicros: resp.CostMicros,
 		BilledTokens: m.Billing.Weights(req.UserID).Tokens(resp.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CachedTokens),
-	})
+	}); err != nil {
+		slog.Error("model usage persistence failed", "provider", resp.Provider, "model", resp.Model)
+	}
 	return resp, nil
 }
