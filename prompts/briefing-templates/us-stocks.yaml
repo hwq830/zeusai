@@ -1,0 +1,51 @@
+slug: us-stocks
+name: 美股早报
+description: 三大指数、财报日程和你关注的个股，英文信源整理成中文
+category: 商业财经
+icon: chart.bar.xaxis
+sort_order: 24
+markets: [US]
+fields:
+  - key: stocks
+    label: 关注的个股
+    type: tags
+    required: false
+    placeholder: 如 苹果、英伟达、特斯拉
+    max: 8
+sections:
+  - key: market
+    title: 三大指数
+    instruction: 前一交易日道琼斯、标普 500、纳斯达克的收盘表现和主要驱动因素
+    max_items: 4
+  - key: calendar
+    title: 财报与经济数据
+    instruction: 本周重要公司财报和经济数据（CPI、非农、美联储议息）的日程和结果
+    max_items: 4
+  - key: stocks
+    title: 关注的个股
+    instruction: '{{stocks}} 的股价表现、财报和相关新闻'
+    max_items: 6
+  - key: news
+    title: 市场要闻
+    instruction: 影响美股的宏观、政策和行业要闻
+    max_items: 4
+sources:
+  - { type: site, value: reuters.com }
+  - { type: site, value: cnbc.com }
+  - { type: search, value: stock market today Dow S&P 500 Nasdaq }
+  - { type: search, value: earnings calendar this week }
+  - { type: search, value: '{{stocks}} stock news' }
+default_schedule: { freq: daily, weekdays: [1, 2, 3, 4, 5], time: '07:30', tz: America/New_York }
+default_length: standard
+translations:
+  en:
+    name: US Stocks Morning
+    description: The three indexes, the earnings calendar and the stocks you follow
+    category: Business
+    fields:
+      stocks: { label: Stocks to follow, placeholder: 'e.g. Apple, NVIDIA, Tesla' }
+    sections:
+      market: { title: The indexes, instruction: 'How the Dow, the S&P 500 and the Nasdaq closed in the last session, and what drove them' }
+      calendar: { title: Earnings and data, instruction: 'This week''s major earnings and economic releases (CPI, payrolls, the Fed) and their results' }
+      stocks: { title: Your stocks, instruction: 'Price moves, earnings and news for {{stocks}}' }
+      news: { title: Market news, instruction: 'Macro, policy and sector news that moves US stocks' }

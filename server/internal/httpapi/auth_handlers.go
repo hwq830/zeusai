@@ -8,6 +8,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/httpapi/gen"
 	"github.com/hwq830/zeusai/server/internal/i18n"
+	"github.com/hwq830/zeusai/server/internal/market"
 )
 
 func (s *Server) session(ctx context.Context, ss auth.Session, err error) (gen.Session, error) {
@@ -47,7 +48,8 @@ func (s *Server) me(ctx context.Context, u db.User) (gen.Me, error) {
 		methods = append(methods, gen.Apple)
 	}
 	user := gen.User{Id: u.ID.String(), Nickname: u.Nickname, Timezone: u.Timezone, CreatedAt: u.CreatedAt, LoginMethods: methods,
-		UiLanguage: gen.Language(i18n.Parse(u.UiLanguage)), ReportLanguage: gen.ReportLanguage(u.ReportLanguage)}
+		UiLanguage: gen.Language(i18n.Parse(u.UiLanguage)), ReportLanguage: gen.ReportLanguage(u.ReportLanguage),
+		Market: gen.Market(market.Normalize(u.Market))}
 	if u.Phone != nil {
 		m := auth.MaskPhone(*u.Phone)
 		user.PhoneMasked = &m
@@ -155,6 +157,12 @@ func (s *Server) UpdateMe(ctx context.Context, req gen.UpdateMeRequestObject) (g
 			return nil, errInvalid("参数不正确")
 		}
 		p.ReportLanguage = (*string)(l)
+	}
+	if m := req.Body.Market; m != nil {
+		if !market.Valid(string(*m)) {
+			return nil, errInvalid("地区无效")
+		}
+		p.Market = (*string)(m)
 	}
 	u, err := s.Q.UpdateUserProfile(ctx, p)
 	if err != nil {

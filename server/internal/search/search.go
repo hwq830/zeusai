@@ -15,6 +15,10 @@ type Query struct {
 	Site      string
 	FreshDays int
 	Limit     int
+	// Country (ISO 3166, lower case, e.g. "tw") and Lang ("zh-hant", "zh-hans", "en") ask for
+	// local results where the API supports it; empty means no preference.
+	Country string
+	Lang    string
 }
 
 type Result struct {

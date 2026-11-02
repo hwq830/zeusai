@@ -22,9 +22,17 @@ func (s *Server) ListTemplates(ctx context.Context, req gen.ListTemplatesRequest
 	if p.Scope != nil {
 		scope = string(*p.Scope)
 	}
-	items, cats, err := s.Templates.List(ctx, userID(ctx), template.ListParams{Scope: scope, Category: deref(p.Category), Q: deref(p.Q), Limit: lim, Offset: off})
+	u, err := s.currentUser(ctx)
 	if err != nil {
 		return nil, err
+	}
+	items, cats, err := s.Templates.List(ctx, u.ID, template.ListParams{Scope: scope, Category: deref(p.Category), Q: deref(p.Q),
+		Market: u.Market, Limit: lim, Offset: off})
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Sources = items[i].SourcesFor(u.Market) // the App shows the sources this user's briefings use
 	}
 	return gen.ListTemplates200JSONResponse{
 		Items: recode[[]gen.Template](items), Categories: cats, NextCursor: nextCursor(len(items), lim, off),
@@ -32,10 +40,15 @@ func (s *Server) ListTemplates(ctx context.Context, req gen.ListTemplatesRequest
 }
 
 func (s *Server) GetTemplate(ctx context.Context, req gen.GetTemplateRequestObject) (gen.GetTemplateResponseObject, error) {
-	t, err := s.Templates.Get(ctx, userID(ctx), req.TemplateId)
+	u, err := s.currentUser(ctx)
 	if err != nil {
 		return nil, err
 	}
+	t, err := s.Templates.Get(ctx, u.ID, req.TemplateId)
+	if err != nil {
+		return nil, err
+	}
+	t.Sources = t.SourcesFor(u.Market)
 	return gen.GetTemplate200JSONResponse(recode[gen.Template](t)), nil
 }
 
@@ -63,7 +76,11 @@ func (s *Server) DeleteTemplate(ctx context.Context, req gen.DeleteTemplateReque
 }
 
 func (s *Server) CopyTemplate(ctx context.Context, req gen.CopyTemplateRequestObject) (gen.CopyTemplateResponseObject, error) {
-	t, err := s.Templates.Copy(ctx, userID(ctx), req.TemplateId)
+	u, err := s.currentUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.Templates.Copy(ctx, u.ID, u.Market, req.TemplateId)
 	if err != nil {
 		return nil, err
 	}

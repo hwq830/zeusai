@@ -23,7 +23,11 @@ type tavilyRequest struct {
 	IncludeDomains []string `json:"include_domains,omitempty"`
 	SearchDepth    string   `json:"search_depth"`
 	Topic          string   `json:"topic"`
+	Country        string   `json:"country,omitempty"`
 }
+
+// tavilyCountries maps ISO codes to the country names Tavily takes (general topic only).
+var tavilyCountries = map[string]string{"tw": "taiwan", "hk": "hong kong", "sg": "singapore", "my": "malaysia", "us": "united states"}
 
 type tavilyResponse struct {
 	Results []struct {
@@ -54,7 +58,8 @@ func (t Tavily) Search(ctx context.Context, q Query) ([]Result, error) {
 	if t.APIKey == "" {
 		return nil, errors.New("tavily: API key is not configured")
 	}
-	r := tavilyRequest{Query: q.Q, MaxResults: limit(q.Limit, 8, 20), TimeRange: timeRange(q.FreshDays), SearchDepth: "basic", Topic: "general"}
+	r := tavilyRequest{Query: q.Q, MaxResults: limit(q.Limit, 8, 20), TimeRange: timeRange(q.FreshDays), SearchDepth: "basic", Topic: "general",
+		Country: tavilyCountries[q.Country]}
 	if q.Site != "" {
 		r.IncludeDomains = []string{q.Site}
 	}

@@ -574,6 +574,8 @@ type Template struct {
 	UpdatedAt          time.Time
 	AdminManaged       bool
 	Translations       json.RawMessage
+	Markets            []string
+	MarketSources      json.RawMessage
 }
 
 type User struct {
@@ -594,6 +596,7 @@ type User struct {
 	LastSeenAt     *time.Time
 	UiLanguage     string
 	ReportLanguage string
+	Market         string
 }
 
 type UserConnector struct {

@@ -108,3 +108,30 @@ func TestTavilyBraveSerper(t *testing.T) {
 		t.Fatalf("serper %+v %v %v", res, err, got)
 	}
 }
+
+func TestLocaleParams(t *testing.T) {
+	var body map[string]any
+	var rawQuery string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		body = nil
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer s.Close()
+	ctx := context.Background()
+	q := Query{Q: "x", Country: "tw", Lang: "zh-hant"}
+	if _, err := (Serper{APIKey: "k", BaseURL: s.URL}).Search(ctx, q); err != nil || body["gl"] != "tw" || body["hl"] != "zh-tw" {
+		t.Fatalf("serper %v %v", body, err)
+	}
+	if _, err := (Tavily{APIKey: "k", BaseURL: s.URL}).Search(ctx, q); err != nil || body["country"] != "taiwan" {
+		t.Fatalf("tavily %v %v", body, err)
+	}
+	if _, err := (Brave{APIKey: "k", BaseURL: s.URL}).Search(ctx, q); err != nil || rawQuery != "count=8&country=TW&q=x&search_lang=zh-hant" {
+		t.Fatalf("brave %s %v", rawQuery, err)
+	}
+	// Brave rejects countries outside its list, so Singapore is left out.
+	if _, err := (Brave{APIKey: "k", BaseURL: s.URL}).Search(ctx, Query{Q: "x", Country: "sg"}); err != nil || rawQuery != "count=8&q=x" {
+		t.Fatalf("brave sg %s %v", rawQuery, err)
+	}
+}

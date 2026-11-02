@@ -11,6 +11,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/adminapi/gen"
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/market"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 )
 
@@ -30,6 +31,7 @@ func toUserSummary(u db.User) gen.UserSummary {
 		Id: u.ID.String(), Nickname: u.Nickname, PhoneMasked: maskPhone(u.Phone), LoginMethods: methods,
 		PlanCode: u.PlanCode, PlanExpiresAt: u.PlanExpiresAt, Timezone: u.Timezone,
 		UiLanguage: gen.UserSummaryUiLanguage(u.UiLanguage), ReportLanguage: gen.UserSummaryReportLanguage(u.ReportLanguage),
+		Market:   gen.Market(market.Normalize(u.Market)),
 		Disabled: u.DisabledAt != nil, DisabledAt: u.DisabledAt, DisabledReason: &reason, CreatedAt: u.CreatedAt,
 	}
 }
@@ -44,7 +46,7 @@ func (s *Server) ListUsers(ctx context.Context, req gen.ListUsersRequestObject) 
 	}
 	rows, err := s.Q.AdminListUsers(ctx, db.AdminListUsersParams{
 		Q: strPtr(p.Q), Plan: strPtr(p.Plan), Status: status, Limit: int32(lim), Offset: int32(off),
-		UiLanguage: (*string)(p.UiLanguage),
+		UiLanguage: (*string)(p.UiLanguage), Market: (*string)(p.Market),
 	})
 	if err != nil {
 		return nil, apperr.Internal(err)

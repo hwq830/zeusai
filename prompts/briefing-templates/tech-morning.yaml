@@ -37,6 +37,41 @@ sources:
     value: '{{topics}} 最新进展'
   - type: search
     value: '{{companies}} 最新消息'
+# 按地区替换上面的 sources（台港澳的搜索词会自动转成繁体）。没写的地区用默认 sources。
+market_sources:
+  TW:
+    - { type: site, value: ithome.com.tw }
+    - { type: site, value: bnext.com.tw }
+    - { type: site, value: technews.tw }
+    - { type: search, value: 科技 新闻 今日 }
+    - { type: search, value: '{{topics}} 最新进展' }
+    - { type: search, value: '{{companies}} 最新消息' }
+  HK: &tech_hk
+    - { type: site, value: unwire.hk }
+    - { type: site, value: ezone.hk }
+    - { type: search, value: 科技 新闻 今日 }
+    - { type: search, value: '{{topics}} 最新进展' }
+    - { type: search, value: '{{companies}} 最新消息' }
+  MO: *tech_hk
+  SG:
+    - { type: site, value: techinasia.com }
+    - { type: site, value: e27.co }
+    - { type: search, value: 科技 新闻 今日 }
+    - { type: search, value: '{{topics}} 最新进展' }
+    - { type: search, value: '{{companies}} 最新消息' }
+  MY:
+    - { type: site, value: digitalnewsasia.com }
+    - { type: site, value: techinasia.com }
+    - { type: search, value: 科技 新闻 今日 }
+    - { type: search, value: '{{topics}} 最新进展' }
+    - { type: search, value: '{{companies}} 最新消息' }
+  US:
+    - { type: site, value: techcrunch.com }
+    - { type: site, value: theverge.com }
+    - { type: site, value: arstechnica.com }
+    - { type: search, value: tech news today }
+    - { type: search, value: '{{topics}} latest' }
+    - { type: search, value: '{{companies}} news' }
 default_schedule: { freq: daily, time: '08:00', tz: Asia/Shanghai }
 default_length: standard
 translations:

@@ -66,6 +66,17 @@ func New(protocol, key, baseURL string, hc *http.Client) (Searcher, error) {
 	return nil, fmt.Errorf("unknown search protocol %q", protocol)
 }
 
+// googleLang maps a search language to Google's hl value (Serper).
+func googleLang(l string) string {
+	switch l {
+	case "zh-hant":
+		return "zh-tw"
+	case "zh-hans":
+		return "zh-cn"
+	}
+	return l
+}
+
 // withSite narrows a query to one site with the common "site:" operator.
 func withSite(q Query) string {
 	if q.Site == "" {
