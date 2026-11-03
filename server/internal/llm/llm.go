@@ -57,12 +57,14 @@ type Usage struct {
 }
 
 type Response struct {
-	RequestID  string
-	UsageKnown bool
-	Content    string
-	Provider   string
-	Model      string
-	Usage      Usage
+	RequestID string
+	// FinishReason is the provider's completion termination reason, when supplied.
+	FinishReason string
+	UsageKnown   bool
+	Content      string
+	Provider     string
+	Model        string
+	Usage        Usage
 	// CostMicros is in 1e-6 CNY, filled in by the gateway when known.
 	CostMicros int64
 }
@@ -78,6 +80,9 @@ func CompleteJSON(ctx context.Context, p Provider, req Request, out any) (Respon
 	if err != nil {
 		return resp, err
 	}
+	if resp.FinishReason == "length" {
+		return resp, ErrOutputTruncated
+	}
 	s := strings.TrimSpace(resp.Content)
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```")
@@ -90,6 +95,9 @@ func CompleteJSON(ctx context.Context, p Provider, req Request, out any) (Respon
 	}
 	return resp, nil
 }
+
+// ErrOutputTruncated means the provider reported stopping at its output limit.
+var ErrOutputTruncated = errors.New("model output truncated by token limit")
 
 // Metered records token usage per user and task after every successful call, including the
 // billed tokens the free quota is metered in.

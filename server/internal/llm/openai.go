@@ -41,7 +41,8 @@ type chatResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Message Message `json:"message"`
+		Message      Message `json:"message"`
+		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens        int `json:"prompt_tokens"`
@@ -118,6 +119,9 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	requestID := ""
 	defer func() {
 		status, code := calllog.Failure(err, httpStatus)
+		if err == nil && out.FinishReason == "length" {
+			status, code = "failed", "output_truncated"
+		}
 		if requestID == "" && out.RequestID != "" {
 			requestID = out.RequestID
 		}
@@ -150,6 +154,7 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 		return out, fmt.Errorf("%s: empty choices", c.Name)
 	}
 	out.Content = cr.Choices[0].Message.Content
+	out.FinishReason = cr.Choices[0].FinishReason
 	return out, nil
 }
 

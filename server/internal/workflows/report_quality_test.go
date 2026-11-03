@@ -38,6 +38,22 @@ func TestVisualRequiresEvidence(t *testing.T) {
 	require.Contains(t, got, "zeus-chart")
 }
 
+func TestVisualRequiresChartsArray(t *testing.T) {
+	a := &Activities{LLM: qualityProvider{result: `{}`}}
+	_, err := a.PlanReportVisuals(context.Background(), ReportPlan{}, []QuestionNotes{{Question: "Q", Notes: "事实 [1]", Sources: []search.Result{{URL: "https://example.test"}}}})
+	require.ErrorContains(t, err, "missing charts array")
+}
+
+func TestVisualAcceptsWorldBankGroupedValues(t *testing.T) {
+	// Public WDI 2022 population table, in thousands. This is a deterministic
+	// evidence fixture, not a live search or a claim that the model always charts it.
+	a := &Activities{LLM: qualityProvider{result: `{"charts":[{"type":"bar","title":"Population","unit":"thousands","period":"2022","points":[{"label":"India","value":1417173,"source":1},{"label":"China","value":1412175,"source":1}]}]}`}}
+	findings := []QuestionNotes{{Question: "Population", Notes: "Population 2022 (thousands): India 1,417,173; China 1,412,175 [1]", Sources: []search.Result{{URL: "https://databankfiles.worldbank.org/public/ddpext_download/POP.pdf"}}}}
+	got, err := a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
+	require.NoError(t, err)
+	require.Contains(t, got, "```zeus-chart")
+}
+
 func TestReviewValidation(t *testing.T) {
 	cases := []struct {
 		body string
@@ -126,4 +142,61 @@ func TestQualityPipelineOutcomes(t *testing.T) {
 			env.AssertExpectations(t)
 		})
 	}
+}
+
+type sequenceProvider struct {
+	responses []llm.Response
+	requests  []llm.Request
+}
+
+func (s *sequenceProvider) Complete(_ context.Context, r llm.Request) (llm.Response, error) {
+	s.requests = append(s.requests, r)
+	if len(s.responses) == 0 {
+		return llm.Response{}, errors.New("unexpected call")
+	}
+	out := s.responses[0]
+	s.responses = s.responses[1:]
+	return out, nil
+}
+func TestReviewRetriesOnlyTruncatedResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		first  llm.Response
+		second llm.Response
+		calls  int
+		failed bool
+	}{
+		{"provider length", llm.Response{Content: `{"status":"pass","issues":[]}`, FinishReason: "length"}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
+		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2400}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
+		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{}, 1, true},
+		{"invalid schema", llm.Response{Content: `{"status":"pass"}`}, llm.Response{}, 1, true},
+		{"second truncation", llm.Response{FinishReason: "length"}, llm.Response{FinishReason: "length"}, 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: []llm.Response{tc.first, tc.second}}
+			a := Activities{LLM: s}
+			got, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{})
+			require.Len(t, s.requests, tc.calls)
+			require.Equal(t, 2400, s.requests[0].MaxTokens)
+			if tc.calls == 2 {
+				require.Equal(t, 4800, s.requests[1].MaxTokens)
+			}
+			if tc.failed {
+				require.Error(t, err)
+				require.NotEqual(t, "pass", got.Status)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "pass", got.Status)
+			}
+		})
+	}
+}
+func TestReviewTruncationHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length"}}}
+	a := Activities{LLM: s}
+	_, err := a.ReviewReport(ctx, ReportPlan{}, nil, reportDraft{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, s.requests, 1)
 }

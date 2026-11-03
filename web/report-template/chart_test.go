@@ -115,3 +115,18 @@ func TestUnevenTrendUsesActualTimeSpacing(t *testing.T) {
 		t.Fatalf("time spacing not proportional: %s", got)
 	}
 }
+
+func TestWorldBankGroupedPopulationNumbers(t *testing.T) {
+	// Public WDI population table, 2022, persons in thousands:
+	// https://databankfiles.worldbank.org/public/ddpext_download/POP.pdf
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"Population\",\"unit\":\"thousands\",\"period\":\"2022\",\"points\":[{\"label\":\"India\",\"value\":1417173,\"source\":1},{\"label\":\"China\",\"value\":1412175,\"source\":1}]}\n```\n"
+	evidence := "Population 2022 (thousands): India 1,417,173; China 1,412,175 [1]"
+	if !strings.Contains(FilterCharts(chart, evidence, 1), "zeus-chart") {
+		t.Fatal("properly grouped source values should be accepted")
+	}
+	for _, bad := range []string{strings.Replace(evidence, "1,417,173", "-1,417,173", 1), strings.Replace(evidence, "1,417,173", "− 1,417,173", 1), strings.Replace(evidence, "1,417,173", "11,417,173", 1), strings.Replace(evidence, "1,417,173", "1,417,1734", 1)} {
+		if strings.Contains(FilterCharts(chart, bad, 1), "zeus-chart") {
+			t.Fatalf("invalid or negative numeric evidence accepted: %s", bad)
+		}
+	}
+}

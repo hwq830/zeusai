@@ -3,7 +3,9 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -16,8 +18,8 @@ import (
 )
 
 // A maximum of one draft, visual plan, revision and two independent reviews.
-// Optional model stages do not retry: retries inside the provider router remain
-// subject to its configured timeouts and the existing task token budget.
+// Temporal does not retry optional stages. A review may retry one truncated
+// response; all calls remain subject to provider timeouts and the task budget.
 type reportDraft struct {
 	Summary  string `json:"summary"`
 	Markdown string `json:"markdown"`
@@ -85,6 +87,7 @@ func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []Q
 func (a *Activities) PlanReportVisuals(ctx context.Context, p ReportPlan, findings []QuestionNotes) (string, error) {
 	merged, sources := mergeNotes(findings)
 	if len(sources) == 0 || strings.TrimSpace(merged) == "" {
+		slog.Info("report visual filtering", "task_id", p.TaskID, "candidates", 0, "accepted", 0, "reason", "no_sources")
 		return "", nil
 	}
 	var out struct {
@@ -92,21 +95,47 @@ func (a *Activities) PlanReportVisuals(ctx context.Context, p ReportPlan, findin
 	}
 	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.visual", Tier: llm.TierFast, MaxTokens: 6000, System: "仅依据研究笔记中可信、可比较的原始数值规划图表，证据充足时可以有多个，不要凑数量。仅允许 bar、dot 或 line，line 仅用于同口径的时间趋势，点标签必须是按时间递增且精度一致的 YYYY、YYYY-MM 或 YYYY-MM-DD，所有点必须来自同一来源，标题、scope、单位和统计范围都必须在每个数据点对应的证据段中明确出现；不得把不同口径、范围或预测和实际混连。对预测、估算数据必须填写 qualifier 并保持标注，统计范围明确时填写 scope，二者必须原样出现在每个点的证据段落中。输出 JSON：{\"charts\":[{\"type\":\"bar\",\"title\":\"...\",\"unit\":\"...\",\"period\":\"...\",\"points\":[{\"label\":\"...\",\"value\":1,\"source\":1}]}]}。每个点的标签、原始数值、单位、时间及来源编号必须同段出现；不得计算或补造。证据不足返回空数组。", Messages: []llm.Message{{Role: "user", Content: merged}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
 	if err != nil {
+		slog.Warn("report visual planning failed", "task_id", p.TaskID, "stage", "model_or_parse")
 		return "", err
+	}
+	if out.Charts == nil {
+		slog.Warn("report visual planning failed", "task_id", p.TaskID, "stage", "schema")
+		return "", fmt.Errorf("visual response missing charts array")
 	}
 	var b strings.Builder
 	for _, c := range out.Charts {
 		fmt.Fprintf(&b, "\n\n```zeus-chart\n%s\n```\n", c)
 	}
 	// This filter checks co-occurrence, not truth or semantic support.
-	return strings.TrimSpace(reporttemplate.FilterCharts(b.String(), p.Lang.Model(merged), len(sources))), nil
+	filtered := strings.TrimSpace(reporttemplate.FilterCharts(b.String(), p.Lang.Model(merged), len(sources)))
+	slog.Info("report visual filtering", "task_id", p.TaskID, "candidates", len(out.Charts), "accepted", strings.Count(filtered, "```zeus-chart"))
+	return filtered, nil
 }
 
 func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft) (reportReview, error) {
 	merged, _ := mergeNotes(findings)
 	var out reportReview
 	payload, _ := json.Marshal(map[string]any{"topic": p.Topic, "focuses": p.Focuses, "scope": p.Scope, "evidence": merged, "summary": d.Summary, "markdown": d.Markdown})
-	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.review", Tier: llm.TierStrong, MaxTokens: 2400, System: "你是独立报告审查者，只根据提供的证据判断。检查问题覆盖、引用、图表与正文数值单位时间、事实与推断和不确定性。不要假称核验原始网页。输出 JSON：{\"status\":\"pass 或 revise\",\"issues\":[{\"severity\":\"high 或 medium 或 low\",\"evidence\":\"具体证据或缺失\",\"suggestion\":\"修订建议\"}]}。重要问题时 status=revise。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
+	req := llm.Request{Purpose: "report.review", Tier: llm.TierStrong, MaxTokens: 2400, System: "你是独立报告审查者，只根据提供的证据判断。检查问题覆盖、引用、图表与正文数值单位时间、事实与推断和不确定性。不要假称核验原始网页。重要问题优先，证据与修订建议尽量简洁，每项不超过 160 字；不要遗漏重要问题。输出 JSON：{\"status\":\"pass 或 revise\",\"issues\":[{\"severity\":\"high 或 medium 或 low\",\"evidence\":\"具体证据或缺失\",\"suggestion\":\"修订建议\"}]}。重要问题时 status=revise。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}
+	resp, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
+	// Some compatible providers omit finish_reason. An incomplete JSON response
+	// at the exact requested output limit is also strong evidence of truncation.
+	var syntax *json.SyntaxError
+	truncated := errors.Is(err, llm.ErrOutputTruncated) || (errors.As(err, &syntax) && strings.Contains(syntax.Error(), "unexpected end of JSON input") && resp.UsageKnown && resp.Usage.OutputTokens >= req.MaxTokens)
+	if truncated {
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return reportReview{}, ctx.Err()
+		case <-timer.C:
+		}
+		// One retry only. Both calls remain metered and obey the task budget and
+		// activity deadline; never treat a second truncated response as a pass.
+		req.MaxTokens = 4800
+		out = reportReview{}
+		_, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
+	}
 	if err != nil {
 		return reportReview{}, err
 	}
