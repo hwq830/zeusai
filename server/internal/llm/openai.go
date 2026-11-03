@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hwq830/zeusai/server/internal/calllog"
@@ -35,14 +37,21 @@ type chatRequest struct {
 	MaxTokens      int       `json:"max_tokens,omitempty"`
 	Temperature    *float64  `json:"temperature,omitempty"`
 	ResponseFormat any       `json:"response_format,omitempty"`
+	Thinking       *struct {
+		Type string `json:"type"`
+	} `json:"thinking,omitempty"`
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 
 type chatResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Message      Message `json:"message"`
-		FinishReason string  `json:"finish_reason"`
+		Message struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
 		PromptTokens        int `json:"prompt_tokens"`
@@ -50,6 +59,9 @@ type chatResponse struct {
 		PromptTokensDetails struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
+		CompletionTokensDetails struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -84,8 +96,12 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	if req.JSON {
 		body.ResponseFormat = map[string]string{"type": "json_object"}
 	}
+	base := c.base(ctx)
+	if req.DisableThinking {
+		setNoThinking(&body, c.Name, base)
+	}
 	b, _ := json.Marshal(body)
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base(ctx)+"/chat/completions", bytes.NewReader(b))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))
 	if err != nil {
 		return Response{}, err
 	}
@@ -149,13 +165,36 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	out = Response{Provider: c.Name, Model: cr.Model, RequestID: cr.ID, UsageKnown: cr.Usage != nil}
 	if cr.Usage != nil {
 		out.Usage = Usage{InputTokens: cr.Usage.PromptTokens, OutputTokens: cr.Usage.CompletionTokens, CachedTokens: cr.Usage.PromptTokensDetails.CachedTokens}
+		out.ReasoningTokens = cr.Usage.CompletionTokensDetails.ReasoningTokens
 	}
 	if len(cr.Choices) == 0 {
 		return out, fmt.Errorf("%s: empty choices", c.Name)
 	}
 	out.Content = cr.Choices[0].Message.Content
+	out.ReasoningContentPresent = cr.Choices[0].Message.ReasoningContent != ""
 	out.FinishReason = cr.Choices[0].FinishReason
 	return out, nil
+}
+
+// Only known-compatible endpoints receive a non-standard thinking toggle.
+// Unknown OpenAI-compatible providers keep their existing request shape.
+func setNoThinking(body *chatRequest, provider, base string) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return
+	}
+	host := strings.ToLower(u.Hostname())
+	if (provider == "deepseek" || host == "api.deepseek.com") &&
+		(body.Model == "deepseek-flash" || body.Model == "deepseek-v4-pro") {
+		body.Thinking = &struct {
+			Type string `json:"type"`
+		}{Type: "disabled"}
+		return
+	}
+	if (host == "dashscope.aliyuncs.com" || strings.HasSuffix(host, ".maas.aliyuncs.com")) && strings.HasPrefix(body.Model, "qwen3.8-") {
+		off := false
+		body.EnableThinking = &off
+	}
 }
 
 func (c OpenAICompat) key(ctx context.Context) string {

@@ -46,6 +46,9 @@ type Request struct {
 	Messages  []Message
 	JSON      bool
 	MaxTokens int
+	// DisableThinking requests direct output for short structured decisions. The
+	// OpenAI-compatible adapter sends only a vendor-supported control field.
+	DisableThinking bool
 	// Temperature, when set, is sent as is (console tests); otherwise the endpoint default.
 	Temperature *float64
 	UserID      *uuid.UUID
@@ -60,11 +63,15 @@ type Response struct {
 	RequestID string
 	// FinishReason is the provider's completion termination reason, when supplied.
 	FinishReason string
-	UsageKnown   bool
-	Content      string
-	Provider     string
-	Model        string
-	Usage        Usage
+	// ReasoningTokens and ReasoningContentPresent are metadata only; reasoning
+	// text is never retained in the response or call log.
+	ReasoningTokens         int
+	ReasoningContentPresent bool
+	UsageKnown              bool
+	Content                 string
+	Provider                string
+	Model                   string
+	Usage                   Usage
 	// CostMicros is in 1e-6 CNY, filled in by the gateway when known.
 	CostMicros int64
 }

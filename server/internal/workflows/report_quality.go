@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/llm"
@@ -116,13 +117,17 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 	merged, _ := mergeNotes(findings)
 	var out reportReview
 	payload, _ := json.Marshal(map[string]any{"topic": p.Topic, "focuses": p.Focuses, "scope": p.Scope, "evidence": merged, "summary": d.Summary, "markdown": d.Markdown})
-	req := llm.Request{Purpose: "report.review", Tier: llm.TierStrong, MaxTokens: 2400, System: "你是独立报告审查者，只根据提供的证据判断。检查问题覆盖、引用、图表与正文数值单位时间、事实与推断和不确定性。不要假称核验原始网页。重要问题优先，证据与修订建议尽量简洁，每项不超过 160 字；不要遗漏重要问题。输出 JSON：{\"status\":\"pass 或 revise\",\"issues\":[{\"severity\":\"high 或 medium 或 low\",\"evidence\":\"具体证据或缺失\",\"suggestion\":\"修订建议\"}]}。重要问题时 status=revise。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}
+	req := llm.Request{Purpose: "report.review", Tier: llm.TierStrong, MaxTokens: 2400, DisableThinking: true, System: "你是独立报告审查者，只根据提供的证据判断。检查问题覆盖、引用、图表与正文数值单位时间、事实与推断和不确定性。不要假称核验原始网页。按严重程度只列最重要的 5 项问题，每项证据与建议各不超过 100 字；不要遗漏会影响结论的重要问题。输出 JSON：{\"status\":\"pass 或 revise\",\"issues\":[{\"severity\":\"high 或 medium 或 low\",\"evidence\":\"具体证据或缺失\",\"suggestion\":\"修订建议\"}]}。重要问题时 status=revise。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}
 	resp, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
+	logReviewAttempt(p.TaskID, 1, req, resp, err)
 	// Some compatible providers omit finish_reason. An incomplete JSON response
 	// at the exact requested output limit is also strong evidence of truncation.
 	var syntax *json.SyntaxError
 	truncated := errors.Is(err, llm.ErrOutputTruncated) || (errors.As(err, &syntax) && strings.Contains(syntax.Error(), "unexpected end of JSON input") && resp.UsageKnown && resp.Usage.OutputTokens >= req.MaxTokens)
-	if truncated {
+	// DeepSeek JSON mode can also return whitespace with finish_reason=stop.
+	// A single bounded retry is safe; never turn an empty response into a pass.
+	blank := err != nil && resp.Provider != "" && resp.FinishReason == "stop" && strings.TrimSpace(resp.Content) == ""
+	if truncated || blank {
 		timer := time.NewTimer(250 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -132,9 +137,12 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 		}
 		// One retry only. Both calls remain metered and obey the task budget and
 		// activity deadline; never treat a second truncated response as a pass.
-		req.MaxTokens = 4800
+		if truncated {
+			req.MaxTokens = 4800
+		}
 		out = reportReview{}
-		_, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
+		resp, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
+		logReviewAttempt(p.TaskID, 2, req, resp, err)
 	}
 	if err != nil {
 		return reportReview{}, err
@@ -148,8 +156,8 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 	if out.Status == "revise" && len(out.Issues) == 0 {
 		return reportReview{}, fmt.Errorf("review missing issues")
 	}
-	if len(out.Issues) > 10 {
-		out.Issues = out.Issues[:10]
+	if len(out.Issues) > 5 {
+		out.Issues = out.Issues[:5]
 	}
 	for _, i := range out.Issues {
 		if (i.Severity != "high" && i.Severity != "medium" && i.Severity != "low") || strings.TrimSpace(i.Evidence) == "" || strings.TrimSpace(i.Suggestion) == "" {
@@ -160,6 +168,14 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 		}
 	}
 	return out, nil
+}
+
+func logReviewAttempt(taskID uuid.UUID, attempt int, req llm.Request, resp llm.Response, err error) {
+	slog.Info("report review model result", "task_id", taskID, "attempt", attempt,
+		"provider", resp.Provider, "model", resp.Model, "max_tokens", req.MaxTokens,
+		"finish_reason", resp.FinishReason, "output_tokens", resp.Usage.OutputTokens,
+		"reasoning_tokens", resp.ReasoningTokens, "reasoning_content_present", resp.ReasoningContentPresent,
+		"error_type", fmt.Sprintf("%T", err))
 }
 
 func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, r reportReview) (reportDraft, error) {

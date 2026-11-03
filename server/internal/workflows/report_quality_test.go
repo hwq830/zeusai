@@ -168,6 +168,7 @@ func TestReviewRetriesOnlyTruncatedResponse(t *testing.T) {
 	}{
 		{"provider length", llm.Response{Content: `{"status":"pass","issues":[]}`, FinishReason: "length"}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2400}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
+		{"empty json mode response", llm.Response{Provider: "deepseek", FinishReason: "stop", Content: "  "}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{}, 1, true},
 		{"invalid schema", llm.Response{Content: `{"status":"pass"}`}, llm.Response{}, 1, true},
 		{"second truncation", llm.Response{FinishReason: "length"}, llm.Response{FinishReason: "length"}, 2, true},
@@ -178,8 +179,14 @@ func TestReviewRetriesOnlyTruncatedResponse(t *testing.T) {
 			got, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{})
 			require.Len(t, s.requests, tc.calls)
 			require.Equal(t, 2400, s.requests[0].MaxTokens)
+			require.True(t, s.requests[0].DisableThinking)
 			if tc.calls == 2 {
-				require.Equal(t, 4800, s.requests[1].MaxTokens)
+				wantTokens := 4800
+				if tc.name == "empty json mode response" {
+					wantTokens = 2400
+				}
+				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
+				require.True(t, s.requests[1].DisableThinking)
 			}
 			if tc.failed {
 				require.Error(t, err)
