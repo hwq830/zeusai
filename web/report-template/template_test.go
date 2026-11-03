@@ -46,14 +46,14 @@ func TestRenderEnglish(t *testing.T) {
 }
 
 func TestContentsControlsAreLocalisedIcons(t *testing.T) {
-	for _, tc := range []struct{ lang, label string }{{"zh", "目录"}, {"en", "Table of contents"}} {
+	for _, tc := range []struct{ lang, label string }{{"zh", "目录"}, {"zh-Hant", "目錄"}, {"en", "Table of contents"}} {
 		out, err := Render(Data{Lang: tc.lang, Markdown: "## Heading\n\nText."})
 		if err != nil {
 			t.Fatal(err)
 		}
 		html := string(out)
-		if !strings.Contains(html, `class="toc-top" type="button" aria-label="`+tc.label+`"`) || !strings.Contains(html, `class="toc-button" type="button" aria-label="`+tc.label+`"`) {
-			t.Fatalf("missing localised icon control for %s", tc.lang)
+		if strings.Count(html, `class="toc-button" type="button" aria-label="`+tc.label+`"`) != 1 || strings.Contains(html, `class="toc-top"`) || strings.Contains(html, `class="toc-hide"`) {
+			t.Fatalf("wrong number or label of contents controls for %s", tc.lang)
 		}
 		if strings.Contains(html, `.has-report .report-content{padding-right:`) {
 			t.Fatal("floating directory must not reserve text width")
