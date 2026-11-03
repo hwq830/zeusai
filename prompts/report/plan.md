@@ -2,7 +2,9 @@
 
 要求：
 - title：报告标题，不超过 30 字。
-- questions：{{.Questions}} 个互不重叠的子问题，合起来能完整回答用户的题目；按阅读顺序排列。
+- questions：最多 {{.Questions}} 个互不重叠的子问题，合起来尽可能回答用户题目，按阅读顺序排列；只保留有价值的问题，不要机械凑数。每个问题对应可执行的章节或研究方向。
+- scope：说明用户指定的研究范围及必要假设；uncertainties 列出缺失条件和不确定性，不能把猜测写成用户要求。
+- 每个问题列出所需 evidence 和可能的 visualOpportunities；可没有视觉机会，图表必须等研究取得可靠数据后才能决定。
 - 每个子问题给 1–3 个搜索词（queries），采用目标来源适用的语言；最终报告语言与来源语言分开。
 - 每个子问题给 regions 数组（最多 3 个）：CN、TW、HK、MO、SG、MY、US、other 或 global。
 - 先采用用户明确指定的研究地区；全球科技、技术文档等全球主题用 global；无法确定时采用用户地区 {{.Market}}。
@@ -15,4 +17,4 @@
 - 用户的长期关注点（仅供参考）：{{join .Interests "；"}}
 {{- end}}
 
-只输出 JSON：{"title":"…","questions":[{"question":"…","queries":["…"],"regions":["global"]}]}
+只输出 JSON：{"title":"…","scope":"…","uncertainties":["…"],"questions":[{"question":"…","queries":["…"],"regions":["global"],"evidence":["…"],"visualOpportunities":["…"]}]}

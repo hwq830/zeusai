@@ -5,6 +5,12 @@
 - 每个事实后面用 [n] 标注来源编号（n 是 <sources> 里的 index）。
 - 300–600 字，Markdown 列表即可，不需要开头结尾的客套。
 - 资料不足以回答时，明确写出缺什么。
+{{- if .Evidence}}
+- 计划寻找的证据：{{join .Evidence "；"}}。资料有新发现时可以调整研究重点，不得编造缺失证据。
+{{- end}}
+{{- if .VisualOpportunities}}
+- 初步视觉机会：{{join .VisualOpportunities "；"}}。仅记录来源明确的原始数字、单位和时间，不要为了图表补造数据。
+{{- end}}
 {{- if .Notes}}
 - 用户在任务进行中补充的要求：{{join .Notes "；"}}
 {{- end}}

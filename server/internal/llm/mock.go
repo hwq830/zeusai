@@ -49,6 +49,12 @@ func (Mock) Complete(_ context.Context, req Request) (Response, error) {
 		out = mockResearch(user)
 	case "report.write":
 		out = mockWrite(user)
+	case "report.visual":
+		out = map[string]any{"charts": []any{}}
+	case "report.review":
+		out = map[string]any{"status": "pass", "issues": []any{}}
+	case "report.revise":
+		out = mockWrite(user)
 	case "report.tools":
 		out = mockToolCalls(user)
 	case "report.followup":
