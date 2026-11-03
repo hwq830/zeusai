@@ -69,21 +69,25 @@ func writeStep(l i18n.Lang, n int) events.Step {
 }
 
 type Question struct {
-	Regions  []string `json:"regions,omitempty"`
-	Question string   `json:"question"`
-	Queries  []string `json:"queries"`
+	Regions             []string `json:"regions,omitempty"`
+	Question            string   `json:"question"`
+	Queries             []string `json:"queries"`
+	Evidence            []string `json:"evidence,omitempty"`
+	VisualOpportunities []string `json:"visualOpportunities,omitempty"`
 }
 
 type ReportPlan struct {
-	Market    string
-	UserID    uuid.UUID
-	TaskID    uuid.UUID
-	ReportID  uuid.UUID
-	Topic     string
-	Depth     string
-	Focuses   []string
-	Title     string
-	Questions []Question
+	Market        string
+	UserID        uuid.UUID
+	TaskID        uuid.UUID
+	ReportID      uuid.UUID
+	Topic         string
+	Depth         string
+	Focuses       []string
+	Title         string
+	Questions     []Question
+	Scope         string
+	Uncertainties []string
 	// Lang is the report's language; UILang the App's (progress steps, push).
 	Lang   i18n.Lang
 	UILang i18n.Lang
@@ -133,7 +137,11 @@ func ReportWorkflow(ctx workflow.Context, run orch.ReportRun) error {
 			}
 		}
 		if err == nil {
-			err = workflow.ExecuteActivity(ctx, a.WriteReport, plan, results, notes).Get(ctx, nil)
+			if workflow.GetVersion(ctx, "report-quality-pipeline", workflow.DefaultVersion, 1) == workflow.DefaultVersion {
+				err = workflow.ExecuteActivity(ctx, a.WriteReport, plan, results, notes).Get(ctx, nil)
+			} else {
+				err = reportQualityPipeline(ctx, plan, results, notes)
+			}
 		}
 	}
 	if err != nil {
@@ -201,8 +209,10 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		return ReportPlan{}, err
 	}
 	var out struct {
-		Title     string     `json:"title"`
-		Questions []Question `json:"questions"`
+		Title         string     `json:"title"`
+		Questions     []Question `json:"questions"`
+		Scope         string     `json:"scope"`
+		Uncertainties []string   `json:"uncertainties"`
 	}
 	if _, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{
 		Purpose: "report.plan", Tier: llm.TierStrong, System: sys,
@@ -220,7 +230,7 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		out.Questions[i].Regions = questionRegions(out.Questions[i].Regions, userMarket)
 	}
 	plan := ReportPlan{Market: userMarket, UserID: run.UserID, TaskID: run.TaskID, ReportID: r.ID, Topic: r.Topic, Depth: r.Depth, Focuses: r.Focuses,
-		Title: clip(strings.TrimSpace(lang.Model(out.Title)), lang.ClipLen(30)), Questions: out.Questions, Lang: lang, UILang: ui}
+		Title: clip(strings.TrimSpace(lang.Model(out.Title)), lang.ClipLen(30)), Questions: out.Questions, Scope: clip(out.Scope, 1000), Uncertainties: out.Uncertainties, Lang: lang, UILang: ui}
 	if plan.Title == "" {
 		plan.Title = r.Title
 	}
@@ -313,7 +323,7 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 	sources = append(sources, a.callTools(ctx, plan, q)...)
 	out := QuestionNotes{Question: q.Question, Sources: sources}
 	if len(sources) > 0 {
-		sys, err := render(plan.Lang, "research.md", map[string]any{"Title": plan.Title, "Question": q.Question, "Notes": notes})
+		sys, err := render(plan.Lang, "research.md", map[string]any{"Title": plan.Title, "Question": q.Question, "Notes": notes, "Evidence": q.Evidence, "VisualOpportunities": q.VisualOpportunities})
 		if err != nil {
 			return QuestionNotes{}, err
 		}
@@ -389,7 +399,7 @@ func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results [
 	}
 	merged, sources := mergeNotes(results)
 	sys, err := render(plan.Lang, "write.md", map[string]any{
-		"Title": plan.Title, "Topic": plan.Topic, "Focuses": plan.Focuses, "Notes": notes, "LengthHint": reportLengthHint(plan.Lang, plan.Depth),
+		"Title": plan.Title, "Topic": plan.Topic, "Focuses": plan.Focuses, "Notes": notes, "LengthHint": reportLengthHint(plan.Lang, plan.Depth), "Scope": plan.Scope, "Uncertainties": plan.Uncertainties,
 	})
 	if err != nil {
 		return err

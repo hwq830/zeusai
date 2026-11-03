@@ -2,6 +2,12 @@
 
 要求：
 - 用户的题目：{{.Topic}}
+{{- if .Scope}}
+- 初步研究范围：{{.Scope}}；研究证据不支持时可以调整，不得虚构事实填满计划。
+{{- end}}
+{{- if .Uncertainties}}
+- 规划时的不确定性：{{join .Uncertainties "；"}}。结合证据说明是否已解决。
+{{- end}}
 {{- if .Focuses}}
 - 侧重：{{join .Focuses "、"}}
 {{- end}}
