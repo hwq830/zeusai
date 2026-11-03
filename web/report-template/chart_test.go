@@ -65,3 +65,53 @@ func TestWithoutChartsDoesNotCountEncodedChartData(t *testing.T) {
 		t.Fatalf("unexpected readable text: %s", got)
 	}
 }
+
+func TestNewTrendRequiresComparableOrderedDates(t *testing.T) {
+	chart := "```zeus-chart\n{\"type\":\"line\",\"title\":\"销量\",\"unit\":\"辆\",\"period\":\"2023–2025\",\"scope\":\"中国\",\"points\":[{\"label\":\"2023\",\"value\":10,\"source\":1},{\"label\":\"2025\",\"value\":20,\"source\":1}]}\n```\n"
+	evidence := "中国销量 2023–2025：2023 年 10 辆，2025 年 20 辆 [1]"
+	if !strings.Contains(FilterCharts(chart, evidence, 1), "zeus-chart") {
+		t.Fatal("supported trend removed")
+	}
+	for _, bad := range []string{strings.Replace(chart, `"scope":"中国"`, `"scope":""`, 1), strings.Replace(chart, `"label":"2025"`, `"label":"2022"`, 1), strings.Replace(chart, `"label":"2025"`, `"label":"2025-01"`, 1), strings.Replace(chart, `"source":1}]`, `"source":2}]`, 1)} {
+		if strings.Contains(FilterCharts(bad, evidence, 2), "zeus-chart") {
+			t.Fatal("unsupported trend retained")
+		}
+	}
+}
+func TestForecastMustBeMarkedAndAllEvidenceRetained(t *testing.T) {
+	evidence := "2025 中国预测 搜索 25% 社区 80% [1]"
+	if strings.Contains(FilterCharts(validChart, evidence, 1), "zeus-chart") {
+		t.Fatal("unmarked forecast retained")
+	}
+	qualified := strings.Replace(validChart, `"period":"2025"`, `"period":"2025","scope":"中国","qualifier":"预测"`, 1)
+	if !strings.Contains(FilterCharts(qualified, evidence, 1), "zeus-chart") {
+		t.Fatal("marked forecast rejected")
+	}
+	if strings.Contains(FilterCharts(qualified, evidence+"（实际与预测混合）", 1), "zeus-chart") {
+		t.Fatal("mixed actual and forecast data must not be charted")
+	}
+	many := strings.Repeat(qualified+"\n", 5)
+	if strings.Count(FilterCharts(many, evidence, 1), "zeus-chart") != 5 {
+		t.Fatal("valid charts should not have a fixed count limit")
+	}
+}
+func TestDotAndPrintDataSources(t *testing.T) {
+	dot := strings.Replace(validChart, `"type":"bar"`, `"type":"dot"`, 1)
+	out, err := Render(Data{Markdown: dot, Sources: []Source{{Index: 1, Title: "A", URL: "https://example.com"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+	for _, part := range []string{`chart-dot-track`, `chart-point-source`, `chart-print-table`, `href="#src-1"`, `统计范围未标注`} {
+		if !strings.Contains(got, part) {
+			t.Errorf("missing %s", part)
+		}
+	}
+}
+func TestUnevenTrendUsesActualTimeSpacing(t *testing.T) {
+	c := Chart{Type: "line", Title: "X", Unit: "份", Period: "2020–2024", Points: []ChartPoint{{Label: "2020", Value: "1", Source: 1}, {Label: "2021", Value: "2", Source: 1}, {Label: "2024", Value: "3", Source: 1}}}
+	got := renderChart(c, "zh")
+	if strings.Contains(got, "160.00,") || !strings.Contains(got, "90.14,") {
+		t.Fatalf("time spacing not proportional: %s", got)
+	}
+}

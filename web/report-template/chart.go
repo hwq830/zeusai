@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Charts are stored as fenced JSON inside the report, so old clients and saved
@@ -15,11 +16,13 @@ import (
 var chartBlock = regexp.MustCompile("(?ms)^```zeus-chart[ \\t]*\\r?\\n(.*?)\\r?\\n```[ \\t]*(?:\\r?\\n|$)")
 
 type Chart struct {
-	Type   string       `json:"type"`
-	Title  string       `json:"title"`
-	Unit   string       `json:"unit"`
-	Period string       `json:"period"`
-	Points []ChartPoint `json:"points"`
+	Type      string       `json:"type"`
+	Title     string       `json:"title"`
+	Unit      string       `json:"unit"`
+	Period    string       `json:"period"`
+	Scope     string       `json:"scope,omitempty"`
+	Qualifier string       `json:"qualifier,omitempty"`
+	Points    []ChartPoint `json:"points"`
 }
 type ChartPoint struct {
 	Label  string      `json:"label"`
@@ -32,10 +35,10 @@ func parseChart(raw string, sources map[int]bool) (Chart, bool) {
 	if len(raw) > 8192 || json.Unmarshal([]byte(raw), &c) != nil || len(c.Points) < 2 || len(c.Points) > 8 {
 		return c, false
 	}
-	if c.Type != "bar" && c.Type != "line" {
+	if c.Type != "bar" && c.Type != "line" && c.Type != "dot" {
 		return c, false
 	}
-	if len(c.Title) == 0 || len(c.Title) > 160 || len(c.Unit) == 0 || len(c.Unit) > 64 || len(c.Period) == 0 || len(c.Period) > 64 {
+	if len(c.Title) == 0 || len(c.Title) > 160 || len(c.Unit) == 0 || len(c.Unit) > 64 || len(c.Period) == 0 || len(c.Period) > 64 || len(c.Scope) > 160 || len(c.Qualifier) > 80 {
 		return c, false
 	}
 	labels := map[string]bool{}
@@ -47,6 +50,43 @@ func parseChart(raw string, sources map[int]bool) (Chart, bool) {
 		labels[p.Label] = true
 	}
 	return c, true
+}
+
+// Only newly generated trend charts are filtered this way; rendering historical
+// charts remains backward compatible. We cannot infer chronology from categories.
+func chronological(points []ChartPoint) bool {
+	var previous time.Time
+	precision := 0
+	for _, p := range points {
+		if precision == 0 {
+			precision = len(p.Label)
+		} else if precision != len(p.Label) {
+			return false
+		}
+		var current time.Time
+		var err error
+		switch len(p.Label) {
+		case 4:
+			current, err = time.Parse("2006", p.Label)
+		case 7:
+			current, err = time.Parse("2006-01", p.Label)
+		case 10:
+			current, err = time.Parse("2006-01-02", p.Label)
+		default:
+			return false
+		}
+		if err != nil || (!previous.IsZero() && !current.After(previous)) {
+			return false
+		}
+		previous = current
+	}
+	return true
+}
+
+func chartDate(label string) time.Time {
+	layout := map[int]string{4: "2006", 7: "2006-01", 10: "2006-01-02"}[len(label)]
+	t, _ := time.Parse(layout, label)
+	return t
 }
 
 // WithoutCharts returns the readable Markdown without embedded chart JSON.
@@ -61,22 +101,45 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 		valid[i] = true
 	}
 	paragraphs := strings.Split(strings.ReplaceAll(evidence, "\r\n", "\n"), "\n\n")
-	count := 0
 	return chartBlock.ReplaceAllStringFunc(markdown, func(block string) string {
 		parts := chartBlock.FindStringSubmatch(block)
 		if len(parts) != 2 {
 			return ""
 		}
 		c, ok := parseChart(parts[1], valid)
-		if !ok || count >= 3 {
+		if !ok || (c.Type == "line" && (!chronological(c.Points) || strings.TrimSpace(c.Scope) == "")) {
 			return ""
+		}
+		if c.Type == "line" {
+			for _, point := range c.Points {
+				if point.Source != c.Points[0].Source {
+					return ""
+				}
+			}
 		}
 		for _, point := range c.Points {
 			supported := false
 			num := regexp.MustCompile(`(^|[^0-9.])` + regexp.QuoteMeta(string(point.Value)) + `([^0-9.]|$)`)
 			cite := regexp.MustCompile(`\[` + strconv.Itoa(point.Source) + `\]`)
 			for _, para := range paragraphs {
-				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && strings.Contains(para, c.Period) && num.MatchString(citeRe.ReplaceAllString(para, "")) && cite.MatchString(para) {
+				lower := strings.ToLower(para)
+				qualifier := strings.ToLower(c.Qualifier)
+				marked := false
+				mismatch := false
+				for _, word := range []string{"预测", "預測", "预估", "預估", "估算", "估计", "估計", "假设", "假設", "情景", "forecast", "estimate", "projected", "projection", "scenario"} {
+					if strings.Contains(lower, word) {
+						marked = true
+						if !strings.Contains(qualifier, word) {
+							mismatch = true
+						}
+					}
+				}
+				// A mixed forecast/actual paragraph cannot safely establish which
+				// category a co-occurring number belongs to.
+				if mismatch || (marked && (strings.Contains(lower, "实际") || strings.Contains(lower, "實際") || strings.Contains(lower, "actual"))) {
+					continue
+				}
+				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && strings.Contains(para, c.Period) && (c.Type != "line" || strings.Contains(para, c.Title)) && (c.Scope == "" || strings.Contains(para, c.Scope)) && (c.Qualifier == "" || strings.Contains(para, c.Qualifier)) && num.MatchString(citeRe.ReplaceAllString(para, "")) && cite.MatchString(para) {
 					supported = true
 					break
 				}
@@ -85,7 +148,6 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 				return ""
 			}
 		}
-		count++
 		return block
 	})
 }
@@ -99,26 +161,38 @@ func renderChart(c Chart, lang string) string {
 		}
 	}
 	dataLabel, sourceLabel := "查看数据表", "来源"
+	missingScope := "统计范围未标注"
 	if lang == "en" {
 		dataLabel, sourceLabel = "View data table", "Sources"
+		missingScope = "Scope not specified"
 	} else if lang == "zh-Hant" {
 		dataLabel, sourceLabel = "查看資料表", "來源"
+		missingScope = "統計範圍未標註"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, `<figure class="report-chart" data-period="%s" data-unit="%s"><figcaption><strong>%s</strong><span>%s · %s</span></figcaption>`, html.EscapeString(c.Period), html.EscapeString(c.Unit), html.EscapeString(c.Title), html.EscapeString(c.Period), html.EscapeString(c.Unit))
+	scope := c.Scope
+	if scope == "" {
+		scope = missingScope
+	}
+	fmt.Fprintf(&b, `<figure class="report-chart" data-period="%s" data-unit="%s" data-scope="%s" data-qualifier="%s"><figcaption><strong>%s</strong><span>%s · %s</span></figcaption>`, html.EscapeString(c.Period), html.EscapeString(c.Unit), html.EscapeString(scope), html.EscapeString(c.Qualifier), html.EscapeString(c.Title), html.EscapeString(c.Period), html.EscapeString(c.Unit))
+	fmt.Fprintf(&b, `<div class="chart-context">%s %s</div>`, html.EscapeString(scope), html.EscapeString(c.Qualifier))
 	if c.Type == "line" {
 		b.WriteString(`<svg class="chart-line" viewBox="0 0 320 120" role="img" aria-label="` + html.EscapeString(c.Title) + `">`)
 		var coords strings.Builder
 		for i, p := range c.Points {
 			value, _ := strconv.ParseFloat(string(p.Value), 64)
 			x := 20.0 + 280.0*float64(i)/float64(len(c.Points)-1)
+			if chronological(c.Points) {
+				start, end, at := chartDate(c.Points[0].Label), chartDate(c.Points[len(c.Points)-1].Label), chartDate(p.Label)
+				x = 20.0 + 280.0*float64(at.Unix()-start.Unix())/float64(end.Unix()-start.Unix())
+			}
 			y := 100.0
 			if max > 0 {
 				y = 100.0 - 80.0*value/max
 			}
 			fmt.Fprintf(&coords, "%.2f,%.2f ", x, y)
 		}
-		fmt.Fprintf(&b, `<polyline fill="none" stroke="#486cda" stroke-width="3" points="%s"/></svg>`, coords.String())
+		fmt.Fprintf(&b, `<polyline fill="none" stroke="currentColor" stroke-width="3" points="%s"/></svg>`, coords.String())
 	}
 	b.WriteString(`<div class="chart-rows">`)
 	seen := map[int]bool{}
@@ -128,7 +202,14 @@ func renderChart(c Chart, lang string) string {
 		if max > 0 {
 			width = 100 * v / max
 		}
-		fmt.Fprintf(&b, `<div class="chart-row"><span class="chart-label">%s</span><span class="chart-track"><span class="chart-bar" style="width:%.3f%%"></span></span><span class="chart-value">%s</span></div>`, html.EscapeString(p.Label), width, html.EscapeString(string(p.Value)))
+		label := fmt.Sprintf(`%s <a class="chart-point-source" href="#src-%d">[%d]</a>`, html.EscapeString(p.Label), p.Source, p.Source)
+		if c.Type == "dot" {
+			fmt.Fprintf(&b, `<div class="chart-row"><span class="chart-label">%s</span><span class="chart-track chart-dot-track"><span class="chart-dot" style="left:%.3f%%"></span></span><span class="chart-value">%s</span></div>`, label, width, html.EscapeString(string(p.Value)))
+		} else if c.Type == "line" {
+			fmt.Fprintf(&b, `<div class="chart-line-value"><span>%s</span><strong>%s</strong></div>`, label, html.EscapeString(string(p.Value)))
+		} else {
+			fmt.Fprintf(&b, `<div class="chart-row"><span class="chart-label">%s</span><span class="chart-track"><span class="chart-bar" style="width:%.3f%%"></span></span><span class="chart-value">%s</span></div>`, label, width, html.EscapeString(string(p.Value)))
+		}
 		seen[p.Source] = true
 	}
 	b.WriteString(`</div><div class="chart-source">` + sourceLabel + `: `)
@@ -144,10 +225,13 @@ func renderChart(c Chart, lang string) string {
 		first = false
 		delete(seen, p.Source)
 	}
-	b.WriteString(`</div><details><summary>` + dataLabel + `</summary><table><tbody>`)
+	b.WriteString(`</div><details><summary>` + dataLabel + `</summary>`)
+	var table strings.Builder
+	table.WriteString(`<table><tbody>`)
 	for _, p := range c.Points {
-		fmt.Fprintf(&b, `<tr><th scope="row">%s</th><td>%s %s</td><td><a href="#src-%d">[%d]</a></td></tr>`, html.EscapeString(p.Label), html.EscapeString(string(p.Value)), html.EscapeString(c.Unit), p.Source, p.Source)
+		fmt.Fprintf(&table, `<tr><th scope="row">%s</th><td>%s %s</td><td><a href="#src-%d">[%d]</a></td></tr>`, html.EscapeString(p.Label), html.EscapeString(string(p.Value)), html.EscapeString(c.Unit), p.Source, p.Source)
 	}
-	b.WriteString(`</tbody></table></details></figure>`)
+	table.WriteString(`</tbody></table>`)
+	b.WriteString(table.String() + `</details><div class="chart-print-table">` + table.String() + `</div></figure>`)
 	return b.String()
 }
