@@ -90,15 +90,12 @@ func (a *Activities) PlanReportVisuals(ctx context.Context, p ReportPlan, findin
 	var out struct {
 		Charts []json.RawMessage `json:"charts"`
 	}
-	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.visual", Tier: llm.TierFast, MaxTokens: 2400, System: "仅依据研究笔记规划最多3个图表。仅允许 bar 或 line，输出 JSON：{\"charts\":[{\"type\":\"bar\",\"title\":\"...\",\"unit\":\"...\",\"period\":\"...\",\"points\":[{\"label\":\"...\",\"value\":1,\"source\":1}]}]}。每个点的标签、原始数值、单位、时间及来源编号必须同段出现；不得计算或补造。证据不足返回空数组。", Messages: []llm.Message{{Role: "user", Content: merged}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
+	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.visual", Tier: llm.TierFast, MaxTokens: 6000, System: "仅依据研究笔记中可信、可比较的原始数值规划图表，证据充足时可以有多个，不要凑数量。仅允许 bar、dot 或 line，line 仅用于同口径的时间趋势，点标签必须是按时间递增且精度一致的 YYYY、YYYY-MM 或 YYYY-MM-DD，所有点必须来自同一来源，标题、scope、单位和统计范围都必须在每个数据点对应的证据段中明确出现；不得把不同口径、范围或预测和实际混连。对预测、估算数据必须填写 qualifier 并保持标注，统计范围明确时填写 scope，二者必须原样出现在每个点的证据段落中。输出 JSON：{\"charts\":[{\"type\":\"bar\",\"title\":\"...\",\"unit\":\"...\",\"period\":\"...\",\"points\":[{\"label\":\"...\",\"value\":1,\"source\":1}]}]}。每个点的标签、原始数值、单位、时间及来源编号必须同段出现；不得计算或补造。证据不足返回空数组。", Messages: []llm.Message{{Role: "user", Content: merged}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	for i, c := range out.Charts {
-		if i == 3 {
-			break
-		}
+	for _, c := range out.Charts {
 		fmt.Fprintf(&b, "\n\n```zeus-chart\n%s\n```\n", c)
 	}
 	// This filter checks co-occurrence, not truth or semantic support.
