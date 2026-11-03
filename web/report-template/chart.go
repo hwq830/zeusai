@@ -14,6 +14,25 @@ import (
 // Charts are stored as fenced JSON inside the report, so old clients and saved
 // reports continue to use the existing Markdown format.
 var chartBlock = regexp.MustCompile("(?ms)^```zeus-chart[ \\t]*\\r?\\n(.*?)\\r?\\n```[ \\t]*(?:\\r?\\n|$)")
+var evidenceNumber = regexp.MustCompile(`[-−–—+]?\s*[0-9][0-9,.]*`)
+var validEvidenceNumber = regexp.MustCompile(`^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?$`)
+
+// Match whole nonnegative numeric tokens, accepting conventional thousands
+// separators without treating a negative or part of a grouped number as evidence.
+func containsEvidenceNumber(text, value string) bool {
+	for _, token := range evidenceNumber.FindAllString(text, -1) {
+		token = strings.TrimSpace(token)
+		if strings.HasPrefix(token, "-") || strings.HasPrefix(token, "−") || strings.HasPrefix(token, "–") || strings.HasPrefix(token, "—") {
+			continue
+		}
+		token = strings.TrimPrefix(token, "+")
+		token = strings.TrimRight(token, ",.")
+		if validEvidenceNumber.MatchString(token) && strings.ReplaceAll(token, ",", "") == value {
+			return true
+		}
+	}
+	return false
+}
 
 type Chart struct {
 	Type      string       `json:"type"`
@@ -119,7 +138,6 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 		}
 		for _, point := range c.Points {
 			supported := false
-			num := regexp.MustCompile(`(^|[^0-9.])` + regexp.QuoteMeta(string(point.Value)) + `([^0-9.]|$)`)
 			cite := regexp.MustCompile(`\[` + strconv.Itoa(point.Source) + `\]`)
 			for _, para := range paragraphs {
 				lower := strings.ToLower(para)
@@ -139,7 +157,7 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 				if mismatch || (marked && (strings.Contains(lower, "实际") || strings.Contains(lower, "實際") || strings.Contains(lower, "actual"))) {
 					continue
 				}
-				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && strings.Contains(para, c.Period) && (c.Type != "line" || strings.Contains(para, c.Title)) && (c.Scope == "" || strings.Contains(para, c.Scope)) && (c.Qualifier == "" || strings.Contains(para, c.Qualifier)) && num.MatchString(citeRe.ReplaceAllString(para, "")) && cite.MatchString(para) {
+				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && strings.Contains(para, c.Period) && (c.Type != "line" || strings.Contains(para, c.Title)) && (c.Scope == "" || strings.Contains(para, c.Scope)) && (c.Qualifier == "" || strings.Contains(para, c.Qualifier)) && containsEvidenceNumber(citeRe.ReplaceAllString(para, ""), string(point.Value)) && cite.MatchString(para) {
 					supported = true
 					break
 				}
