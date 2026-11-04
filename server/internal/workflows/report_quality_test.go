@@ -160,7 +160,7 @@ func (s *sequenceProvider) Complete(_ context.Context, r llm.Request) (llm.Respo
 	s.responses = s.responses[1:]
 	return out, nil
 }
-func TestReviewRetriesOnlyTruncatedResponse(t *testing.T) {
+func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		first  llm.Response
@@ -171,7 +171,7 @@ func TestReviewRetriesOnlyTruncatedResponse(t *testing.T) {
 		{"provider length", llm.Response{Content: `{"status":"pass","issues":[]}`, FinishReason: "length"}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2400}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"empty json mode response", llm.Response{Provider: "deepseek", FinishReason: "stop", Content: "  "}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
-		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{}, 1, true},
+		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"invalid schema", llm.Response{Content: `{"status":"pass"}`}, llm.Response{}, 1, true},
 		{"second truncation", llm.Response{FinishReason: "length"}, llm.Response{FinishReason: "length"}, 2, true},
 	} {
@@ -184,7 +184,7 @@ func TestReviewRetriesOnlyTruncatedResponse(t *testing.T) {
 			require.True(t, s.requests[0].DisableThinking)
 			if tc.calls == 2 {
 				wantTokens := 4800
-				if tc.name == "empty json mode response" {
+				if tc.name == "empty json mode response" || tc.name == "incomplete below cap" {
 					wantTokens = 2400
 				}
 				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
@@ -451,4 +451,32 @@ func TestVisualPreparationDistinguishesSourceReadFailure(t *testing.T) {
 	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
 	require.NoError(t, err)
 	require.Contains(t, got.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
+}
+
+func TestRevisionRetriesMalformedJSONAtSameLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		second   string
+		succeeds bool
+	}{
+		{"recovered", `{"summary":"ok","markdown":"revised [1]"}`, true},
+		{"still invalid", `{"summary":"again"æ}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"first","markdown":"broken"æ}`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2292}}, {Content: tc.second}}}
+			a := Activities{LLM: s}
+			_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{}, reportReview{})
+			if tc.succeeds {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.Len(t, s.requests, 2)
+			require.Equal(t, 8192, s.requests[0].MaxTokens)
+			require.Equal(t, 8192, s.requests[1].MaxTokens)
+			require.True(t, s.requests[0].JSON)
+			require.True(t, s.requests[1].JSON)
+			require.Contains(t, s.requests[1].System, "JSON 语法有误")
+		})
+	}
 }
