@@ -49,6 +49,9 @@ type Request struct {
 	// DisableThinking requests direct output for short structured decisions. The
 	// OpenAI-compatible adapter sends only a vendor-supported control field.
 	DisableThinking bool
+	// ReasoningEffort is an optional vendor-supported reasoning level. Unknown
+	// providers ignore it; disabling thinking takes precedence.
+	ReasoningEffort string
 	// Temperature, when set, is sent as is (console tests); otherwise the endpoint default.
 	Temperature *float64
 	UserID      *uuid.UUID

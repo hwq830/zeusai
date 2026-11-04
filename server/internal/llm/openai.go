@@ -40,7 +40,8 @@ type chatRequest struct {
 	Thinking       *struct {
 		Type string `json:"type"`
 	} `json:"thinking,omitempty"`
-	EnableThinking *bool `json:"enable_thinking,omitempty"`
+	EnableThinking  *bool  `json:"enable_thinking,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type chatResponse struct {
@@ -99,6 +100,8 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	base := c.base(ctx)
 	if req.DisableThinking {
 		setNoThinking(&body, c.Name, base)
+	} else {
+		setReasoningEffort(&body, base, req.ReasoningEffort)
 	}
 	b, _ := json.Marshal(body)
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))
@@ -174,6 +177,21 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	out.ReasoningContentPresent = cr.Choices[0].Message.ReasoningContent != ""
 	out.FinishReason = cr.Choices[0].FinishReason
 	return out, nil
+}
+
+// Limit the optional reasoning field to models and the official endpoint that
+// document it. In particular, fallback OpenAI-compatible vendors do not see it.
+func setReasoningEffort(body *chatRequest, base, effort string) {
+	u, err := url.Parse(base)
+	if err != nil || !strings.EqualFold(u.Hostname(), "api.deepseek.com") {
+		return
+	}
+	if body.Model != "deepseek-flash" && body.Model != "deepseek-v4-pro" {
+		return
+	}
+	if effort == "low" || effort == "high" || effort == "max" {
+		body.ReasoningEffort = effort
+	}
 }
 
 // Only known-compatible endpoints receive a non-standard thinking toggle.

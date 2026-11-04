@@ -186,6 +186,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 			require.Len(t, s.requests, tc.calls)
 			require.Equal(t, 16000, s.requests[0].MaxTokens)
 			require.False(t, s.requests[0].DisableThinking)
+			require.Equal(t, "low", s.requests[0].ReasoningEffort)
 			require.Contains(t, s.requests[0].System, "最多列 5 项")
 			require.Contains(t, s.requests[0].System, "不要为凑数制造问题")
 			require.Contains(t, s.requests[0].System, "不要把不同指标的独立图表使用不同单位当成事实错误")
@@ -196,6 +197,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 				}
 				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
 				require.False(t, s.requests[1].DisableThinking)
+				require.Equal(t, "low", s.requests[1].ReasoningEffort)
 			}
 			if tc.failed {
 				require.Error(t, err)
