@@ -225,6 +225,39 @@ func TestVisualRetriesTruncatedAndDisablesThinking(t *testing.T) {
 	require.Equal(t, 9000, s.requests[1].MaxTokens)
 }
 
+func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
+	const good = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
+	const badEvidence = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":99,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
+	const badBody = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"社区","value":80,"source":1}]}]}`
+	findings := []QuestionNotes{{Question: "渠道", Notes: "渠道 [1]", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "2025 搜索 25% 社区 80% 邮件 10%"}}}}
+	body := "2025 搜索 25% 邮件 10% [1]"
+	for _, tc := range []struct {
+		name, first, second string
+		wantErr             bool
+	}{
+		{"source correction", badEvidence, good, false},
+		{"body correction", badBody, good, false},
+		{"rejected twice", badEvidence, badEvidence, true},
+		{"malformed then rejected", `{"charts":`, badEvidence, true},
+		{"rejected then empty", badEvidence, `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: []llm.Response{{Content: tc.first}, {Content: tc.second}}}
+			a := Activities{LLM: s}
+			got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: body}, "")
+			require.Len(t, s.requests, 2)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, got.Markdown, "```zeus-chart")
+			require.Equal(t, s.requests[0].Messages[0], s.requests[1].Messages[0])
+			require.Contains(t, s.requests[1].Messages[len(s.requests[1].Messages)-1].Content, "不得推算或补造")
+		})
+	}
+}
+
 func TestRevisionRetriesTruncatedAndDisablesThinking(t *testing.T) {
 	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 8192}}, {Content: `{"summary":"ok","markdown":"Evidence [1]"}`}}}
 	a := Activities{LLM: s}

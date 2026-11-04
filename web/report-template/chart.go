@@ -236,7 +236,14 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 		for _, point := range c.Points {
 			supported := false
 			cite := regexp.MustCompile(`\[` + strconv.Itoa(point.Source) + `\]`)
+			// Diagnose the closest paragraph from the cited source only. These
+			// flags contain no labels, values, quotations or source content.
+			bestScore := -1
+			var missing []string
 			for _, para := range paragraphs {
+				if !cite.MatchString(para) {
+					continue
+				}
 				lower := strings.ToLower(para)
 				qualifier := strings.ToLower(c.Qualifier)
 				marked := false
@@ -251,17 +258,42 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 				}
 				// A mixed forecast/actual paragraph cannot safely establish which
 				// category a co-occurring number belongs to.
-				if mismatch || (marked && (strings.Contains(lower, "实际") || strings.Contains(lower, "實際") || strings.Contains(lower, "actual"))) {
-					continue
-				}
 				periodPresent := strings.Contains(para, c.Period) || (len(rangeDates) > 0 && strings.Contains(para, point.Label))
-				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && periodPresent && (c.Type != "line" || strings.Contains(para, c.Title)) && (c.Scope == "" || strings.Contains(para, c.Scope)) && (c.Qualifier == "" || strings.Contains(para, c.Qualifier)) && pointValueMatches(para, c, point) && cite.MatchString(para) {
+				checks := []struct {
+					name string
+					ok   bool
+				}{
+					{"label", strings.Contains(para, point.Label)},
+					{"unit", strings.Contains(para, c.Unit)},
+					{"period", periodPresent},
+					{"title", c.Type != "line" || strings.Contains(para, c.Title)},
+					{"scope", c.Scope == "" || strings.Contains(para, c.Scope)},
+					{"qualifier", c.Qualifier == "" || strings.Contains(para, c.Qualifier)},
+					{"value_binding", pointValueMatches(para, c, point)},
+					{"forecast_context", !mismatch && !(marked && (strings.Contains(lower, "实际") || strings.Contains(lower, "實際") || strings.Contains(lower, "actual")))},
+				}
+				var failed []string
+				for _, check := range checks {
+					if !check.ok {
+						failed = append(failed, check.name)
+					}
+				}
+				if len(failed) == 0 {
 					supported = true
 					break
+				}
+				if score := len(checks) - len(failed); score > bestScore {
+					bestScore, missing = score, failed
 				}
 			}
 			if !supported {
 				reasons["missing_evidence"]++
+				if bestScore < 0 {
+					reasons["evidence_source"]++
+				}
+				for _, field := range missing {
+					reasons["evidence_"+field]++
+				}
 				return ""
 			}
 		}

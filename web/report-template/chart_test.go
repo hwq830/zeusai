@@ -143,6 +143,22 @@ func TestFilterChartsReportsRejectionCategories(t *testing.T) {
 	}
 }
 
+func TestFilterChartsDiagnosesClosestCitedPassageWithoutContent(t *testing.T) {
+	_, reasons := FilterChartsWithReasons(validChart, "2025 搜索 25% [1]", 1)
+	if reasons["missing_evidence"] != 1 || reasons["evidence_label"] != 1 || reasons["evidence_value_binding"] != 1 {
+		t.Fatalf("missing point diagnosis: %v", reasons)
+	}
+	_, reasons = FilterChartsWithReasons(validChart, "2025 搜索 25% 社区 80% [2]", 2)
+	if reasons["missing_evidence"] != 1 || reasons["evidence_source"] != 1 {
+		t.Fatalf("wrong source diagnosis: %v", reasons)
+	}
+	for reason := range reasons {
+		if strings.ContainsAny(reason, "0123456789搜索社区") {
+			t.Fatalf("diagnostic exposed source content: %q", reason)
+		}
+	}
+}
+
 func TestChartRejectsSwappedCategoryValues(t *testing.T) {
 	evidence := "2025 搜索 25% 社区 80% [1]"
 	swapped := strings.Replace(validChart, `"value":25`, `"value":80`, 1)
