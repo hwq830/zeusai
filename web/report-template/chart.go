@@ -131,6 +131,54 @@ func parseChart(raw string, sources map[int]bool) (Chart, bool) {
 	return c, true
 }
 
+// schemaRejection identifies a safe, content-free reason for an invalid chart.
+// It is diagnostic only: parseChart remains the authority for acceptance.
+func schemaRejection(raw string, sources map[int]bool) string {
+	if len(raw) > 8192 {
+		return "schema_block_too_long"
+	}
+	var c Chart
+	if json.Unmarshal([]byte(raw), &c) != nil {
+		return "schema_invalid_json_or_field_type"
+	}
+	if len(c.Points) < 2 || len(c.Points) > 8 {
+		return "schema_point_count"
+	}
+	if c.Type != "bar" && c.Type != "line" && c.Type != "dot" {
+		return "schema_chart_type"
+	}
+	if len(c.Title) == 0 || len(c.Title) > 160 {
+		return "schema_title_length"
+	}
+	if len(c.Unit) == 0 || len(c.Unit) > 64 {
+		return "schema_unit_length"
+	}
+	if len(c.Period) == 0 || len(c.Period) > 64 {
+		return "schema_period_length"
+	}
+	if len(c.Scope) > 160 {
+		return "schema_scope_length"
+	}
+	if len(c.Qualifier) > 80 {
+		return "schema_qualifier_length"
+	}
+	labels := map[string]bool{}
+	for _, p := range c.Points {
+		value, err := strconv.ParseFloat(string(p.Value), 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1e15 {
+			return "schema_point_value"
+		}
+		if len(p.Label) == 0 || len(p.Label) > 100 || labels[p.Label] {
+			return "schema_point_label"
+		}
+		if !sources[p.Source] {
+			return "schema_point_source"
+		}
+		labels[p.Label] = true
+	}
+	return "schema_other"
+}
+
 // Only newly generated trend charts are filtered this way; rendering historical
 // charts remains backward compatible. We cannot infer chronology from categories.
 func chronological(points []ChartPoint) bool {
@@ -202,6 +250,7 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 		c, ok := parseChart(parts[1], valid)
 		if !ok {
 			reasons["invalid_schema"]++
+			reasons[schemaRejection(parts[1], valid)]++
 			return ""
 		}
 		if c.Type == "line" && (!chronological(c.Points) || strings.TrimSpace(c.Scope) == "") {

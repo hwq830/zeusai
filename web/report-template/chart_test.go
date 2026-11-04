@@ -143,6 +143,26 @@ func TestFilterChartsReportsRejectionCategories(t *testing.T) {
 	}
 }
 
+func TestFilterChartsReportsOverlongQualifier(t *testing.T) {
+	chart := strings.Replace(validChart, `"period":"2025"`, `"period":"2025","qualifier":"`+strings.Repeat("说明", 14)+`"`, 1)
+	_, reasons := FilterChartsWithReasons(chart, "2025 搜索 25% 社区 80% [1]", 1)
+	if reasons["invalid_schema"] != 1 || reasons["schema_qualifier_length"] != 1 {
+		t.Fatalf("unexpected schema diagnosis: %v", reasons)
+	}
+}
+
+func TestFilterChartsRejectsCombinedScopeAndUnsupportedUnit(t *testing.T) {
+	evidence := "2025 搜索 25% 社区 80% [1]"
+	combined := strings.Replace(validChart, `"period":"2025"`, `"period":"2025","scope":"搜索/社区"`, 1)
+	if got, reasons := FilterChartsWithReasons(combined, evidence, 1); got != "" || reasons["evidence_scope"] != 1 {
+		t.Fatalf("combined scope unexpectedly accepted: %v", reasons)
+	}
+	wrongUnit := strings.Replace(validChart, `"unit":"%"`, `"unit":"人次"`, 1)
+	if got, reasons := FilterChartsWithReasons(wrongUnit, evidence, 1); got != "" || reasons["evidence_unit"] != 1 {
+		t.Fatalf("unsupported unit unexpectedly accepted: %v", reasons)
+	}
+}
+
 func TestFilterChartsDiagnosesClosestCitedPassageWithoutContent(t *testing.T) {
 	_, reasons := FilterChartsWithReasons(validChart, "2025 搜索 25% [1]", 1)
 	if reasons["missing_evidence"] != 1 || reasons["evidence_label"] != 1 || reasons["evidence_value_binding"] != 1 {
