@@ -22,6 +22,8 @@ var validChartDecimal = regexp.MustCompile(`^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$`)
 var dateRange = regexp.MustCompile(`(?i)^\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*(?:—|–|~|至|到|to|-)\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*$`)
 var valueBeforeDate = regexp.MustCompile(`(?i)^\s*(?:in|for|during|at)\b[^0-9\n;；。]{0,30}$`)
 var fourDigitNumber = regexp.MustCompile(`[0-9]{4}`)
+var leadingGeoScope = regexp.MustCompile(`^(?:国内|國內|全国|全國|全球|全省|全市|全县|全縣|本省|本市|本县|本縣|[\p{Han}]{1,8}?(?:自治区|自治區|地区|地區|省|市|县|縣|州|国|國))`)
+var regionalContext = regexp.MustCompile(`[\p{Han}]{1,8}?(?:自治区|自治區|地区|地區|省|市|县|縣|州|国|國)`)
 
 // Match whole nonnegative numeric tokens, accepting conventional thousands
 // separators without treating a negative or part of a grouped number as evidence.
@@ -106,6 +108,13 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 	if (chart.Type != "bar" && chart.Type != "dot") || len(point.Label) != 4 || strings.TrimSpace(chart.Scope) == "" || !chronological(chart.Points) {
 		return false
 	}
+	// A metric-only scope such as “出口总量” cannot establish whether the
+	// preceding annual context belongs to the same region. Require an explicit
+	// geographic scope and reject any incompatible region in the year clause.
+	geoScope := leadingGeoScope.FindString(chart.Scope)
+	if geoScope == "" {
+		return false
+	}
 	unsafePeriod := []string{"季度", "上半年", "下半年", "月份", "月度", "假期", "节假日", "節假日", "春节", "春節", "预测", "預測", "预估", "預估", "预计", "預計", "估算", "估计", "估計", "假设", "假設"}
 	for _, marker := range append(unsafePeriod, "月", "周", "季", "半年") {
 		if strings.Contains(chart.Scope, marker) {
@@ -124,9 +133,41 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 			return false
 		}
 		if strings.HasPrefix(strings.TrimLeftFunc(text[loc[1]:], unicode.IsSpace), "年") {
-			yearClause := text[loc[0]:]
+			start := strings.LastIndexAny(text[:loc[0]], "\n;；。")
+			if start >= 0 {
+				_, width := utf8.DecodeRuneInString(text[start:])
+				start += width
+			} else {
+				start = 0
+			}
+			yearClause := text[start:]
 			if end := strings.IndexAny(yearClause, "\n;；。"); end >= 0 {
 				yearClause = yearClause[:end]
+			}
+			if !strings.Contains(yearClause, geoScope) {
+				return false
+			}
+			// The year sentence must introduce this geographic scope directly.
+			// An unqualified place name before or between them (e.g. “上海：”)
+			// would otherwise allow two regions to masquerade as national data.
+			prefix := strings.TrimFunc(text[start:loc[0]], func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) })
+			if prefix != "" && prefix != geoScope && prefix != "据统计" && prefix != "據統計" && prefix != "根据统计" && prefix != "根據統計" {
+				return false
+			}
+			afterYear := strings.TrimLeftFunc(text[loc[1]:], unicode.IsSpace)
+			afterYear = strings.TrimPrefix(afterYear, "年")
+			afterYear = strings.TrimLeftFunc(afterYear, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) })
+			if !strings.HasPrefix(afterYear, geoScope) {
+				return false
+			}
+			afterGeo := []rune(strings.TrimLeftFunc(strings.TrimPrefix(afterYear, geoScope), unicode.IsSpace))
+			if len(afterGeo) < 2 || !strings.Contains(strings.TrimPrefix(chart.Scope, geoScope), string(afterGeo[:2])) {
+				return false
+			}
+			for _, region := range regionalContext.FindAllString(yearClause, -1) {
+				if !strings.Contains(chart.Scope, region) {
+					return false
+				}
 			}
 			for _, marker := range append(unsafePeriod, "月", "周", "季", "半年") {
 				if strings.Contains(yearClause, marker) {
