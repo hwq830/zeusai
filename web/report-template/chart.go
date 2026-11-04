@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Charts are stored as fenced JSON inside the report, so old clients and saved
@@ -16,6 +17,8 @@ import (
 var chartBlock = regexp.MustCompile("(?ms)^```zeus-chart[ \\t]*\\r?\\n(.*?)\\r?\\n```[ \\t]*(?:\\r?\\n|$)")
 var evidenceNumber = regexp.MustCompile(`[-−–—+]?\s*[0-9][0-9,.]*`)
 var validEvidenceNumber = regexp.MustCompile(`^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?$`)
+var dateRange = regexp.MustCompile(`(?i)^\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*(?:—|–|~|至|到|to|-)\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*$`)
+var valueBeforeDate = regexp.MustCompile(`(?i)^\s*(?:in|for|during|at)\b[^0-9\n;；。]{0,30}$`)
 
 // Match whole nonnegative numeric tokens, accepting conventional thousands
 // separators without treating a negative or part of a grouped number as evidence.
@@ -29,6 +32,50 @@ func containsEvidenceNumber(text, value string) bool {
 		token = strings.TrimRight(token, ",.")
 		if validEvidenceNumber.MatchString(token) && strings.ReplaceAll(token, ",", "") == value {
 			return true
+		}
+	}
+	return false
+}
+
+// A value must follow its own label in the same clause, without another
+// plotted label in between. Paragraph-wide co-occurrence alone can attach
+// another category's number to this point.
+func pointValueMatches(text string, chart Chart, point ChartPoint) bool {
+	text = citeRe.ReplaceAllString(text, "")
+	for _, loc := range evidenceNumber.FindAllStringIndex(text, -1) {
+		if !containsEvidenceNumber(text[loc[0]:loc[1]], string(point.Value)) {
+			continue
+		}
+		token := text[loc[0]:loc[1]]
+		leading := len(token) - len(strings.TrimLeftFunc(token, unicode.IsSpace))
+		prefix := text[:loc[0]+leading]
+		boundary := strings.LastIndexAny(prefix, "\n;；。")
+		last, label := -1, ""
+		for _, candidate := range chart.Points {
+			if i := strings.LastIndex(prefix, candidate.Label); i > last || (i == last && i >= 0 && len(candidate.Label) > len(label)) {
+				last, label = i, candidate.Label
+			}
+		}
+		if label == point.Label && last > boundary && len(prefix)-(last+len(label)) <= 200 {
+			return true
+		}
+		// Some official releases say “60,322,400 in mid-2022”. Accept the
+		// value-before-date form only when the date follows in the same clause
+		// with an explicit time preposition and no intervening chart label.
+		if last <= boundary {
+			suffix := text[loc[1]:]
+			if end := strings.IndexAny(suffix, "\n;；。"); end >= 0 {
+				suffix = suffix[:end]
+			}
+			first, following := len(suffix)+1, ""
+			for _, candidate := range chart.Points {
+				if i := strings.Index(suffix, candidate.Label); i >= 0 && i < first {
+					first, following = i, candidate.Label
+				}
+			}
+			if following == point.Label && valueBeforeDate.MatchString(suffix[:first]) {
+				return true
+			}
 		}
 	}
 	return false
@@ -109,32 +156,64 @@ func chartDate(label string) time.Time {
 }
 
 // WithoutCharts returns the readable Markdown without embedded chart JSON.
-func WithoutCharts(markdown string) string { return chartBlock.ReplaceAllString(markdown, "") }
+func WithoutCharts(markdown string) string {
+	return structureBlock.ReplaceAllString(chartBlock.ReplaceAllString(markdown, ""), "")
+}
+
+// ChartBlocks extracts existing chart assets without retaining surrounding prose.
+func ChartBlocks(markdown string) string {
+	return strings.Join(chartBlock.FindAllString(markdown, -1), "\n")
+}
 
 // FilterCharts only retains charts whose labels, values, unit and period appear
 // together with the cited source in one research-notes paragraph. The prose is
 // written independently, so rejecting a chart never removes the report text.
 func FilterCharts(markdown, evidence string, sourceCount int) string {
+	filtered, _ := FilterChartsWithReasons(markdown, evidence, sourceCount)
+	return filtered
+}
+
+// FilterChartsWithReasons reports aggregate rejection categories without exposing source text.
+func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string, map[string]int) {
+	reasons := map[string]int{}
 	valid := map[int]bool{}
 	for i := 1; i <= sourceCount; i++ {
 		valid[i] = true
 	}
 	paragraphs := strings.Split(strings.ReplaceAll(evidence, "\r\n", "\n"), "\n\n")
-	return chartBlock.ReplaceAllStringFunc(markdown, func(block string) string {
+	filtered := chartBlock.ReplaceAllStringFunc(markdown, func(block string) string {
 		parts := chartBlock.FindStringSubmatch(block)
 		if len(parts) != 2 {
 			return ""
 		}
 		c, ok := parseChart(parts[1], valid)
-		if !ok || (c.Type == "line" && (!chronological(c.Points) || strings.TrimSpace(c.Scope) == "")) {
+		if !ok {
+			reasons["invalid_schema"]++
+			return ""
+		}
+		if c.Type == "line" && (!chronological(c.Points) || strings.TrimSpace(c.Scope) == "") {
+			reasons["invalid_trend"]++
 			return ""
 		}
 		if c.Type == "line" {
 			for _, point := range c.Points {
 				if point.Source != c.Points[0].Source {
+					reasons["mixed_trend_sources"]++
 					return ""
 				}
 			}
+		}
+		// A range is valid only when derived from ordered date labels. Each
+		// evidence passage may then contain its own year rather than a range
+		// that the original source never stated.
+		rangeDates := dateRange.FindStringSubmatch(c.Period)
+		if c.Type == "line" && len(rangeDates) == 0 {
+			reasons["invalid_period"]++
+			return ""
+		}
+		if len(rangeDates) > 0 && (!chronological(c.Points) || rangeDates[1] != c.Points[0].Label || rangeDates[2] != c.Points[len(c.Points)-1].Label) {
+			reasons["invalid_period"]++
+			return ""
 		}
 		for _, point := range c.Points {
 			supported := false
@@ -157,17 +236,20 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 				if mismatch || (marked && (strings.Contains(lower, "实际") || strings.Contains(lower, "實際") || strings.Contains(lower, "actual"))) {
 					continue
 				}
-				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && strings.Contains(para, c.Period) && (c.Type != "line" || strings.Contains(para, c.Title)) && (c.Scope == "" || strings.Contains(para, c.Scope)) && (c.Qualifier == "" || strings.Contains(para, c.Qualifier)) && containsEvidenceNumber(citeRe.ReplaceAllString(para, ""), string(point.Value)) && cite.MatchString(para) {
+				periodPresent := strings.Contains(para, c.Period) || (len(rangeDates) > 0 && strings.Contains(para, point.Label))
+				if strings.Contains(para, point.Label) && strings.Contains(para, c.Unit) && periodPresent && (c.Type != "line" || strings.Contains(para, c.Title)) && (c.Scope == "" || strings.Contains(para, c.Scope)) && (c.Qualifier == "" || strings.Contains(para, c.Qualifier)) && pointValueMatches(para, c, point) && cite.MatchString(para) {
 					supported = true
 					break
 				}
 			}
 			if !supported {
+				reasons["missing_evidence"]++
 				return ""
 			}
 		}
 		return block
 	})
+	return filtered, reasons
 }
 
 func renderChart(c Chart, lang string) string {
