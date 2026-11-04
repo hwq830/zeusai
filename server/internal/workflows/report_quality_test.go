@@ -65,6 +65,8 @@ func TestReviewValidation(t *testing.T) {
 	}{
 		{`{"status":"pass","issues":[]}`, "pass", false},
 		{`{"status":"pass","issues":[{"severity":"high","evidence":"冲突","suggestion":"修正"}]}`, "revise", false},
+		{`{"status":"pass","issues":[{"severity":"medium","evidence":"来源不匹配","suggestion":"修正"}]}`, "revise", false},
+		{`{"status":"pass","issues":[{"severity":"low","evidence":"可选排版","suggestion":"优化"}]}`, "pass", false},
 		{`{"status":"pass","issues":[{"severity":"mystery","evidence":"x","suggestion":"y"}]}`, "", true},
 		{`{"status":"revise","issues":[]}`, "", true},
 		{`{"status":"pass"}`, "", true},
@@ -170,7 +172,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 		failed bool
 	}{
 		{"provider length", llm.Response{Content: `{"status":"pass","issues":[]}`, FinishReason: "length"}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
-		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2400}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
+		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"empty json mode response", llm.Response{Provider: "deepseek", FinishReason: "stop", Content: "  "}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"content filtered", llm.Response{FinishReason: "content_filter", Content: `{"status":"rev`}, llm.Response{}, 1, true},
@@ -182,15 +184,18 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 			a := Activities{LLM: s}
 			got, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{})
 			require.Len(t, s.requests, tc.calls)
-			require.Equal(t, 2400, s.requests[0].MaxTokens)
-			require.True(t, s.requests[0].DisableThinking)
+			require.Equal(t, 16000, s.requests[0].MaxTokens)
+			require.False(t, s.requests[0].DisableThinking)
+			require.Contains(t, s.requests[0].System, "最多列 5 项")
+			require.Contains(t, s.requests[0].System, "不要为凑数制造问题")
+			require.Contains(t, s.requests[0].System, "不要把不同指标的独立图表使用不同单位当成事实错误")
 			if tc.calls == 2 {
-				wantTokens := 4800
+				wantTokens := 24000
 				if tc.name == "empty json mode response" || tc.name == "incomplete below cap" {
-					wantTokens = 2400
+					wantTokens = 16000
 				}
 				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
-				require.True(t, s.requests[1].DisableThinking)
+				require.False(t, s.requests[1].DisableThinking)
 			}
 			if tc.failed {
 				require.Error(t, err)
