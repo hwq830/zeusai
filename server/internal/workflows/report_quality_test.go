@@ -307,6 +307,13 @@ func TestInternalEvidenceStatusRequiresRevision(t *testing.T) {
 	review, err = a.ReviewReport(context.Background(), ReportPlan{Topic: "未知的数据"}, nil, reportDraft{Markdown: "| 数据 | unknown |"})
 	require.NoError(t, err)
 	require.Equal(t, "pass", review.Status)
+	// The actionable metadata issue must survive the five-issue cap even
+	// when the model has already returned five high-priority findings.
+	a.LLM = qualityProvider{result: `{"status":"revise","issues":[{"severity":"high","evidence":"1","suggestion":"a"},{"severity":"high","evidence":"2","suggestion":"b"},{"severity":"high","evidence":"3","suggestion":"c"},{"severity":"high","evidence":"4","suggestion":"d"},{"severity":"high","evidence":"5","suggestion":"e"}]}`}
+	review, err = a.ReviewReport(context.Background(), ReportPlan{Topic: "旅游"}, nil, reportDraft{Markdown: "来源 readStatus 为 unknown"})
+	require.NoError(t, err)
+	require.Len(t, review.Issues, 5)
+	require.Contains(t, review.Issues[0].Evidence, "内部字段")
 }
 
 func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
@@ -317,6 +324,11 @@ func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	a := Activities{LLM: s}
 	writeRequest, err := reportDraftRequest(ReportPlan{}, findings, nil)
 	require.NoError(t, err)
+	require.NotContains(t, writeRequest.System, "图表用独立 Markdown 代码块")
+	require.Contains(t, writeRequest.System, "只写正文")
+	legacyPrompt, err := render(ReportPlan{}.Lang, "write.md", map[string]any{"VisualPipeline": false})
+	require.NoError(t, err)
+	require.Contains(t, legacyPrompt, "图表用独立 Markdown 代码块")
 	draft := reportDraft{Summary: "ok", Markdown: "2024 城镇 16.3% 农村 9.9% [1]"}
 	_, err = a.ReviewReport(context.Background(), ReportPlan{}, findings, draft)
 	require.NoError(t, err)

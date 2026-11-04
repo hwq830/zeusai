@@ -210,7 +210,7 @@ func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []Q
 
 func reportDraftRequest(p ReportPlan, findings []QuestionNotes, notes []string) (llm.Request, error) {
 	merged, sources := mergeNotes(findings)
-	sys, err := render(p.Lang, "write.md", map[string]any{"Title": p.Title, "Topic": p.Topic, "Focuses": p.Focuses, "Notes": notes, "LengthHint": reportLengthHint(p.Lang, p.Depth), "Scope": p.Scope, "Uncertainties": p.Uncertainties})
+	sys, err := render(p.Lang, "write.md", map[string]any{"Title": p.Title, "Topic": p.Topic, "Focuses": p.Focuses, "Notes": notes, "LengthHint": reportLengthHint(p.Lang, p.Depth), "Scope": p.Scope, "Uncertainties": p.Uncertainties, "VisualPipeline": true})
 	if err != nil {
 		return llm.Request{}, err
 	}
@@ -434,7 +434,8 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 		return reportReview{}, fmt.Errorf("review missing issues")
 	}
 	if exposesInternalEvidenceStatus(p, d) {
-		out.Issues = append(out.Issues, reviewIssue{Severity: "high", Evidence: "正文暴露了来源读取状态等内部字段。", Suggestion: "用自然语言说明来源可核验性，移除内部字段和状态表。"})
+		issue := reviewIssue{Severity: "high", Evidence: "正文暴露了来源读取状态等内部字段。", Suggestion: "用自然语言说明来源可核验性，移除内部字段和状态表。"}
+		out.Issues = append([]reviewIssue{issue}, out.Issues...)
 	}
 	for _, i := range out.Issues {
 		if (i.Severity != "high" && i.Severity != "medium" && i.Severity != "low") || strings.TrimSpace(i.Evidence) == "" || strings.TrimSpace(i.Suggestion) == "" {
