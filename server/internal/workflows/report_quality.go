@@ -273,8 +273,11 @@ func retryStructured(resp llm.Response, err error, limit int) bool {
 	if err == nil {
 		return false
 	}
+	if resp.FinishReason != "" && resp.FinishReason != "stop" && resp.FinishReason != "length" {
+		return false
+	}
 	var syntax *json.SyntaxError
-	return outputTruncated(resp, err, limit) || errors.As(err, &syntax) ||
+	return outputTruncated(resp, err, limit) || (resp.Content != "" && errors.As(err, &syntax)) ||
 		(resp.Provider != "" && resp.FinishReason == "stop" && strings.TrimSpace(resp.Content) == "")
 }
 

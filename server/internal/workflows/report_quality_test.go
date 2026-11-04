@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -172,6 +173,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2400}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"empty json mode response", llm.Response{Provider: "deepseek", FinishReason: "stop", Content: "  "}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
+		{"content filtered", llm.Response{FinishReason: "content_filter", Content: `{"status":"rev`}, llm.Response{}, 1, true},
 		{"invalid schema", llm.Response{Content: `{"status":"pass"}`}, llm.Response{}, 1, true},
 		{"second truncation", llm.Response{FinishReason: "length"}, llm.Response{FinishReason: "length"}, 2, true},
 	} {
@@ -461,6 +463,7 @@ func TestRevisionRetriesMalformedJSONAtSameLimit(t *testing.T) {
 	}{
 		{"recovered", `{"summary":"ok","markdown":"revised [1]"}`, true},
 		{"still invalid", `{"summary":"again"æ}`, false},
+		{"empty revision", `{"summary":"ok","markdown":""}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"first","markdown":"broken"æ}`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2292}}, {Content: tc.second}}}
@@ -479,4 +482,21 @@ func TestRevisionRetriesMalformedJSONAtSameLimit(t *testing.T) {
 			require.Contains(t, s.requests[1].System, "JSON 语法有误")
 		})
 	}
+}
+
+func TestRetryStructuredDoesNotRetryMalformedEnvelope(t *testing.T) {
+	var decoded any
+	err := json.Unmarshal([]byte(`{"bad"æ}`), &decoded)
+	require.Error(t, err)
+	require.False(t, retryStructured(llm.Response{}, err, 8192))
+	require.True(t, retryStructured(llm.Response{Content: `{"bad"æ}`}, err, 8192))
+}
+func TestRevisionMalformedJSONHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"broken"æ}`}}}
+	a := Activities{LLM: s}
+	_, err := a.ReviseReport(ctx, ReportPlan{}, nil, reportDraft{}, reportReview{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, s.requests, 1)
 }
