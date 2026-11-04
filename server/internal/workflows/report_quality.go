@@ -249,7 +249,7 @@ line 另有更严格条件：所有点来自同一来源，标题、scope、单�
 candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和正文上下文，不是图表方案，也不证明任意两点可比。逐点核查原文和完整上下文中的地区、指标、时间、单位及统计方法；不能仅因指标和单位文字相同，就将不同地区或口径的数值合并。同口径时可仅选择可比较的子集，不要为凑年份加入未确认的点。线索为空或不完整时仍须自行检查原文和正文，可以规划其他语言、其他指标或非年度数据，不能仅因为没有线索就认定不可出图。
 字段限长按 UTF-8 字节数计：title 和 scope 各不超过 160，unit 与 period 各不超过 64，qualifier 不超过 80，每个 label 不超过 100；source 必须是来源编号整数。scope 只填写各数据点原文和正文中共同出现的简短统计范围。qualifier 只用于原文逐点明示的预测、估算等限定词；没有此类限定时填写空字符串，不能把长篇说明或口径待核的判断放进 qualifier。无法给所有点找到相同范围或限定词时，应拆分或舍弃不满足条件的点，不得合成原文没有的范围。
 输出 JSON：{"charts":[{"type":"bar","title":"...","scope":"...","qualifier":"...","unit":"...","period":"...","points":[{"label":"...","value":1,"source":1}]}]}。若查遍后确无至少两个可比较且同时在原文和正文得到支持的数据点，返回 charts 空数组、no_chart_reason 为 insufficient_comparable_data，并用 no_chart_explanation 简述缺少的具体条件；不要因一部分年份不可比就忽略可比较的子集。`
-	req := llm.Request{Purpose: "report.visual", Tier: llm.TierFast, MaxTokens: 6000, DisableThinking: true, System: system, Messages: []llm.Message{{Role: "user", Content: visualInput}}, UserID: &p.UserID, TaskID: &p.TaskID}
+	req := llm.Request{Purpose: "report.visual", Tier: llm.TierFast, MaxTokens: 16000, System: system, Messages: []llm.Message{{Role: "user", Content: visualInput}}, UserID: &p.UserID, TaskID: &p.TaskID}
 	// A malformed response and an evidence correction share a single retry
 	// budget. Neither kind of failure can lead to a third provider call.
 	failedCandidateStage := ""
@@ -265,7 +265,7 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 					return "", err
 				}
 				if outputTruncated(resp, err, req.MaxTokens) {
-					req.MaxTokens = 9000
+					req.MaxTokens = 24000
 				}
 				req.System += structuredRetryInstruction
 				continue

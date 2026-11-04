@@ -212,17 +212,24 @@ func TestReviewTruncationHonorsCancellation(t *testing.T) {
 	require.Len(t, s.requests, 1)
 }
 
-func TestVisualRetriesTruncatedAndDisablesThinking(t *testing.T) {
-	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 6000}}, {Content: `{"charts":[]}`}}}
+func TestVisualRetriesTruncatedWithBoundedThinkingBudget(t *testing.T) {
+	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}}, {Content: `{"charts":[]}`}}}
 	a := Activities{LLM: s}
 	findings := []QuestionNotes{{Question: "Q", Notes: "Evidence [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
 	_, err := a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
 	require.NoError(t, err)
 	require.Len(t, s.requests, 2)
-	require.True(t, s.requests[0].DisableThinking)
-	require.True(t, s.requests[1].DisableThinking)
-	require.Equal(t, 6000, s.requests[0].MaxTokens)
-	require.Equal(t, 9000, s.requests[1].MaxTokens)
+	require.False(t, s.requests[0].DisableThinking)
+	require.False(t, s.requests[1].DisableThinking)
+	require.Equal(t, 16000, s.requests[0].MaxTokens)
+	require.Equal(t, 24000, s.requests[1].MaxTokens)
+
+	s = &sequenceProvider{responses: []llm.Response{{FinishReason: "length"}, {FinishReason: "length"}}}
+	a.LLM = s
+	_, err = a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
+	require.Error(t, err)
+	require.Len(t, s.requests, 2)
+	require.Equal(t, 24000, s.requests[1].MaxTokens)
 }
 
 func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
@@ -246,6 +253,10 @@ func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
 			a := Activities{LLM: s}
 			got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: body}, "")
 			require.Len(t, s.requests, 2)
+			require.False(t, s.requests[0].DisableThinking)
+			require.False(t, s.requests[1].DisableThinking)
+			require.Equal(t, 16000, s.requests[0].MaxTokens)
+			require.Equal(t, 16000, s.requests[1].MaxTokens)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
