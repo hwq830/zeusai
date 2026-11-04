@@ -435,3 +435,14 @@ func TestVisualNoteExplainsMissingSources(t *testing.T) {
 	require.Contains(t, got.Markdown, "没有可核验的来源")
 	require.NotContains(t, got.Markdown, "结构图")
 }
+
+func TestVisualPreparationDistinguishesSourceReadFailure(t *testing.T) {
+	findings := []QuestionNotes{{Question: "Q", Notes: "A source [1]", Sources: []search.Result{{URL: "https://example.org"}}, SourceReadsAttempted: 1}}
+	a := Activities{LLM: qualityProvider{result: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}
+	_, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
+	require.ErrorContains(t, err, "source pages unavailable")
+	findings[0].SourceReadsSucceeded = 1
+	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
+	require.NoError(t, err)
+	require.Contains(t, got.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
+}

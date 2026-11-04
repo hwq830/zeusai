@@ -100,7 +100,9 @@ type QuestionNotes struct {
 	Notes    string
 	Sources  []search.Result
 	// Numeric excerpts are verbatim source text, with local source indices.
-	NumericExcerpts []NumericExcerpt `json:",omitempty"`
+	NumericExcerpts      []NumericExcerpt `json:",omitempty"`
+	SourceReadsAttempted int              `json:",omitempty"`
+	SourceReadsSucceeded int              `json:",omitempty"`
 }
 type NumericExcerpt struct {
 	Source int
@@ -344,7 +346,13 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 			Content string `json:"content"`
 		}
 		list := make([]ps, len(sources))
-		full := a.readPages(ctx, sources, b.FullPages)
+		full, readOK := a.readPagesWithStatus(ctx, sources, b.FullPages)
+		out.SourceReadsAttempted = min(b.FullPages, len(sources))
+		for _, ok := range readOK {
+			if ok {
+				out.SourceReadsSucceeded++
+			}
+		}
 		for j, r := range sources {
 			list[j] = ps{Index: j + 1, Title: r.Title, Site: r.SiteName, Content: clip(r.Snippet, 2000)}
 			if t := full[j]; len(t) > len(r.Snippet) {
@@ -668,9 +676,15 @@ func (a *Activities) EmitEvent(ctx context.Context, userID, taskID uuid.UUID, ev
 
 // readPages fetches the full text of the first n sources; a page that fails keeps its snippet.
 func (a *Activities) readPages(ctx context.Context, sources []search.Result, n int) []string {
+	out, _ := a.readPagesWithStatus(ctx, sources, n)
+	return out
+}
+
+func (a *Activities) readPagesWithStatus(ctx context.Context, sources []search.Result, n int) ([]string, []bool) {
 	out := make([]string, len(sources))
+	ok := make([]bool, len(sources))
 	if a.Browse == nil {
-		return out
+		return out, ok
 	}
 	var wg sync.WaitGroup
 	for i := range sources[:min(n, len(sources))] {
@@ -679,11 +693,12 @@ func (a *Activities) readPages(ctx context.Context, sources []search.Result, n i
 			defer wg.Done()
 			if p, err := a.Browse.Read(ctx, sources[i].URL); err == nil {
 				out[i] = p.Text
+				ok[i] = strings.TrimSpace(p.Text) != ""
 			}
 		}()
 	}
 	wg.Wait()
-	return out
+	return out, ok
 }
 
 const maxToolCalls = 2
