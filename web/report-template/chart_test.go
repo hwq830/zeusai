@@ -296,4 +296,14 @@ func TestAnnualScopeAcrossLineRequiresSingleYearAndExactValue(t *testing.T) {
 			t.Fatalf("%s unexpectedly accepted", name)
 		}
 	}
+	quarterlyChart := strings.ReplaceAll(chart, "出口总量", "第一季度出口总量")
+	quarterlyEvidence := strings.ReplaceAll(evidence, "出口总量", "第一季度出口总量")
+	if got := FilterCharts(quarterlyChart, quarterlyEvidence, 2); strings.Contains(got, "zeus-chart") {
+		t.Fatal("quarterly scopes must not use the annual cross-sentence fallback")
+	}
+	monthlyChart := strings.ReplaceAll(chart, "出口总量", "1月出口总量")
+	monthlyEvidence := strings.ReplaceAll(evidence, "出口总量", "1月出口总量")
+	if got := FilterCharts(monthlyChart, monthlyEvidence, 2); strings.Contains(got, "zeus-chart") {
+		t.Fatal("monthly scopes must not use the annual cross-sentence fallback")
+	}
 }

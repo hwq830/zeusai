@@ -107,6 +107,11 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 		return false
 	}
 	unsafePeriod := []string{"季度", "上半年", "下半年", "月份", "月度", "假期", "节假日", "節假日", "春节", "春節", "预测", "預測", "预估", "預估", "预计", "預計", "估算", "估计", "估計", "假设", "假設"}
+	for _, marker := range append(unsafePeriod, "月", "周", "季", "半年") {
+		if strings.Contains(chart.Scope, marker) {
+			return false
+		}
+	}
 	yearBefore := -1
 	for _, loc := range fourDigitNumber.FindAllStringIndex(text, -1) {
 		// Do not interpret a substring of a larger number or a decimal as a
