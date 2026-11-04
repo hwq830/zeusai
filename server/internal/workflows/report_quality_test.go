@@ -246,7 +246,7 @@ func TestPrepareVisualsProducesSupportedGraphicAndExplainsAbsence(t *testing.T) 
 	got, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "如下图所示，资料不足。"}, "")
 	require.NoError(t, err)
 	require.NotContains(t, got.Markdown, "下图")
-	require.Contains(t, got.Markdown, "未形成通过验证")
+	require.Contains(t, got.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
 	findings = append(findings, QuestionNotes{Question: "Demand", Notes: "Second source [1]", Sources: []search.Result{{URL: "https://example.org"}}})
 	draft.Markdown = "## Supply\n\nProduction is constrained [1].\n\n## Demand\n\nDemand depends on adoption [2]."
 	got, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, draft, "")
@@ -426,4 +426,12 @@ func TestOfficialAnnualReleaseExcerptAndChart(t *testing.T) {
 	rendered, err := reporttemplate.Render(reporttemplate.Data{Lang: "en", Markdown: got.Markdown, Sources: []reporttemplate.Source{{Index: 1, URL: findings[0].Sources[0].URL, Title: "ONS"}}})
 	require.NoError(t, err)
 	require.Contains(t, string(rendered), `<polyline`)
+}
+
+func TestVisualNoteExplainsMissingSources(t *testing.T) {
+	a := Activities{LLM: qualityProvider{err: errors.New("unexpected model call")}}
+	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "正文"}, "")
+	require.NoError(t, err)
+	require.Contains(t, got.Markdown, "没有可核验的来源")
+	require.NotContains(t, got.Markdown, "结构图")
 }

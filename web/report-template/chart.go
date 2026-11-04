@@ -211,6 +211,11 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 			reasons["invalid_period"]++
 			return ""
 		}
+		if len(rangeDates) > 0 && c.Type != "line" && !chronological(c.Points) {
+			// Category charts can compare values aggregated over a whole period;
+			// they must match the original full period rather than per-point dates.
+			rangeDates = nil
+		}
 		if len(rangeDates) > 0 && (!chronological(c.Points) || rangeDates[1] != c.Points[0].Label || rangeDates[2] != c.Points[len(c.Points)-1].Label) {
 			reasons["invalid_period"]++
 			return ""

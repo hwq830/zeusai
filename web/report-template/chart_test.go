@@ -183,3 +183,16 @@ func TestAnnualSourcePassagesUsePointYearsNotInventedRange(t *testing.T) {
 		t.Fatal("line chart must retain single-source rule")
 	}
 }
+
+func TestCategoryChartCanUseFullMultiYearPeriod(t *testing.T) {
+	evidence := "2023—2025 City A 30 trips City B 20 trips [1]"
+	for _, kind := range []string{"bar", "dot"} {
+		chart := "```zeus-chart\n{\"type\":\"" + kind + "\",\"title\":\"Trips\",\"unit\":\"trips\",\"period\":\"2023—2025\",\"points\":[{\"label\":\"City A\",\"value\":30,\"source\":1},{\"label\":\"City B\",\"value\":20,\"source\":1}]}\n```\n"
+		if !strings.Contains(FilterCharts(chart, evidence, 1), "zeus-chart") {
+			t.Fatalf("%s category chart should accept the sourced full period", kind)
+		}
+		if strings.Contains(FilterCharts(chart, strings.Replace(evidence, "2023—2025", "2023", 1), 1), "zeus-chart") {
+			t.Fatalf("%s must require its full aggregation period", kind)
+		}
+	}
+}

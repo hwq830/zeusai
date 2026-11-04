@@ -153,10 +153,13 @@ func (a *Activities) PrepareReportVisuals(ctx context.Context, p ReportPlan, fin
 	if structure != "" {
 		d.Markdown += "\n\n" + structure
 	}
-	if structure == "" {
-		d.Markdown += p.Lang.Pick("\n\n视觉说明：本次未形成通过验证的图表或结构图，请结合正文和原始来源阅读。", "\n\nVisual note: no chart or structure visual passed validation; consult the text and original sources.")
+	if len(sources) == 0 {
+		d.Markdown += p.Lang.Pick("\n\n视觉说明：没有可核验的来源，本次未生成图表。", "\n\nVisual note: no verifiable sources were available, so no chart was generated.")
 	} else {
-		d.Markdown += p.Lang.Pick("\n\n视觉说明：未形成与正文及来源均可核对的数据图表；上方要点摘自正文。", "\n\nVisual note: no data chart could be verified against both the report and its sources; the highlights above are excerpts from the report.")
+		d.Markdown += p.Lang.Pick("\n\n视觉说明：未找到同时可核对来源和正文的可比较原始数值，本次未生成数据图表。", "\n\nVisual note: no comparable original values could be verified against both sources and report, so no data chart was generated.")
+	}
+	if structure != "" {
+		d.Markdown += p.Lang.Pick("上方来源要点摘自正文，属于文字摘要。", " The cited highlights above are excerpts from the report, not a chart.")
 	}
 	return d, nil
 }
