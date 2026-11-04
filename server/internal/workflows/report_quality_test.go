@@ -291,6 +291,23 @@ func TestEmptyVisualRechecksComparableSubsetWithinRetryBudget(t *testing.T) {
 	}
 }
 
+func TestVisualPlanIncludesUserTopicAndFocus(t *testing.T) {
+	const chart = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
+	findings := []QuestionNotes{{Question: "渠道", Notes: "渠道 [1]", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "2025 搜索 25% 邮件 10%"}}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: chart}}}
+	a := Activities{LLM: s}
+	p := ReportPlan{Topic: "渠道趋势", Focuses: []string{"分别展示各项指标"}}
+	_, err := a.planReportVisuals(context.Background(), p, findings, "2025 搜索 25% 邮件 10% [1]")
+	require.NoError(t, err)
+	var payload struct {
+		Topic   string   `json:"topic"`
+		Focuses []string `json:"focuses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(s.requests[0].Messages[0].Content), &payload))
+	require.Equal(t, p.Topic, payload.Topic)
+	require.Equal(t, p.Focuses, payload.Focuses)
+}
+
 func TestInternalEvidenceStatusRequiresRevision(t *testing.T) {
 	for _, body := range []string{"来源 readStatus 为 unknown", "| 来源 | read/unknown |", "状态 read／unknown"} {
 		a := Activities{LLM: qualityProvider{result: `{"status":"pass","issues":[]}`}}

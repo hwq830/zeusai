@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Charts are stored as fenced JSON inside the report, so old clients and saved
@@ -20,6 +21,7 @@ var validEvidenceNumber = regexp.MustCompile(`^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})
 var validChartDecimal = regexp.MustCompile(`^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$`)
 var dateRange = regexp.MustCompile(`(?i)^\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*(?:—|–|~|至|到|to|-)\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*$`)
 var valueBeforeDate = regexp.MustCompile(`(?i)^\s*(?:in|for|during|at)\b[^0-9\n;；。]{0,30}$`)
+var fourDigitNumber = regexp.MustCompile(`[0-9]{4}`)
 
 // Match whole nonnegative numeric tokens, accepting conventional thousands
 // separators without treating a negative or part of a grouped number as evidence.
@@ -89,6 +91,89 @@ func pointValueMatches(text string, chart Chart, point ChartPoint) bool {
 			if following == point.Label && valueBeforeDate.MatchString(suffix[:first]) {
 				return true
 			}
+		}
+	}
+	return scopedAnnualValueMatches(text, chart, point)
+}
+
+// Some official annual releases state the year in one paragraph line and put
+// the next annual metric at the start of the following line. Accept that form
+// only when the cited passage has one unambiguous year and the metric's exact
+// scope is immediately followed by the original number and unit. In
+// particular, never carry a year across a quarterly, seasonal, forecast or
+// category-qualified statement.
+func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
+	if (chart.Type != "bar" && chart.Type != "dot") || len(point.Label) != 4 || strings.TrimSpace(chart.Scope) == "" || !chronological(chart.Points) {
+		return false
+	}
+	unsafePeriod := []string{"季度", "上半年", "下半年", "月份", "月度", "假期", "节假日", "節假日", "春节", "春節", "预测", "預測", "预估", "預估", "预计", "預計", "估算", "估计", "估計", "假设", "假設"}
+	yearBefore := -1
+	for _, loc := range fourDigitNumber.FindAllStringIndex(text, -1) {
+		// Do not interpret a substring of a larger number or a decimal as a
+		// year. Other standalone four-digit numbers conservatively block it.
+		if (loc[0] > 0 && ((text[loc[0]-1] >= '0' && text[loc[0]-1] <= '9') || text[loc[0]-1] == '.')) || (loc[1] < len(text) && ((text[loc[1]] >= '0' && text[loc[1]] <= '9') || text[loc[1]] == '.')) {
+			continue
+		}
+		token := text[loc[0]:loc[1]]
+		if token != point.Label {
+			return false
+		}
+		if strings.HasPrefix(strings.TrimLeftFunc(text[loc[1]:], unicode.IsSpace), "年") {
+			yearClause := text[loc[0]:]
+			if end := strings.IndexAny(yearClause, "\n;；。"); end >= 0 {
+				yearClause = yearClause[:end]
+			}
+			for _, marker := range append(unsafePeriod, "月", "周", "季", "半年") {
+				if strings.Contains(yearClause, marker) {
+					return false
+				}
+			}
+			if yearBefore < 0 {
+				yearBefore = loc[0]
+			}
+		}
+	}
+	if yearBefore < 0 {
+		return false
+	}
+	for _, loc := range evidenceNumber.FindAllStringIndex(text, -1) {
+		if !containsEvidenceNumber(text[loc[0]:loc[1]], string(point.Value)) {
+			continue
+		}
+		leading := len(text[loc[0]:loc[1]]) - len(strings.TrimLeftFunc(text[loc[0]:loc[1]], unicode.IsSpace))
+		prefix := text[:loc[0]+leading]
+		boundary := strings.LastIndexAny(prefix, "\n;；。")
+		if boundary < 0 || yearBefore >= boundary {
+			continue
+		}
+		_, boundaryWidth := utf8.DecodeRuneInString(prefix[boundary:])
+		if strings.TrimSpace(prefix[boundary+boundaryWidth:]) != chart.Scope {
+			continue
+		}
+		suffix := strings.TrimLeftFunc(text[loc[1]:], unicode.IsSpace)
+		if !strings.HasPrefix(suffix, chart.Unit) {
+			continue
+		}
+		afterUnit := strings.TrimPrefix(suffix, chart.Unit)
+		if afterUnit != "" {
+			next, _ := utf8.DecodeRuneInString(afterUnit)
+			if unicode.IsLetter(next) || unicode.IsDigit(next) {
+				continue
+			}
+		}
+		clause := suffix
+		if end := strings.IndexAny(clause, "\n;；。"); end >= 0 {
+			clause = clause[:end]
+		}
+		unsafe := false
+		for _, marker := range unsafePeriod {
+			if strings.Contains(clause, marker) {
+				unsafe = true
+				break
+			}
+		}
+		if !unsafe {
+			return true
 		}
 	}
 	return false

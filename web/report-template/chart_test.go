@@ -263,3 +263,37 @@ func TestChartWithEquivalentDecimalPrecision(t *testing.T) {
 		t.Fatal("matching chart decimals should be charted")
 	}
 }
+
+func TestAnnualScopeAcrossLineRequiresSingleYearAndExactValue(t *testing.T) {
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"出口总量\",\"scope\":\"出口总量\",\"unit\":\"万吨\",\"period\":\"2023—2024\",\"points\":[{\"label\":\"2023\",\"value\":4.91,\"source\":1},{\"label\":\"2024\",\"value\":5.75,\"source\":2}]}\n```\n"
+	evidence := "2023年，企业总数20家。\n出口总量4.91万吨，其中甲市4.18万吨 [1]\n\n2024年，企业总数22家。\n出口总量5.75万吨，其中甲市4.93万吨 [2]"
+	if got := FilterCharts(chart, evidence, 2); !strings.Contains(got, "zeus-chart") {
+		t.Fatal("single-year cited source with adjacent scope, value and unit should be supported")
+	}
+	for name, bad := range map[string]string{
+		"different year":          strings.Replace(evidence, "企业总数20家", "2022年企业总数20家", 1),
+		"year range":              strings.Replace(evidence, "2023年，", "2023年—2024年，", 1),
+		"four digits not a year":  strings.Replace(evidence, "2023年，", "企业数量2023家，", 1),
+		"half-year year context":  strings.Replace(evidence, "2023年，", "2023年上半年，", 1),
+		"repeated year quarter":   strings.Replace(evidence, "企业总数20家。", "企业总数20家。2023年第一季度总数10家。", 1),
+		"half-year value context": strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨（上半年）", 1),
+		"category prefix":         strings.Replace(evidence, "出口总量4.91万吨", "甲市出口总量4.91万吨", 1),
+		"negative value":          strings.Replace(evidence, "出口总量4.91万吨", "出口总量-4.91万吨", 1),
+		"partial number":          strings.Replace(evidence, "出口总量4.91万吨", "出口总量14.91万吨", 1),
+		"wrong source":            strings.Replace(evidence, "4.18万吨 [1]", "4.18万吨 [2]", 1),
+		"unsupported unit":        strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨货物", 1),
+	} {
+		if got := FilterCharts(chart, bad, 2); strings.Contains(got, "zeus-chart") {
+			t.Fatalf("%s unexpectedly accepted", name)
+		}
+	}
+	for name, bad := range map[string]string{
+		"category value": strings.Replace(chart, `"value":4.91`, `"value":4.18`, 1),
+		"no scope":       strings.Replace(chart, `"scope":"出口总量",`, "", 1),
+		"line chart":     strings.Replace(chart, `"type":"bar"`, `"type":"line"`, 1),
+	} {
+		if got := FilterCharts(bad, evidence, 2); strings.Contains(got, "zeus-chart") {
+			t.Fatalf("%s unexpectedly accepted", name)
+		}
+	}
+}
