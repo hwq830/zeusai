@@ -274,18 +274,29 @@ func TestAnnualScopeAcrossLineRequiresSingleYearAndExactValue(t *testing.T) {
 	if got := FilterCharts(chart, evidence, 2); !strings.Contains(got, "zeus-chart") {
 		t.Fatal("single-year cited source with adjacent scope, value and unit should be supported")
 	}
+	sameSourceYear := strings.Replace(evidence, "企业总数20家。", "企业总数20家 [1]。", 1)
+	if got := FilterCharts(chart, sameSourceYear, 2); !strings.Contains(got, "zeus-chart") {
+		t.Fatal("an explicit matching citation on the year must remain supported")
+	}
 	for name, bad := range map[string]string{
-		"different year":          strings.Replace(evidence, "企业总数20家", "2022年企业总数20家", 1),
-		"year range":              strings.Replace(evidence, "2023年，", "2023年—2024年，", 1),
-		"four digits not a year":  strings.Replace(evidence, "2023年，", "企业数量2023家，", 1),
-		"half-year year context":  strings.Replace(evidence, "2023年，", "2023年上半年，", 1),
-		"repeated year quarter":   strings.Replace(evidence, "企业总数20家。", "企业总数20家。2023年第一季度总数10家。", 1),
-		"half-year value context": strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨（上半年）", 1),
-		"category prefix":         strings.Replace(evidence, "出口总量4.91万吨", "甲市出口总量4.91万吨", 1),
-		"negative value":          strings.Replace(evidence, "出口总量4.91万吨", "出口总量-4.91万吨", 1),
-		"partial number":          strings.Replace(evidence, "出口总量4.91万吨", "出口总量14.91万吨", 1),
-		"wrong source":            strings.Replace(evidence, "4.18万吨 [1]", "4.18万吨 [2]", 1),
-		"unsupported unit":        strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨货物", 1),
+		"different year":                   strings.Replace(evidence, "企业总数20家", "2022年企业总数20家", 1),
+		"year range":                       strings.Replace(evidence, "2023年，", "2023年—2024年，", 1),
+		"four digits not a year":           strings.Replace(evidence, "2023年，", "企业数量2023家，", 1),
+		"half-year year context":           strings.Replace(evidence, "2023年，", "2023年上半年，", 1),
+		"repeated year quarter":            strings.Replace(evidence, "企业总数20家。", "企业总数20家。2023年第一季度总数10家。", 1),
+		"intervening quarter scope":        strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n第一季度出口总量统计如下。\n", 1),
+		"intervening half-year scope":      strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n上半年出口总量统计如下。\n", 1),
+		"intervening quarter numeric":      strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n第一季度范围1月统计。\n", 1),
+		"intervening different region":     strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n其中甲市的情况如下。\n", 1),
+		"intervening place without suffix": strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n其中上海的情况如下。\n", 1),
+		"year cites different source":      strings.Replace(evidence, "企业总数20家。", "企业总数20家 [3]。", 1),
+		"year citation after punctuation":  strings.Replace(evidence, "企业总数20家。", "企业总数20家。[3]", 1),
+		"half-year value context":          strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨（上半年）", 1),
+		"category prefix":                  strings.Replace(evidence, "出口总量4.91万吨", "甲市出口总量4.91万吨", 1),
+		"negative value":                   strings.Replace(evidence, "出口总量4.91万吨", "出口总量-4.91万吨", 1),
+		"partial number":                   strings.Replace(evidence, "出口总量4.91万吨", "出口总量14.91万吨", 1),
+		"wrong source":                     strings.Replace(evidence, "4.18万吨 [1]", "4.18万吨 [2]", 1),
+		"unsupported unit":                 strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨货物", 1),
 	} {
 		if got := FilterCharts(chart, bad, 2); strings.Contains(got, "zeus-chart") {
 			t.Fatalf("%s unexpectedly accepted", name)

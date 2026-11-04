@@ -23,7 +23,7 @@ var dateRange = regexp.MustCompile(`(?i)^\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*(?:�
 var valueBeforeDate = regexp.MustCompile(`(?i)^\s*(?:in|for|during|at)\b[^0-9\n;；。]{0,30}$`)
 var fourDigitNumber = regexp.MustCompile(`[0-9]{4}`)
 var leadingGeoScope = regexp.MustCompile(`^(?:国内|國內|全国|全國|全球|全省|全市|全县|全縣|本省|本市|本县|本縣|[\p{Han}]{1,8}?(?:自治区|自治區|地区|地區|省|市|县|縣|州|国|國))`)
-var regionalContext = regexp.MustCompile(`[\p{Han}]{1,8}?(?:自治区|自治區|地区|地區|省|市|县|縣|州|国|國)`)
+var regionalContext = regexp.MustCompile(`[\p{Han}]{1,8}?(?:自治区|自治區|地区|地區|省|市|县|縣|州)`)
 
 // Match whole nonnegative numeric tokens, accepting conventional thousands
 // separators without treating a negative or part of a grouped number as evidence.
@@ -58,6 +58,7 @@ func trimDecimalZeros(value string) string {
 // plotted label in between. Paragraph-wide co-occurrence alone can attach
 // another category's number to this point.
 func pointValueMatches(text string, chart Chart, point ChartPoint) bool {
+	originalText := text
 	text = citeRe.ReplaceAllString(text, "")
 	for _, loc := range evidenceNumber.FindAllStringIndex(text, -1) {
 		if !containsEvidenceNumber(text[loc[0]:loc[1]], string(point.Value)) {
@@ -95,7 +96,7 @@ func pointValueMatches(text string, chart Chart, point ChartPoint) bool {
 			}
 		}
 	}
-	return scopedAnnualValueMatches(text, chart, point)
+	return scopedAnnualValueMatches(originalText, chart, point)
 }
 
 // Some official annual releases state the year in one paragraph line and put
@@ -121,7 +122,8 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 			return false
 		}
 	}
-	yearBefore := -1
+	yearBefore, yearClauseEnd := -1, -1
+	yearMetric := ""
 	for _, loc := range fourDigitNumber.FindAllStringIndex(text, -1) {
 		// Do not interpret a substring of a larger number or a decimal as a
 		// year. Other standalone four-digit numbers conservatively block it.
@@ -144,6 +146,12 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 			if end := strings.IndexAny(yearClause, "\n;；。"); end >= 0 {
 				yearClause = yearClause[:end]
 			}
+			for _, cite := range citeRe.FindAllStringSubmatch(yearClause, -1) {
+				index, _ := strconv.Atoi(cite[1])
+				if index != point.Source {
+					return false
+				}
+			}
 			if !strings.Contains(yearClause, geoScope) {
 				return false
 			}
@@ -160,8 +168,17 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 			if !strings.HasPrefix(afterYear, geoScope) {
 				return false
 			}
-			afterGeo := []rune(strings.TrimLeftFunc(strings.TrimPrefix(afterYear, geoScope), unicode.IsSpace))
+			afterGeoText := strings.TrimLeftFunc(strings.TrimPrefix(afterYear, geoScope), unicode.IsSpace)
+			afterGeo := []rune(afterGeoText)
 			if len(afterGeo) < 2 || !strings.Contains(strings.TrimPrefix(chart.Scope, geoScope), string(afterGeo[:2])) {
+				return false
+			}
+			metricEnd := evidenceNumber.FindStringIndex(afterGeoText)
+			if metricEnd == nil {
+				return false
+			}
+			metric := strings.TrimSpace(afterGeoText[:metricEnd[0]])
+			if len([]rune(metric)) < 2 || len([]rune(metric)) > 30 {
 				return false
 			}
 			for _, region := range regionalContext.FindAllString(yearClause, -1) {
@@ -176,6 +193,8 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 			}
 			if yearBefore < 0 {
 				yearBefore = loc[0]
+				yearClauseEnd = start + len(yearClause)
+				yearMetric = metric
 			}
 		}
 	}
@@ -194,6 +213,46 @@ func scopedAnnualValueMatches(text string, chart Chart, point ChartPoint) bool {
 		}
 		_, boundaryWidth := utf8.DecodeRuneInString(prefix[boundary:])
 		if strings.TrimSpace(prefix[boundary+boundaryWidth:]) != chart.Scope {
+			continue
+		}
+		// Between the annual context and the target, allow only explicit
+		// breakdowns of the different metric established by the year sentence.
+		// This prevents a quarterly/category heading from re-scoping the target.
+		if yearClauseEnd < 0 || yearClauseEnd > boundary {
+			continue
+		}
+		intermediate := text[yearClauseEnd : boundary+boundaryWidth]
+		unsafeIntermediate := false
+		for _, cite := range citeRe.FindAllStringSubmatch(intermediate, -1) {
+			index, _ := strconv.Atoi(cite[1])
+			if index != point.Source {
+				unsafeIntermediate = true
+				break
+			}
+		}
+		if unsafeIntermediate {
+			continue
+		}
+		for _, part := range strings.FieldsFunc(intermediate, func(r rune) bool { return r == '\n' || r == '。' || r == '；' || r == ';' }) {
+			part = strings.TrimSpace(citeRe.ReplaceAllString(part, ""))
+			if part == "" {
+				continue
+			}
+			if !strings.Contains(part, yearMetric) || strings.Contains(chart.Scope, yearMetric) {
+				unsafeIntermediate = true
+				break
+			}
+			for _, region := range regionalContext.FindAllString(part, -1) {
+				if !strings.Contains(chart.Scope, region) {
+					unsafeIntermediate = true
+					break
+				}
+			}
+			if unsafeIntermediate {
+				break
+			}
+		}
+		if unsafeIntermediate {
 			continue
 		}
 		suffix := strings.TrimLeftFunc(text[loc[1]:], unicode.IsSpace)
