@@ -258,6 +258,46 @@ func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
 	}
 }
 
+func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
+	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
+	evidence := "2024 城镇 16.3% 农村 9.9%"
+	findings := []QuestionNotes{{Question: "Q", Notes: "Notes [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp}}, SourceReadStatus: []string{"read"}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"ok","markdown":"2024 城镇 16.3% 农村 9.9% [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
+	a := Activities{LLM: s}
+	writeRequest, err := reportDraftRequest(ReportPlan{}, findings, nil)
+	require.NoError(t, err)
+	draft := reportDraft{Summary: "ok", Markdown: "2024 城镇 16.3% 农村 9.9% [1]"}
+	_, err = a.ReviewReport(context.Background(), ReportPlan{}, findings, draft)
+	require.NoError(t, err)
+	_, err = a.ReviseReport(context.Background(), ReportPlan{}, findings, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	_, err = a.planReportVisuals(context.Background(), ReportPlan{}, findings, draft.Markdown)
+	require.NoError(t, err)
+	requests := append([]llm.Request{writeRequest}, s.requests...)
+	for _, request := range requests {
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(request.Messages[0].Content), &payload))
+		require.Contains(t, payload, "source_excerpts")
+		require.Contains(t, payload["source_excerpts"], evidence)
+		raw, _ := json.Marshal(payload)
+		require.Contains(t, string(raw), "https://example.test/official")
+		require.Contains(t, string(raw), "2025-01-21T16:00:00Z")
+		require.Contains(t, string(raw), "readStatus")
+		require.Contains(t, request.System, "原文")
+	}
+	require.Contains(t, requests[1].System, "至少两个数据点")
+}
+
+func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
+	const evidence = "Population 2022 (thousands): India 1,417,173; China 1,412,175"
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"Population\",\"unit\":\"thousands\",\"period\":\"2022\",\"points\":[{\"label\":\"India\",\"value\":1417173,\"source\":1},{\"label\":\"China\",\"value\":1412175,\"source\":1}]}\n```\n"
+	findings := []QuestionNotes{{Question: "Population", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
+	draft := reportDraft{Markdown: evidence + " [1]\n\n" + chart}
+	require.NoError(t, validateReviewedVisuals(ReportPlan{}, findings, draft, 1))
+	draft.Markdown = strings.Replace(draft.Markdown, "1412175", "9999999", 1)
+	require.ErrorContains(t, validateReviewedVisuals(ReportPlan{}, findings, draft, 1), "publication validation")
+}
+
 func TestRevisionRetriesTruncatedAndDisablesThinking(t *testing.T) {
 	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 8192}}, {Content: `{"summary":"ok","markdown":"Evidence [1]"}`}}}
 	a := Activities{LLM: s}
@@ -308,7 +348,29 @@ func TestVisualPipelineRechecksAfterRevision(t *testing.T) {
 	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, visual, first).Return(revised, nil).Once()
 	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, revised, visual.Markdown).Return(final, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, final).Return(reportReview{Status: "pass"}, nil).Once()
-	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, final, mock.MatchedBy(func(r reportReview) bool { return r.Status == "pass" })).Return(nil).Once()
+	env.OnActivity(a.PublishVisualReport, mock.Anything, p, findings, final, mock.MatchedBy(func(r reportReview) bool { return r.Status == "pass" })).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportVisualPipeline(ctx, p, findings, notes)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+}
+
+func TestVisualPipelineReplaysLegacyPublication(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	var notes []string
+	draft := reportDraft{Markdown: "draft"}
+	env.OnGetVersion("report-visual-publish-v3", workflow.DefaultVersion, workflow.Version(1)).Return(workflow.DefaultVersion).Once()
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, notes).Return(draft, nil).Once()
+	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, draft, "").Return(draft, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, draft).Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, draft, mock.Anything).Return(nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
 		return reportVisualPipeline(ctx, p, findings, notes)
@@ -367,7 +429,7 @@ func TestVisualPipelineStopsOnTechnicalFailure(t *testing.T) {
 		return reportVisualPipeline(ctx, p, findings, notes)
 	})
 	require.ErrorContains(t, env.GetWorkflowError(), "visual preparation failed")
-	env.AssertNotCalled(t, "PublishReviewedReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	env.AssertNotCalled(t, "PublishVisualReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestReviewReceivesRenderedChartAndOriginalEvidence(t *testing.T) {
@@ -415,7 +477,7 @@ func TestVisualPipelineStopsWhenReviewRemainsUnresolved(t *testing.T) {
 		return reportVisualPipeline(ctx, p, findings, notes)
 	})
 	require.ErrorContains(t, env.GetWorkflowError(), "unresolved issues")
-	env.AssertNotCalled(t, "PublishReviewedReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	env.AssertNotCalled(t, "PublishVisualReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestAnnualOfficialEvidenceFlowsIntoRenderedChart(t *testing.T) {
