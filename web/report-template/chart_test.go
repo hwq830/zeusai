@@ -196,3 +196,34 @@ func TestCategoryChartCanUseFullMultiYearPeriod(t *testing.T) {
 		}
 	}
 }
+
+func TestEvidenceDecimalTrailingZeros(t *testing.T) {
+	for _, tc := range []struct {
+		text, value string
+		want        bool
+	}{
+		{"25.0", "25", true}, {"80.00", "80", true}, {"25", "25.00", true}, {"25.1000", "25.1", true},
+		{"25.10", "25.100", true}, {"25,000.00", "25000", true}, {"25,000", "25000.00", true},
+		{"0.000", "0", true}, {"0", "0.00", true}, {"25000", "2500", false}, {"2500", "25000.0", false},
+		{"25.01", "25", false}, {"25.0001", "25.0000", false}, {"-25.0", "25", false}, {"−25.0", "25.0", false},
+		{"1,025.00", "25", false}, {"125.0", "25.0", false}, {"25,000.00", "2500", false}, {"25.0", "-25.0", false},
+		{"25", "2.5e1", false}, {"25.0000000000000000001", "25.0000000000000000000", false},
+	} {
+		t.Run(tc.text+"_"+tc.value, func(t *testing.T) {
+			if got := containsEvidenceNumber(tc.text, tc.value); got != tc.want {
+				t.Fatalf("containsEvidenceNumber(%q,%q)=%v, want %v", tc.text, tc.value, got, tc.want)
+			}
+		})
+	}
+}
+func TestChartWithEquivalentDecimalPrecision(t *testing.T) {
+	evidence := "2025 搜索 25.0% 社区 80.00% [1]"
+	if !strings.Contains(FilterCharts(validChart, evidence, 1), "zeus-chart") {
+		t.Fatal("matching values with trailing decimal zeros should be charted")
+	}
+	withDecimals := strings.Replace(validChart, `"value":25`, `"value":25.00`, 1)
+	withDecimals = strings.Replace(withDecimals, `"value":80`, `"value":80.0`, 1)
+	if !strings.Contains(FilterCharts(withDecimals, "2025 搜索 25% 社区 80% [1]", 1), "zeus-chart") {
+		t.Fatal("matching chart decimals should be charted")
+	}
+}
