@@ -57,3 +57,14 @@ func TestInternationalIdentityProviders(t *testing.T) {
 		t.Fatalf("SMTP: %#v", full.Email)
 	}
 }
+
+func TestMockSearchHasMockBrowseReader(t *testing.T) {
+	reader, err := Browse(config.Config{SearchProvider: "mock"})
+	if err != nil || reader == nil {
+		t.Fatalf("mock reader: %v", err)
+	}
+	page, err := reader.Read(context.Background(), "https://news.example.com/example")
+	if err != nil || page.Text == "" || page.Title != "Mock source" {
+		t.Fatalf("mock page is not available: %+v, %v", page, err)
+	}
+}

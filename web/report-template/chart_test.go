@@ -130,3 +130,69 @@ func TestWorldBankGroupedPopulationNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterChartsReportsRejectionCategories(t *testing.T) {
+	filtered, reasons := FilterChartsWithReasons(validChart, "2025 搜索 25% [1]", 1)
+	if strings.Contains(filtered, "zeus-chart") || reasons["missing_evidence"] != 1 {
+		t.Fatalf("unexpected filter result: %v", reasons)
+	}
+	invalid := strings.Replace(validChart, `"type":"bar"`, `"type":"invalid"`, 1)
+	_, reasons = FilterChartsWithReasons(invalid, "2025 搜索 25% 社区 80% [1]", 1)
+	if reasons["invalid_schema"] != 1 {
+		t.Fatalf("unexpected schema result: %v", reasons)
+	}
+}
+
+func TestChartRejectsSwappedCategoryValues(t *testing.T) {
+	evidence := "2025 搜索 25% 社区 80% [1]"
+	swapped := strings.Replace(validChart, `"value":25`, `"value":80`, 1)
+	swapped = strings.Replace(swapped, `"value":80,"source":1}]`, `"value":25,"source":1}]`, 1)
+	if strings.Contains(FilterCharts(swapped, evidence, 1), "zeus-chart") {
+		t.Fatal("swapped values must not be associated with the wrong labels")
+	}
+	if !strings.Contains(FilterCharts(validChart, evidence, 1), "zeus-chart") {
+		t.Fatal("correctly associated values should pass")
+	}
+}
+
+func TestAnnualSourcePassagesUsePointYearsNotInventedRange(t *testing.T) {
+	// ONS Great Britain mid-year population estimates, revised 2026:
+	// https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/timeseries/gbpop/pop
+	evidence := "Great Britain population estimate, people: 2022 65,769,400 [1]\n\nGreat Britain population estimate, people: 2023 66,667,700 [1]\n\nGreat Britain population estimate, people: 2024 67,328,400 [1]"
+	chart := "```zeus-chart\n{\"type\":\"line\",\"title\":\"population\",\"unit\":\"people\",\"period\":\"2022—2024\",\"scope\":\"Great Britain\",\"qualifier\":\"estimate\",\"points\":[{\"label\":\"2022\",\"value\":65769400,\"source\":1},{\"label\":\"2023\",\"value\":66667700,\"source\":1},{\"label\":\"2024\",\"value\":67328400,\"source\":1}]}\n```\n"
+	if !strings.Contains(FilterCharts(chart, evidence, 1), "zeus-chart") {
+		t.Fatal("separate annual cited evidence should support a derived date range")
+	}
+	wrong := strings.Replace(chart, `"period":"2022—2024"`, `"period":"2021—2024"`, 1)
+	if strings.Contains(FilterCharts(wrong, evidence, 1), "zeus-chart") {
+		t.Fatal("range must match the verified endpoint labels")
+	}
+	mismatch := strings.Replace(chart, `"value":66667700`, `"value":67328400`, 1)
+	if strings.Contains(FilterCharts(mismatch, evidence, 1), "zeus-chart") {
+		t.Fatal("a different year's value must not pass")
+	}
+	multi := strings.Replace(chart, `"type":"line"`, `"type":"bar"`, 1)
+	multi = strings.Replace(multi, `"label":"2023","value":66667700,"source":1`, `"label":"2023","value":66667700,"source":2`, 1)
+	multi = strings.Replace(multi, `"label":"2024","value":67328400,"source":1`, `"label":"2024","value":67328400,"source":3`, 1)
+	multiEvidence := strings.Replace(evidence, "2023 66,667,700 [1]", "2023 66,667,700 [2]", 1)
+	multiEvidence = strings.Replace(multiEvidence, "2024 67,328,400 [1]", "2024 67,328,400 [3]", 1)
+	if !strings.Contains(FilterCharts(multi, multiEvidence, 3), "zeus-chart") {
+		t.Fatal("bar chart should allow separately cited years")
+	}
+	if strings.Contains(FilterCharts(strings.Replace(multi, `"type":"bar"`, `"type":"line"`, 1), multiEvidence, 3), "zeus-chart") {
+		t.Fatal("line chart must retain single-source rule")
+	}
+}
+
+func TestCategoryChartCanUseFullMultiYearPeriod(t *testing.T) {
+	evidence := "2023—2025 City A 30 trips City B 20 trips [1]"
+	for _, kind := range []string{"bar", "dot"} {
+		chart := "```zeus-chart\n{\"type\":\"" + kind + "\",\"title\":\"Trips\",\"unit\":\"trips\",\"period\":\"2023—2025\",\"points\":[{\"label\":\"City A\",\"value\":30,\"source\":1},{\"label\":\"City B\",\"value\":20,\"source\":1}]}\n```\n"
+		if !strings.Contains(FilterCharts(chart, evidence, 1), "zeus-chart") {
+			t.Fatalf("%s category chart should accept the sourced full period", kind)
+		}
+		if strings.Contains(FilterCharts(chart, strings.Replace(evidence, "2023—2025", "2023", 1), 1), "zeus-chart") {
+			t.Fatalf("%s must require its full aggregation period", kind)
+		}
+	}
+}

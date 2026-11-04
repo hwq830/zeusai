@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/worker"
 
+	"github.com/hwq830/zeusai/server/internal/browse"
 	"github.com/hwq830/zeusai/server/internal/connector"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
@@ -89,7 +90,7 @@ func setup(t *testing.T) *harness {
 	y, m, d := time.Now().Date()
 	noon := time.Date(y, m, d, 4, 0, 0, 0, time.UTC)
 	notifier := &notify.Service{Q: q, Sender: pushes, Now: func() time.Time { return noon }}
-	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Metered{Provider: llm.Mock{}, Q: q}, Search: search.Mock{},
+	workflows.Register(w, &workflows.Activities{Q: q, Bus: &events.Bus{R: rdb}, LLM: llm.Metered{Provider: llm.Mock{}, Q: q}, Search: search.Mock{}, Browse: browse.Mock{},
 		Push: notifier, Tools: tools, PDF: printer, Blob: files, Notify: notifier, Quota: &quota.Service{Q: q}})
 	if err := w.Start(); err != nil {
 		t.Fatal(err)
