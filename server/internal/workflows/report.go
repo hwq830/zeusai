@@ -216,7 +216,7 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		userMarket = market.Normalize(u.Market)
 	}
 	interests, _ := a.Q.ListInterestMemories(ctx, db.ListInterestMemoriesParams{UserID: run.UserID, Limit: 10})
-	sys, err := render(lang, "plan.md", map[string]any{"Questions": b.Questions, "Focuses": r.Focuses, "Interests": interests, "Lang": string(lang), "Market": userMarket})
+	sys, err := render(lang, "plan.md", map[string]any{"Questions": b.Questions, "Focuses": r.Focuses, "Interests": interests, "Lang": string(lang), "Market": userMarket, "CurrentDate": time.Now().UTC().Format(time.DateOnly)})
 	if err != nil {
 		return ReportPlan{}, err
 	}
@@ -347,11 +347,11 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 			Content string `json:"content"`
 		}
 		list := make([]ps, len(sources))
-		full, readOK := a.readPagesWithStatus(ctx, sources, b.FullPages)
+		full, readOK, attempted := a.readEvidencePages(ctx, sources, b.FullPages)
 		if a.Browse == nil && b.FullPages > 0 {
 			out.SourceReaderUnavailable = true
 		} else {
-			out.SourceReadsAttempted = min(b.FullPages, len(sources))
+			out.SourceReadsAttempted = attempted
 		}
 		for _, ok := range readOK {
 			if ok {
@@ -398,6 +398,8 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 
 var citeRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 var numericExcerptPattern = regexp.MustCompile(`[0-9]`)
+var documentNavigationPattern = regexp.MustCompile(`(?s)(?:页|頁).{0,80}(?:积分|積分)|(?:积分|積分).{0,80}(?:页|頁)`)
+var registrationNumberPattern = regexp.MustCompile(`(?s)(?:信用代码|信用代碼).{0,80}[0-9A-Za-z]{18}`)
 
 // numericSourceExcerpts keeps whole paragraphs, never the trailing clipped fragment.
 func numericSourceExcerpts(text string, source int, clipped bool) []NumericExcerpt {
@@ -431,7 +433,7 @@ func numericSourceExcerptsForQuery(text string, source int, clipped bool, query 
 			end++
 		}
 		text := strings.TrimSpace(strings.Join(lines[start:end], "\n"))
-		if len(text) >= 12 && utf8.RuneCountInString(text) <= 400 && !citeRe.MatchString(text) {
+		if len(text) >= 12 && utf8.RuneCountInString(text) <= 400 && !citeRe.MatchString(text) && !documentNavigationPattern.MatchString(text) && !registrationNumberPattern.MatchString(text) {
 			candidates = append(candidates, NumericExcerpt{Source: source, Text: text})
 		}
 		i = end
@@ -704,6 +706,62 @@ func (a *Activities) readPagesWithStatus(ctx context.Context, sources []search.R
 	}
 	wg.Wait()
 	return out, ok
+}
+
+// readEvidencePages replaces unavailable or obvious soft-error pages with the
+// next search result, retaining original source indices for citations. Keep a
+// hard cap of twice the normal read budget, including unsuccessful reads.
+func (a *Activities) readEvidencePages(ctx context.Context, sources []search.Result, n int) ([]string, []bool, int) {
+	out := make([]string, len(sources))
+	ok := make([]bool, len(sources))
+	if a.Browse == nil || n <= 0 {
+		return out, ok, 0
+	}
+	limit := min(len(sources), 2*n)
+	attempted, succeeded := 0, 0
+	for attempted < limit && succeeded < n && ctx.Err() == nil {
+		batch := min(n-succeeded, limit-attempted)
+		start := attempted
+		var wg sync.WaitGroup
+		for i := start; i < start+batch; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				page, err := a.Browse.Read(ctx, sources[i].URL)
+				if err == nil && usableEvidencePage(page.Text) {
+					out[i], ok[i] = page.Text, true
+				}
+			}(i)
+		}
+		wg.Wait()
+		attempted += batch
+		for _, success := range ok[start:attempted] {
+			if success {
+				succeeded++
+			}
+		}
+	}
+	return out, ok, attempted
+}
+
+// Search results can lead to HTTP 200 error pages. Only reject short pages
+// containing explicit error language; ordinary articles mentioning 404 or
+// unavailable pages should not be discarded as a result.
+func usableEvidencePage(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return false
+	}
+	if utf8.RuneCountInString(t) > 1000 {
+		return true
+	}
+	lower := strings.ToLower(t)
+	for _, marker := range []string{"您访问的页面不见了", "您访问的页面不存在", "您访问的网页不存在", "您访问的页面已删除", "page not found", "404 not found", "page does not exist"} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 const maxToolCalls = 2
