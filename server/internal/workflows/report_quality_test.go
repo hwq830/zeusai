@@ -260,6 +260,7 @@ func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
 
 func TestEmptyVisualRechecksComparableSubsetWithinRetryBudget(t *testing.T) {
 	const empty = `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`
+	const missingReason = `{"charts":[]}`
 	const explained = `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"正文缺少可核对的第二个数值"}`
 	const valid = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
 	const invalid = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":99,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
@@ -270,10 +271,15 @@ func TestEmptyVisualRechecksComparableSubsetWithinRetryBudget(t *testing.T) {
 		wantChart, wantErr  bool
 	}{
 		{"empty then supported chart", empty, valid, true, false},
+		{"missing reason then supported chart", missingReason, valid, true, false},
+		{"missing reason then explained empty", missingReason, explained, false, false},
+		{"missing reason twice", missingReason, missingReason, false, true},
+		{"missing reason then empty without explanation", missingReason, empty, false, true},
 		{"empty twice with explanation", empty, explained, false, false},
 		{"empty twice without explanation", empty, empty, false, true},
 		{"empty then invented value", empty, invalid, false, true},
 		{"malformed then empty without explanation", `{"charts":`, empty, false, true},
+		{"malformed then empty without reason", `{"charts":`, missingReason, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &sequenceProvider{responses: []llm.Response{{Content: tc.first}, {Content: tc.second}}}
@@ -289,6 +295,30 @@ func TestEmptyVisualRechecksComparableSubsetWithinRetryBudget(t *testing.T) {
 			require.Equal(t, tc.wantChart, strings.Contains(got, "```zeus-chart"))
 		})
 	}
+}
+
+func TestMissingNoChartReasonRechecksWithoutExcerptsAndHonorsCancellation(t *testing.T) {
+	const missingReason = `{"charts":[]}`
+	const explained = `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"缺少原文数值"}`
+	findings := []QuestionNotes{{Question: "Q", Notes: "Evidence [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: missingReason}, {Content: explained}}}
+	a := Activities{LLM: s}
+	_, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, "正文 [1]")
+	require.NoError(t, err)
+	require.Len(t, s.requests, 2)
+	s = &sequenceProvider{responses: []llm.Response{{Content: missingReason}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
+	a.LLM = s
+	_, err = a.planReportVisuals(context.Background(), ReportPlan{}, findings, "正文 [1]")
+	require.ErrorContains(t, err, "missing explanation")
+	require.Len(t, s.requests, 2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s = &sequenceProvider{responses: []llm.Response{{Content: missingReason}}}
+	a.LLM = s
+	_, err = a.planReportVisuals(ctx, ReportPlan{}, findings, "正文 [1]")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, s.requests, 1)
 }
 
 func TestVisualPlanIncludesUserTopicAndFocus(t *testing.T) {
