@@ -132,11 +132,13 @@ func (a *Activities) PrepareReportVisuals(ctx context.Context, p ReportPlan, fin
 		return d, nil
 	}
 	attempted, succeeded := 0, 0
+	readerUnavailable := false
 	for _, finding := range findings {
 		attempted += finding.SourceReadsAttempted
 		succeeded += finding.SourceReadsSucceeded
+		readerUnavailable = readerUnavailable || finding.SourceReaderUnavailable
 	}
-	if len(sources) > 0 && attempted > 0 && succeeded == 0 {
+	if len(sources) > 0 && (attempted > 0 || readerUnavailable) && succeeded == 0 {
 		return reportDraft{}, fmt.Errorf("source pages unavailable for visual evidence")
 	}
 	visual, err := a.planReportVisuals(ctx, p, findings, d.Markdown)

@@ -441,6 +441,12 @@ func TestVisualPreparationDistinguishesSourceReadFailure(t *testing.T) {
 	a := Activities{LLM: qualityProvider{result: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}
 	_, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
 	require.ErrorContains(t, err, "source pages unavailable")
+	findings[0].SourceReadsAttempted = 0
+	findings[0].SourceReaderUnavailable = true
+	_, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
+	require.ErrorContains(t, err, "source pages unavailable")
+	findings[0].SourceReaderUnavailable = false
+	findings[0].SourceReadsAttempted = 1
 	findings[0].SourceReadsSucceeded = 1
 	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
 	require.NoError(t, err)

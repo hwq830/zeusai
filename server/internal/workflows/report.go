@@ -100,9 +100,10 @@ type QuestionNotes struct {
 	Notes    string
 	Sources  []search.Result
 	// Numeric excerpts are verbatim source text, with local source indices.
-	NumericExcerpts      []NumericExcerpt `json:",omitempty"`
-	SourceReadsAttempted int              `json:",omitempty"`
-	SourceReadsSucceeded int              `json:",omitempty"`
+	NumericExcerpts         []NumericExcerpt `json:",omitempty"`
+	SourceReadsAttempted    int              `json:",omitempty"`
+	SourceReadsSucceeded    int              `json:",omitempty"`
+	SourceReaderUnavailable bool             `json:",omitempty"`
 }
 type NumericExcerpt struct {
 	Source int
@@ -347,7 +348,11 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 		}
 		list := make([]ps, len(sources))
 		full, readOK := a.readPagesWithStatus(ctx, sources, b.FullPages)
-		out.SourceReadsAttempted = min(b.FullPages, len(sources))
+		if a.Browse == nil && b.FullPages > 0 {
+			out.SourceReaderUnavailable = true
+		} else {
+			out.SourceReadsAttempted = min(b.FullPages, len(sources))
+		}
 		for _, ok := range readOK {
 			if ok {
 				out.SourceReadsSucceeded++

@@ -30,6 +30,13 @@ type Reader interface {
 	Read(ctx context.Context, url string) (Page, error)
 }
 
+// Mock supplies explicitly non-factual content for the mock search environment.
+type Mock struct{}
+
+func (Mock) Read(_ context.Context, raw string) (Page, error) {
+	return Page{URL: raw, Title: "Mock source", Text: "Mock source content. No verifiable numerical observations are provided."}, nil
+}
+
 var ErrBlocked = errors.New("browse: address not allowed")
 
 // blocked covers loopback, private, link-local, CGNAT (Aliyun metadata is 100.100.100.200)
