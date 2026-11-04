@@ -258,11 +258,62 @@ func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
 	}
 }
 
+func TestEmptyVisualRechecksComparableSubsetWithinRetryBudget(t *testing.T) {
+	const empty = `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`
+	const explained = `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"正文缺少可核对的第二个数值"}`
+	const valid = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
+	const invalid = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":99,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
+	findings := []QuestionNotes{{Question: "渠道", Notes: "渠道 [1]", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "2025 搜索 25% 邮件 10%"}}}}
+	body := "2025 搜索 25% 邮件 10% [1]"
+	for _, tc := range []struct {
+		name, first, second string
+		wantChart, wantErr  bool
+	}{
+		{"empty then supported chart", empty, valid, true, false},
+		{"empty twice with explanation", empty, explained, false, false},
+		{"empty twice without explanation", empty, empty, false, true},
+		{"empty then invented value", empty, invalid, false, true},
+		{"malformed then empty without explanation", `{"charts":`, empty, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: []llm.Response{{Content: tc.first}, {Content: tc.second}}}
+			a := Activities{LLM: s}
+			got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+			require.Len(t, s.requests, 2)
+			require.Equal(t, s.requests[0].Messages[0], s.requests[1].Messages[0])
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantChart, strings.Contains(got, "```zeus-chart"))
+		})
+	}
+}
+
+func TestInternalEvidenceStatusRequiresRevision(t *testing.T) {
+	for _, body := range []string{"来源 readStatus 为 unknown", "| 来源 | read/unknown |", "状态 read／unknown"} {
+		a := Activities{LLM: qualityProvider{result: `{"status":"pass","issues":[]}`}}
+		review, err := a.ReviewReport(context.Background(), ReportPlan{Topic: "旅游"}, nil, reportDraft{Markdown: body})
+		require.NoError(t, err)
+		require.Equal(t, "revise", review.Status)
+		require.Equal(t, "high", review.Issues[0].Severity)
+	}
+	// Reports explicitly about a technical field may name it.
+	a := Activities{LLM: qualityProvider{result: `{"status":"pass","issues":[]}`}}
+	review, err := a.ReviewReport(context.Background(), ReportPlan{Topic: "解释 readStatus 字段"}, nil, reportDraft{Markdown: "readStatus 字段"})
+	require.NoError(t, err)
+	require.Equal(t, "pass", review.Status)
+	review, err = a.ReviewReport(context.Background(), ReportPlan{Topic: "未知的数据"}, nil, reportDraft{Markdown: "| 数据 | unknown |"})
+	require.NoError(t, err)
+	require.Equal(t, "pass", review.Status)
+}
+
 func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
 	evidence := "2024 城镇 16.3% 农村 9.9%"
 	findings := []QuestionNotes{{Question: "Q", Notes: "Notes [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp}}, SourceReadStatus: []string{"read"}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
-	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"ok","markdown":"2024 城镇 16.3% 农村 9.9% [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"ok","markdown":"2024 城镇 16.3% 农村 9.9% [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"只有一年数据"}`}}}
 	a := Activities{LLM: s}
 	writeRequest, err := reportDraftRequest(ReportPlan{}, findings, nil)
 	require.NoError(t, err)
@@ -317,7 +368,7 @@ func TestPrepareVisualsProducesSupportedGraphicAndExplainsAbsence(t *testing.T) 
 	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, draft, "")
 	require.NoError(t, err)
 	require.Contains(t, got.Markdown, "```zeus-chart")
-	a.LLM = qualityProvider{result: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}
+	a.LLM = qualityProvider{result: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"正文没有可核对的数值"}`}
 	got, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "如下图所示，资料不足。"}, "")
 	require.NoError(t, err)
 	require.NotContains(t, got.Markdown, "下图")
