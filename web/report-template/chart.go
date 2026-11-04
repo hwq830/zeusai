@@ -17,12 +17,17 @@ import (
 var chartBlock = regexp.MustCompile("(?ms)^```zeus-chart[ \\t]*\\r?\\n(.*?)\\r?\\n```[ \\t]*(?:\\r?\\n|$)")
 var evidenceNumber = regexp.MustCompile(`[-−–—+]?\s*[0-9][0-9,.]*`)
 var validEvidenceNumber = regexp.MustCompile(`^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]+)?$`)
+var validChartDecimal = regexp.MustCompile(`^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$`)
 var dateRange = regexp.MustCompile(`(?i)^\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*(?:—|–|~|至|到|to|-)\s*(\d{4}(?:-\d{2}(?:-\d{2})?)?)\s*$`)
 var valueBeforeDate = regexp.MustCompile(`(?i)^\s*(?:in|for|during|at)\b[^0-9\n;；。]{0,30}$`)
 
 // Match whole nonnegative numeric tokens, accepting conventional thousands
 // separators without treating a negative or part of a grouped number as evidence.
 func containsEvidenceNumber(text, value string) bool {
+	if !validChartDecimal.MatchString(value) {
+		return false
+	}
+	value = trimDecimalZeros(value)
 	for _, token := range evidenceNumber.FindAllString(text, -1) {
 		token = strings.TrimSpace(token)
 		if strings.HasPrefix(token, "-") || strings.HasPrefix(token, "−") || strings.HasPrefix(token, "–") || strings.HasPrefix(token, "—") {
@@ -30,11 +35,19 @@ func containsEvidenceNumber(text, value string) bool {
 		}
 		token = strings.TrimPrefix(token, "+")
 		token = strings.TrimRight(token, ",.")
-		if validEvidenceNumber.MatchString(token) && strings.ReplaceAll(token, ",", "") == value {
+		if validEvidenceNumber.MatchString(token) && trimDecimalZeros(strings.ReplaceAll(token, ",", "")) == value {
 			return true
 		}
 	}
 	return false
+}
+
+// Only trim the fractional part: integer zeroes and all significant digits are retained.
+func trimDecimalZeros(value string) string {
+	if strings.Contains(value, ".") {
+		return strings.TrimSuffix(strings.TrimRight(value, "0"), ".")
+	}
+	return value
 }
 
 // A value must follow its own label in the same clause, without another
