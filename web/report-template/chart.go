@@ -125,6 +125,12 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 		if len(parts) != 2 {
 			return ""
 		}
+		if spec, ok := parseVisualSpec(parts[1]); ok {
+			if ValidateVisualSpec(spec) == nil {
+				return block
+			}
+			return ""
+		}
 		c, ok := parseChart(parts[1], valid)
 		if !ok || (c.Type == "line" && (!chronological(c.Points) || strings.TrimSpace(c.Scope) == "")) {
 			return ""

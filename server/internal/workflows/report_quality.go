@@ -35,6 +35,12 @@ type reportReview struct {
 	Issues []reviewIssue `json:"issues"`
 }
 
+// useVisualAgent switches the report pipeline between the P1 VisualSpec agent
+// (PlanVisuals + deterministic insertion) and the legacy PlanReportVisuals.
+// To roll back after a deployment, change this constant to false; the old
+// activity and filter are intentionally kept.
+const useVisualAgent = true
+
 func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []QuestionNotes, notes []string) error {
 	var a *Activities
 	optional := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 7 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
@@ -42,9 +48,18 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 	if err := workflow.ExecuteActivity(ctx, a.DraftReport, plan, findings, notes).Get(ctx, &draft); err != nil {
 		return err
 	}
-	var visual string
-	if err := workflow.ExecuteActivity(optional, a.PlanReportVisuals, plan, findings).Get(optional, &visual); err == nil && visual != "" {
-		draft.Markdown += "\n\n" + visual
+	var specs []reporttemplate.VisualSpec
+	if useVisualAgent {
+		// Failure isolation: a model/parse/validation error is just "no charts".
+		if err := workflow.ExecuteActivity(optional, a.PlanVisuals, plan, findings).Get(optional, &specs); err != nil {
+			specs = nil
+		}
+		draft.Markdown, _, _ = insertVisuals(plan.TaskID, draft.Markdown, specs)
+	} else {
+		var visual string
+		if err := workflow.ExecuteActivity(optional, a.PlanReportVisuals, plan, findings).Get(optional, &visual); err == nil && visual != "" {
+			draft.Markdown += "\n\n" + visual
+		}
 	}
 	var review reportReview
 	if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &review); err != nil {
@@ -54,6 +69,11 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 		var revised reportDraft
 		if err := workflow.ExecuteActivity(optional, a.ReviseReport, plan, findings, draft, review).Get(optional, &revised); err == nil {
 			draft = revised
+			if useVisualAgent {
+				// ReviseReport rewrites markdown, so charts must be re-inserted
+				// by the same anchor; insertVisuals is idempotent.
+				draft.Markdown, _, _ = insertVisuals(plan.TaskID, draft.Markdown, specs)
+			}
 			var recheck reportReview
 			if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &recheck); err != nil {
 				review.Status = "unavailable"
