@@ -81,3 +81,23 @@ func TestSkippedAttemptIsNotDispatched(t *testing.T) {
 		t.Fatal("skipped provider counted as a dispatched request")
 	}
 }
+
+func TestResultCountUpdatePreservesStatusAndWritesZero(t *testing.T) {
+	store := &memoryStore{}
+	r := &Recorder{Store: store}
+	call, err := r.Start(context.Background(), Begin{Kind: "model", Provider: "deepseek", Dispatched: true}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Finish(context.Background(), End{Status: "success", UsageKnown: true, InputTokens: 10, OutputTokens: 20})
+	call.SetResultCount(context.Background(), 0)
+	end := store.ends[call.begin.ID]
+	if end.Status != "success" || end.ResultCount == nil || *end.ResultCount != 0 {
+		t.Fatalf("zero result count not persisted with status: %+v", end)
+	}
+	call.SetResultCount(context.Background(), 2)
+	end = store.ends[call.begin.ID]
+	if end.ResultCount == nil || *end.ResultCount != 2 {
+		t.Fatalf("result count update missing: %+v", end)
+	}
+}
