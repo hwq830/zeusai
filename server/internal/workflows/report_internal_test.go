@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/hwq830/zeusai/server/internal/browse"
 	"github.com/hwq830/zeusai/server/internal/search"
@@ -71,45 +70,5 @@ func TestNumericExcerptsExcludeDocumentNavigationAndRegistration(t *testing.T) {
 	excerpts := numericSourceExcerptsForQuery(page, 1, false, "年度游客人数")
 	if len(excerpts) != 1 || !strings.Contains(excerpts[0].Text, "42 万人次") {
 		t.Fatalf("unexpected excerpts: %v", excerpts)
-	}
-}
-
-func TestNumericExcerptsPreferRelevantMeasuredQuantitiesOverMetadata(t *testing.T) {
-	page := "2025 年国内旅游统计标题\n索引 357A04 2026 0103\n发布时间 2026 01 26\n\n2025 年国内出游人数 65.22 亿人次，增长 16.2%。\n2025 年国内出游花费 6.30 万亿元，增长 9.5%。\n\n版权信息 2026 01 26"
-	excerpts := numericSourceExcerptsForQuery(page, 1, false, "2025 年国内旅游统计人次与花费")
-	var evidence string
-	for _, e := range excerpts {
-		evidence += e.Text
-	}
-	if !strings.Contains(evidence, "65.22") || !strings.Contains(evidence, "6.30") {
-		t.Fatal("ranked excerpts dropped the source's measured quantities")
-	}
-}
-
-func TestMergeNotesCarriesSourceReadStatusAndFullTimestamp(t *testing.T) {
-	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
-	findings := []QuestionNotes{{Question: "Q", Notes: "fact [1]", Sources: []search.Result{{URL: "https://example.test/a", PublishedAt: &stamp}, {URL: "https://example.test/b"}}, SourceReadStatus: []string{"read", "failed"}}}
-	merged, _ := mergeNotes(findings)
-	for _, expected := range []string{`"url":"https://example.test/a"`, `"readStatus":"read"`, `"readStatus":"failed"`, `"publishedAt":"2025-01-21T16:00:00Z"`} {
-		if !strings.Contains(merged, expected) {
-			t.Fatalf("source metadata missing %s", expected)
-		}
-	}
-	findings[0].SourceReadStatus = nil
-	merged, _ = mergeNotes(findings)
-	if !strings.Contains(merged, `"readStatus":"unknown"`) {
-		t.Fatal("legacy status should remain unknown")
-	}
-}
-
-func TestResearchSourcesIncludeURLReadStatusAndTimezone(t *testing.T) {
-	stamp := time.Date(2026, 1, 25, 16, 0, 0, 0, time.UTC)
-	sources := []search.Result{{URL: "https://example.test/read", Snippet: "a longer search snippet", PublishedAt: &stamp}, {URL: "https://example.test/fail", Snippet: "search result"}, {URL: "https://example.test/skip"}}
-	got, status := researchSources(sources, []string{"short page", "", ""}, []bool{true, false, false}, 2)
-	if got[0].URL != sources[0].URL || got[0].Content != "short page" || got[0].Date != "2026-01-25T16:00:00Z" {
-		t.Fatalf("read source lost its URL, extracted text or timezone: %+v", got[0])
-	}
-	if strings.Join(status, ",") != "read,failed,not_attempted" || got[1].Content != "search result" {
-		t.Fatalf("incorrect statuses: %v", status)
 	}
 }

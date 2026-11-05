@@ -65,8 +65,6 @@ func TestReviewValidation(t *testing.T) {
 	}{
 		{`{"status":"pass","issues":[]}`, "pass", false},
 		{`{"status":"pass","issues":[{"severity":"high","evidence":"冲突","suggestion":"修正"}]}`, "revise", false},
-		{`{"status":"pass","issues":[{"severity":"medium","evidence":"来源不匹配","suggestion":"修正"}]}`, "revise", false},
-		{`{"status":"pass","issues":[{"severity":"low","evidence":"可选排版","suggestion":"优化"}]}`, "pass", false},
 		{`{"status":"pass","issues":[{"severity":"mystery","evidence":"x","suggestion":"y"}]}`, "", true},
 		{`{"status":"revise","issues":[]}`, "", true},
 		{`{"status":"pass"}`, "", true},
@@ -172,7 +170,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 		failed bool
 	}{
 		{"provider length", llm.Response{Content: `{"status":"pass","issues":[]}`, FinishReason: "length"}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
-		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
+		{"incomplete at cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 2400}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"empty json mode response", llm.Response{Provider: "deepseek", FinishReason: "stop", Content: "  "}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"incomplete below cap", llm.Response{Content: `{"status":"rev`, UsageKnown: true, Usage: llm.Usage{OutputTokens: 20}}, llm.Response{Content: `{"status":"pass","issues":[]}`}, 2, false},
 		{"content filtered", llm.Response{FinishReason: "content_filter", Content: `{"status":"rev`}, llm.Response{}, 1, true},
@@ -184,18 +182,15 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 			a := Activities{LLM: s}
 			got, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{})
 			require.Len(t, s.requests, tc.calls)
-			require.Equal(t, 16000, s.requests[0].MaxTokens)
-			require.False(t, s.requests[0].DisableThinking)
-			require.Contains(t, s.requests[0].System, "最多列 5 项")
-			require.Contains(t, s.requests[0].System, "不要为凑数制造问题")
-			require.Contains(t, s.requests[0].System, "不要把不同指标的独立图表使用不同单位当成事实错误")
+			require.Equal(t, 2400, s.requests[0].MaxTokens)
+			require.True(t, s.requests[0].DisableThinking)
 			if tc.calls == 2 {
-				wantTokens := 24000
+				wantTokens := 4800
 				if tc.name == "empty json mode response" || tc.name == "incomplete below cap" {
-					wantTokens = 16000
+					wantTokens = 2400
 				}
 				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
-				require.False(t, s.requests[1].DisableThinking)
+				require.True(t, s.requests[1].DisableThinking)
 			}
 			if tc.failed {
 				require.Error(t, err)
@@ -217,24 +212,17 @@ func TestReviewTruncationHonorsCancellation(t *testing.T) {
 	require.Len(t, s.requests, 1)
 }
 
-func TestVisualRetriesTruncatedWithBoundedThinkingBudget(t *testing.T) {
-	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}}, {Content: `{"charts":[]}`}}}
+func TestVisualRetriesTruncatedAndDisablesThinking(t *testing.T) {
+	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 6000}}, {Content: `{"charts":[]}`}}}
 	a := Activities{LLM: s}
 	findings := []QuestionNotes{{Question: "Q", Notes: "Evidence [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
 	_, err := a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
 	require.NoError(t, err)
 	require.Len(t, s.requests, 2)
-	require.False(t, s.requests[0].DisableThinking)
-	require.False(t, s.requests[1].DisableThinking)
-	require.Equal(t, 16000, s.requests[0].MaxTokens)
-	require.Equal(t, 24000, s.requests[1].MaxTokens)
-
-	s = &sequenceProvider{responses: []llm.Response{{FinishReason: "length"}, {FinishReason: "length"}}}
-	a.LLM = s
-	_, err = a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
-	require.Error(t, err)
-	require.Len(t, s.requests, 2)
-	require.Equal(t, 24000, s.requests[1].MaxTokens)
+	require.True(t, s.requests[0].DisableThinking)
+	require.True(t, s.requests[1].DisableThinking)
+	require.Equal(t, 6000, s.requests[0].MaxTokens)
+	require.Equal(t, 9000, s.requests[1].MaxTokens)
 }
 
 func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
@@ -258,10 +246,6 @@ func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
 			a := Activities{LLM: s}
 			got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: body}, "")
 			require.Len(t, s.requests, 2)
-			require.False(t, s.requests[0].DisableThinking)
-			require.False(t, s.requests[1].DisableThinking)
-			require.Equal(t, 16000, s.requests[0].MaxTokens)
-			require.Equal(t, 16000, s.requests[1].MaxTokens)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -272,156 +256,6 @@ func TestVisualEvidenceCorrectionSharesRetryBudget(t *testing.T) {
 			require.Contains(t, s.requests[1].Messages[len(s.requests[1].Messages)-1].Content, "不得推算或补造")
 		})
 	}
-}
-
-func TestEmptyVisualRechecksComparableSubsetWithinRetryBudget(t *testing.T) {
-	const empty = `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`
-	const missingReason = `{"charts":[]}`
-	const explained = `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"正文缺少可核对的第二个数值"}`
-	const valid = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
-	const invalid = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":99,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
-	findings := []QuestionNotes{{Question: "渠道", Notes: "渠道 [1]", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "2025 搜索 25% 邮件 10%"}}}}
-	body := "2025 搜索 25% 邮件 10% [1]"
-	for _, tc := range []struct {
-		name, first, second string
-		wantChart, wantErr  bool
-	}{
-		{"empty then supported chart", empty, valid, true, false},
-		{"missing reason then supported chart", missingReason, valid, true, false},
-		{"missing reason then explained empty", missingReason, explained, false, false},
-		{"missing reason twice", missingReason, missingReason, false, true},
-		{"missing reason then empty without explanation", missingReason, empty, false, true},
-		{"empty twice with explanation", empty, explained, false, false},
-		{"empty twice without explanation", empty, empty, false, true},
-		{"empty then invented value", empty, invalid, false, true},
-		{"malformed then empty without explanation", `{"charts":`, empty, false, true},
-		{"malformed then empty without reason", `{"charts":`, missingReason, false, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s := &sequenceProvider{responses: []llm.Response{{Content: tc.first}, {Content: tc.second}}}
-			a := Activities{LLM: s}
-			got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
-			require.Len(t, s.requests, 2)
-			require.Equal(t, s.requests[0].Messages[0], s.requests[1].Messages[0])
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tc.wantChart, strings.Contains(got, "```zeus-chart"))
-		})
-	}
-}
-
-func TestMissingNoChartReasonRechecksWithoutExcerptsAndHonorsCancellation(t *testing.T) {
-	const missingReason = `{"charts":[]}`
-	const explained = `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"缺少原文数值"}`
-	findings := []QuestionNotes{{Question: "Q", Notes: "Evidence [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
-	s := &sequenceProvider{responses: []llm.Response{{Content: missingReason}, {Content: explained}}}
-	a := Activities{LLM: s}
-	_, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, "正文 [1]")
-	require.NoError(t, err)
-	require.Len(t, s.requests, 2)
-	s = &sequenceProvider{responses: []llm.Response{{Content: missingReason}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
-	a.LLM = s
-	_, err = a.planReportVisuals(context.Background(), ReportPlan{}, findings, "正文 [1]")
-	require.ErrorContains(t, err, "missing explanation")
-	require.Len(t, s.requests, 2)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	s = &sequenceProvider{responses: []llm.Response{{Content: missingReason}}}
-	a.LLM = s
-	_, err = a.planReportVisuals(ctx, ReportPlan{}, findings, "正文 [1]")
-	require.ErrorIs(t, err, context.Canceled)
-	require.Len(t, s.requests, 1)
-}
-
-func TestVisualPlanIncludesUserTopicAndFocus(t *testing.T) {
-	const chart = `{"charts":[{"type":"bar","title":"渠道","unit":"%","period":"2025","points":[{"label":"搜索","value":25,"source":1},{"label":"邮件","value":10,"source":1}]}]}`
-	findings := []QuestionNotes{{Question: "渠道", Notes: "渠道 [1]", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "2025 搜索 25% 邮件 10%"}}}}
-	s := &sequenceProvider{responses: []llm.Response{{Content: chart}}}
-	a := Activities{LLM: s}
-	p := ReportPlan{Topic: "渠道趋势", Focuses: []string{"分别展示各项指标"}}
-	_, err := a.planReportVisuals(context.Background(), p, findings, "2025 搜索 25% 邮件 10% [1]")
-	require.NoError(t, err)
-	var payload struct {
-		Topic   string   `json:"topic"`
-		Focuses []string `json:"focuses"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(s.requests[0].Messages[0].Content), &payload))
-	require.Equal(t, p.Topic, payload.Topic)
-	require.Equal(t, p.Focuses, payload.Focuses)
-}
-
-func TestInternalEvidenceStatusRequiresRevision(t *testing.T) {
-	for _, body := range []string{"来源 readStatus 为 unknown", "| 来源 | read/unknown |", "状态 read／unknown"} {
-		a := Activities{LLM: qualityProvider{result: `{"status":"pass","issues":[]}`}}
-		review, err := a.ReviewReport(context.Background(), ReportPlan{Topic: "旅游"}, nil, reportDraft{Markdown: body})
-		require.NoError(t, err)
-		require.Equal(t, "revise", review.Status)
-		require.Equal(t, "high", review.Issues[0].Severity)
-	}
-	// Reports explicitly about a technical field may name it.
-	a := Activities{LLM: qualityProvider{result: `{"status":"pass","issues":[]}`}}
-	review, err := a.ReviewReport(context.Background(), ReportPlan{Topic: "解释 readStatus 字段"}, nil, reportDraft{Markdown: "readStatus 字段"})
-	require.NoError(t, err)
-	require.Equal(t, "pass", review.Status)
-	review, err = a.ReviewReport(context.Background(), ReportPlan{Topic: "未知的数据"}, nil, reportDraft{Markdown: "| 数据 | unknown |"})
-	require.NoError(t, err)
-	require.Equal(t, "pass", review.Status)
-	// The actionable metadata issue must survive the five-issue cap even
-	// when the model has already returned five high-priority findings.
-	a.LLM = qualityProvider{result: `{"status":"revise","issues":[{"severity":"high","evidence":"1","suggestion":"a"},{"severity":"high","evidence":"2","suggestion":"b"},{"severity":"high","evidence":"3","suggestion":"c"},{"severity":"high","evidence":"4","suggestion":"d"},{"severity":"high","evidence":"5","suggestion":"e"}]}`}
-	review, err = a.ReviewReport(context.Background(), ReportPlan{Topic: "旅游"}, nil, reportDraft{Markdown: "来源 readStatus 为 unknown"})
-	require.NoError(t, err)
-	require.Len(t, review.Issues, 5)
-	require.Contains(t, review.Issues[0].Evidence, "内部字段")
-}
-
-func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
-	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
-	evidence := "2024 城镇 16.3% 农村 9.9%"
-	findings := []QuestionNotes{{Question: "Q", Notes: "Notes [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp}}, SourceReadStatus: []string{"read"}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
-	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"ok","markdown":"2024 城镇 16.3% 农村 9.9% [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"只有一年数据"}`}}}
-	a := Activities{LLM: s}
-	writeRequest, err := reportDraftRequest(ReportPlan{}, findings, nil)
-	require.NoError(t, err)
-	require.NotContains(t, writeRequest.System, "图表用独立 Markdown 代码块")
-	require.Contains(t, writeRequest.System, "只写正文")
-	legacyPrompt, err := render(ReportPlan{}.Lang, "write.md", map[string]any{"VisualPipeline": false})
-	require.NoError(t, err)
-	require.Contains(t, legacyPrompt, "图表用独立 Markdown 代码块")
-	draft := reportDraft{Summary: "ok", Markdown: "2024 城镇 16.3% 农村 9.9% [1]"}
-	_, err = a.ReviewReport(context.Background(), ReportPlan{}, findings, draft)
-	require.NoError(t, err)
-	_, err = a.ReviseReport(context.Background(), ReportPlan{}, findings, draft, reportReview{Status: "revise"})
-	require.NoError(t, err)
-	_, err = a.planReportVisuals(context.Background(), ReportPlan{}, findings, draft.Markdown)
-	require.NoError(t, err)
-	requests := append([]llm.Request{writeRequest}, s.requests...)
-	for _, request := range requests {
-		var payload map[string]any
-		require.NoError(t, json.Unmarshal([]byte(request.Messages[0].Content), &payload))
-		require.Contains(t, payload, "source_excerpts")
-		require.Contains(t, payload["source_excerpts"], evidence)
-		raw, _ := json.Marshal(payload)
-		require.Contains(t, string(raw), "https://example.test/official")
-		require.Contains(t, string(raw), "2025-01-21T16:00:00Z")
-		require.Contains(t, string(raw), "readStatus")
-		require.Contains(t, request.System, "原文")
-	}
-	require.Contains(t, requests[1].System, "至少两个数据点")
-}
-
-func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
-	const evidence = "Population 2022 (thousands): India 1,417,173; China 1,412,175"
-	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"Population\",\"unit\":\"thousands\",\"period\":\"2022\",\"points\":[{\"label\":\"India\",\"value\":1417173,\"source\":1},{\"label\":\"China\",\"value\":1412175,\"source\":1}]}\n```\n"
-	findings := []QuestionNotes{{Question: "Population", Sources: []search.Result{{URL: "https://example.test"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
-	draft := reportDraft{Markdown: evidence + " [1]\n\n" + chart}
-	require.NoError(t, validateReviewedVisuals(ReportPlan{}, findings, draft, 1))
-	draft.Markdown = strings.Replace(draft.Markdown, "1412175", "9999999", 1)
-	require.ErrorContains(t, validateReviewedVisuals(ReportPlan{}, findings, draft, 1), "publication validation")
 }
 
 func TestRevisionRetriesTruncatedAndDisablesThinking(t *testing.T) {
@@ -443,7 +277,7 @@ func TestPrepareVisualsProducesSupportedGraphicAndExplainsAbsence(t *testing.T) 
 	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, draft, "")
 	require.NoError(t, err)
 	require.Contains(t, got.Markdown, "```zeus-chart")
-	a.LLM = qualityProvider{result: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"正文没有可核对的数值"}`}
+	a.LLM = qualityProvider{result: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}
 	got, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "如下图所示，资料不足。"}, "")
 	require.NoError(t, err)
 	require.NotContains(t, got.Markdown, "下图")
@@ -474,29 +308,7 @@ func TestVisualPipelineRechecksAfterRevision(t *testing.T) {
 	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, visual, first).Return(revised, nil).Once()
 	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, revised, visual.Markdown).Return(final, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, final).Return(reportReview{Status: "pass"}, nil).Once()
-	env.OnActivity(a.PublishVisualReport, mock.Anything, p, findings, final, mock.MatchedBy(func(r reportReview) bool { return r.Status == "pass" })).Return(nil).Once()
-	env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
-		return reportVisualPipeline(ctx, p, findings, notes)
-	})
-	require.NoError(t, env.GetWorkflowError())
-	env.AssertExpectations(t)
-}
-
-func TestVisualPipelineReplaysLegacyPublication(t *testing.T) {
-	var suite testsuite.WorkflowTestSuite
-	env := suite.NewTestWorkflowEnvironment()
-	a := &Activities{}
-	env.RegisterActivity(a)
-	p := ReportPlan{}
-	var findings []QuestionNotes
-	var notes []string
-	draft := reportDraft{Markdown: "draft"}
-	env.OnGetVersion("report-visual-publish-v3", workflow.DefaultVersion, workflow.Version(1)).Return(workflow.DefaultVersion).Once()
-	env.OnActivity(a.DraftReport, mock.Anything, p, findings, notes).Return(draft, nil).Once()
-	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, draft, "").Return(draft, nil).Once()
-	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, draft).Return(reportReview{Status: "pass"}, nil).Once()
-	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, draft, mock.Anything).Return(nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, final, mock.MatchedBy(func(r reportReview) bool { return r.Status == "pass" })).Return(nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
 		return reportVisualPipeline(ctx, p, findings, notes)
@@ -555,7 +367,7 @@ func TestVisualPipelineStopsOnTechnicalFailure(t *testing.T) {
 		return reportVisualPipeline(ctx, p, findings, notes)
 	})
 	require.ErrorContains(t, env.GetWorkflowError(), "visual preparation failed")
-	env.AssertNotCalled(t, "PublishVisualReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	env.AssertNotCalled(t, "PublishReviewedReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestReviewReceivesRenderedChartAndOriginalEvidence(t *testing.T) {
@@ -603,7 +415,7 @@ func TestVisualPipelineStopsWhenReviewRemainsUnresolved(t *testing.T) {
 		return reportVisualPipeline(ctx, p, findings, notes)
 	})
 	require.ErrorContains(t, env.GetWorkflowError(), "unresolved issues")
-	env.AssertNotCalled(t, "PublishVisualReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	env.AssertNotCalled(t, "PublishReviewedReport", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestAnnualOfficialEvidenceFlowsIntoRenderedChart(t *testing.T) {

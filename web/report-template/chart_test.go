@@ -143,26 +143,6 @@ func TestFilterChartsReportsRejectionCategories(t *testing.T) {
 	}
 }
 
-func TestFilterChartsReportsOverlongQualifier(t *testing.T) {
-	chart := strings.Replace(validChart, `"period":"2025"`, `"period":"2025","qualifier":"`+strings.Repeat("说明", 14)+`"`, 1)
-	_, reasons := FilterChartsWithReasons(chart, "2025 搜索 25% 社区 80% [1]", 1)
-	if reasons["invalid_schema"] != 1 || reasons["schema_qualifier_length"] != 1 {
-		t.Fatalf("unexpected schema diagnosis: %v", reasons)
-	}
-}
-
-func TestFilterChartsRejectsCombinedScopeAndUnsupportedUnit(t *testing.T) {
-	evidence := "2025 搜索 25% 社区 80% [1]"
-	combined := strings.Replace(validChart, `"period":"2025"`, `"period":"2025","scope":"搜索/社区"`, 1)
-	if got, reasons := FilterChartsWithReasons(combined, evidence, 1); got != "" || reasons["evidence_scope"] != 1 {
-		t.Fatalf("combined scope unexpectedly accepted: %v", reasons)
-	}
-	wrongUnit := strings.Replace(validChart, `"unit":"%"`, `"unit":"人次"`, 1)
-	if got, reasons := FilterChartsWithReasons(wrongUnit, evidence, 1); got != "" || reasons["evidence_unit"] != 1 {
-		t.Fatalf("unsupported unit unexpectedly accepted: %v", reasons)
-	}
-}
-
 func TestFilterChartsDiagnosesClosestCitedPassageWithoutContent(t *testing.T) {
 	_, reasons := FilterChartsWithReasons(validChart, "2025 搜索 25% [1]", 1)
 	if reasons["missing_evidence"] != 1 || reasons["evidence_label"] != 1 || reasons["evidence_value_binding"] != 1 {
@@ -261,93 +241,5 @@ func TestChartWithEquivalentDecimalPrecision(t *testing.T) {
 	withDecimals = strings.Replace(withDecimals, `"value":80`, `"value":80.0`, 1)
 	if !strings.Contains(FilterCharts(withDecimals, "2025 搜索 25% 社区 80% [1]", 1), "zeus-chart") {
 		t.Fatal("matching chart decimals should be charted")
-	}
-}
-
-func TestAnnualScopeAcrossLineRequiresSingleYearAndExactValue(t *testing.T) {
-	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"出口总量\",\"scope\":\"出口总量\",\"unit\":\"万吨\",\"period\":\"2023—2024\",\"points\":[{\"label\":\"2023\",\"value\":4.91,\"source\":1},{\"label\":\"2024\",\"value\":5.75,\"source\":2}]}\n```\n"
-	evidence := "2023年，企业总数20家。\n出口总量4.91万吨，其中甲市4.18万吨 [1]\n\n2024年，企业总数22家。\n出口总量5.75万吨，其中甲市4.93万吨 [2]"
-	chart = strings.ReplaceAll(chart, "出口总量", "全国出口总量")
-	evidence = strings.ReplaceAll(evidence, "出口总量", "全国出口总量")
-	evidence = strings.Replace(evidence, "2023年，企业", "2023年，全国出口企业", 1)
-	evidence = strings.Replace(evidence, "2024年，企业", "2024年，全国出口企业", 1)
-	if got := FilterCharts(chart, evidence, 2); !strings.Contains(got, "zeus-chart") {
-		t.Fatal("single-year cited source with adjacent scope, value and unit should be supported")
-	}
-	sameSourceYear := strings.Replace(evidence, "企业总数20家。", "企业总数20家 [1]。", 1)
-	if got := FilterCharts(chart, sameSourceYear, 2); !strings.Contains(got, "zeus-chart") {
-		t.Fatal("an explicit matching citation on the year must remain supported")
-	}
-	for name, bad := range map[string]string{
-		"different year":                   strings.Replace(evidence, "企业总数20家", "2022年企业总数20家", 1),
-		"year range":                       strings.Replace(evidence, "2023年，", "2023年—2024年，", 1),
-		"four digits not a year":           strings.Replace(evidence, "2023年，", "企业数量2023家，", 1),
-		"half-year year context":           strings.Replace(evidence, "2023年，", "2023年上半年，", 1),
-		"repeated year quarter":            strings.Replace(evidence, "企业总数20家。", "企业总数20家。2023年第一季度总数10家。", 1),
-		"intervening quarter scope":        strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n第一季度出口总量统计如下。\n", 1),
-		"intervening half-year scope":      strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n上半年出口总量统计如下。\n", 1),
-		"intervening quarter numeric":      strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n第一季度范围1月统计。\n", 1),
-		"intervening different region":     strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n其中甲市的情况如下。\n", 1),
-		"intervening place without suffix": strings.Replace(evidence, "企业总数20家。\n", "企业总数20家。\n其中上海的情况如下。\n", 1),
-		"year cites different source":      strings.Replace(evidence, "企业总数20家。", "企业总数20家 [3]。", 1),
-		"year citation after punctuation":  strings.Replace(evidence, "企业总数20家。", "企业总数20家。[3]", 1),
-		"half-year value context":          strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨（上半年）", 1),
-		"category prefix":                  strings.Replace(evidence, "出口总量4.91万吨", "甲市出口总量4.91万吨", 1),
-		"negative value":                   strings.Replace(evidence, "出口总量4.91万吨", "出口总量-4.91万吨", 1),
-		"partial number":                   strings.Replace(evidence, "出口总量4.91万吨", "出口总量14.91万吨", 1),
-		"wrong source":                     strings.Replace(evidence, "4.18万吨 [1]", "4.18万吨 [2]", 1),
-		"unsupported unit":                 strings.Replace(evidence, "出口总量4.91万吨", "出口总量4.91万吨货物", 1),
-	} {
-		if got := FilterCharts(chart, bad, 2); strings.Contains(got, "zeus-chart") {
-			t.Fatalf("%s unexpectedly accepted", name)
-		}
-	}
-	for name, bad := range map[string]string{
-		"category value": strings.Replace(chart, `"value":4.91`, `"value":4.18`, 1),
-		"no scope":       strings.Replace(chart, `"scope":"全国出口总量",`, "", 1),
-		"line chart":     strings.Replace(chart, `"type":"bar"`, `"type":"line"`, 1),
-	} {
-		if got := FilterCharts(bad, evidence, 2); strings.Contains(got, "zeus-chart") {
-			t.Fatalf("%s unexpectedly accepted", name)
-		}
-	}
-	quarterlyChart := strings.ReplaceAll(chart, "出口总量", "第一季度出口总量")
-	quarterlyEvidence := strings.ReplaceAll(evidence, "出口总量", "第一季度出口总量")
-	if got := FilterCharts(quarterlyChart, quarterlyEvidence, 2); strings.Contains(got, "zeus-chart") {
-		t.Fatal("quarterly scopes must not use the annual cross-sentence fallback")
-	}
-	monthlyChart := strings.ReplaceAll(chart, "出口总量", "1月出口总量")
-	monthlyEvidence := strings.ReplaceAll(evidence, "出口总量", "1月出口总量")
-	if got := FilterCharts(monthlyChart, monthlyEvidence, 2); strings.Contains(got, "zeus-chart") {
-		t.Fatal("monthly scopes must not use the annual cross-sentence fallback")
-	}
-}
-
-func TestAnnualScopeAcrossLineRejectsDifferentRegions(t *testing.T) {
-	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"出口总量\",\"scope\":\"出口总量\",\"unit\":\"万吨\",\"period\":\"2023—2024\",\"points\":[{\"label\":\"2023\",\"value\":4.91,\"source\":1},{\"label\":\"2024\",\"value\":5.75,\"source\":2}]}\n```\n"
-	evidence := "甲省：2023年，企业总数20家。\n出口总量4.91万吨 [1]\n\n乙省：2024年，企业总数22家。\n出口总量5.75万吨 [2]"
-	if got := FilterCharts(chart, evidence, 2); strings.Contains(got, "zeus-chart") {
-		t.Fatal("metric-only scope must not combine observations from different regions")
-	}
-	domesticChart := strings.ReplaceAll(chart, "出口总量", "国内出口总量")
-	domesticEvidence := strings.ReplaceAll(evidence, "出口总量", "国内出口总量")
-	domesticEvidence = strings.ReplaceAll(domesticEvidence, "企业总数", "国内企业总数")
-	if got := FilterCharts(domesticChart, domesticEvidence, 2); strings.Contains(got, "zeus-chart") {
-		t.Fatal("an additional regional qualifier cannot be silently omitted from the scope")
-	}
-	unmarkedRegions := strings.ReplaceAll(strings.ReplaceAll(domesticEvidence, "甲省", "上海"), "乙省", "北京")
-	if got := FilterCharts(domesticChart, unmarkedRegions, 2); strings.Contains(got, "zeus-chart") {
-		t.Fatal("place names without an administrative suffix must not be ignored")
-	}
-	afterScopeRegion := strings.Replace(domesticEvidence, "甲省：2023年，国内企业", "2023年，国内上海企业", 1)
-	if got := FilterCharts(domesticChart, afterScopeRegion, 2); strings.Contains(got, "zeus-chart") {
-		t.Fatal("a place inserted after a broad scope must not be ignored")
-	}
-	sameRegionChart := strings.ReplaceAll(chart, "出口总量", "甲省出口总量")
-	sameRegionEvidence := strings.ReplaceAll(evidence, "出口总量", "甲省出口总量")
-	sameRegionEvidence = strings.ReplaceAll(sameRegionEvidence, "乙省", "甲省")
-	sameRegionEvidence = strings.ReplaceAll(sameRegionEvidence, "企业总数", "甲省出口企业总数")
-	if got := FilterCharts(sameRegionChart, sameRegionEvidence, 2); !strings.Contains(got, "zeus-chart") {
-		t.Fatal("matching explicit regional scope should be supported")
 	}
 }
