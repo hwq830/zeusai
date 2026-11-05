@@ -60,3 +60,47 @@ func TestContentsControlsAreLocalisedIcons(t *testing.T) {
 		}
 	}
 }
+
+func TestTrimLeadingTitle(t *testing.T) {
+	cases := []struct {
+		name, markdown, title, want string
+	}{
+		{"matching", "# 标题\n\n## A\n\n正文", "标题", "## A\n\n正文"},
+		{"different", "# 别的标题\n\n## A", "标题", "# 别的标题\n\n## A"},
+		{"h2 untouched", "## 标题\n\n正文", "标题", "## 标题\n\n正文"},
+		{"collapsed whitespace", "#  报告   标题 \n\n## A", "报告 标题", "## A"},
+		{"leading blank lines", "\n\n# 标题\n\n## A", "标题", "## A"},
+		{"title only", "# 标题\n", "标题", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TrimLeadingTitle(tc.markdown, tc.title); got != tc.want {
+				t.Fatalf("TrimLeadingTitle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderDeduplicatesMatchingH1(t *testing.T) {
+	out, err := Render(Data{Title: "报告标题", Markdown: "# 报告标题\n\n## A\n\n正文"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if got := strings.Count(html, "<h1>"); got != 1 {
+		t.Fatalf("matching leading H1 rendered %d times, want 1", got)
+	}
+	if !strings.Contains(html, "<h2>A</h2>") {
+		t.Fatal("body content lost")
+	}
+}
+
+func TestRenderKeepsDifferentLeadingH1(t *testing.T) {
+	out, err := Render(Data{Title: "报告标题", Markdown: "# 作者按\n\n## A\n\n正文"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(out), "<h1>"); got != 2 {
+		t.Fatalf("different leading H1 rendered %d h1 elements, want 2", got)
+	}
+}
