@@ -186,6 +186,11 @@ func buildReportEvidence(findings []QuestionNotes) reportEvidence {
 		}
 		add := func(source int, text string) {
 			idx, ok := local[source]
+			// Old histories may lack statuses, but an explicit failed or untried
+			// read cannot contribute a passage for this occurrence.
+			if source > 0 && source <= len(f.SourceReadStatus) && (f.SourceReadStatus[source-1] == "failed" || f.SourceReadStatus[source-1] == "not_attempted") {
+				return
+			}
 			text = strings.TrimSpace(text)
 			if !ok || text == "" {
 				return

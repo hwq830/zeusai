@@ -67,33 +67,22 @@ func hintClauses(s string) []string {
 // and report context are included so the model can check scope independently.
 // It never assembles values into a chart or equates the scope of two sources.
 func visualCandidateHints(findings []QuestionNotes, markdown string, sourceCount int) []visualCandidateHint {
-	sourceIndex := map[string]int{}
 	type sourceObservation struct {
 		value, context string
 	}
 	sourceFacts := map[annualHintFact][]sourceObservation{}
-	for _, finding := range findings {
-		local := map[int]int{}
-		for i, source := range finding.Sources {
-			idx, ok := sourceIndex[source.URL]
-			if !ok {
-				idx = len(sourceIndex) + 1
-				sourceIndex[source.URL] = idx
-			}
-			local[i+1] = idx
-		}
-		for _, excerpt := range finding.NumericExcerpts {
-			idx, ok := local[excerpt.Source]
-			if !ok || utf8.RuneCountInString(excerpt.Text) > 1200 {
+	for _, source := range buildReportEvidence(findings).Sources {
+		for _, excerpt := range source.Excerpts {
+			if utf8.RuneCountInString(excerpt) > 1200 {
 				continue
 			}
-			for _, clause := range hintClauses(excerpt.Text) {
+			for _, clause := range hintClauses(excerpt) {
 				if utf8.RuneCountInString(clause) > 800 {
 					continue
 				}
 				for _, obs := range annualHintFacts(clause) {
-					fact := annualHintFact{key: obs.key, source: idx}
-					sourceFacts[fact] = append(sourceFacts[fact], sourceObservation{value: obs.rawValue, context: excerpt.Text})
+					fact := annualHintFact{key: obs.key, source: source.Index}
+					sourceFacts[fact] = append(sourceFacts[fact], sourceObservation{value: obs.rawValue, context: excerpt})
 				}
 			}
 		}
