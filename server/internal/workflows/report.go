@@ -594,7 +594,7 @@ func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results [
 		Markdown string `json:"markdown"`
 	}
 	if _, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{
-		Purpose: "report.write", Tier: llm.TierStrong, System: sys + reportEvidenceRules,
+		Purpose: "report.write", Tier: llm.TierStrong, System: sys,
 		Messages: []llm.Message{{Role: "user", Content: "<notes>\n" + merged + "</notes>"}},
 		UserID:   &plan.UserID, TaskID: &plan.TaskID,
 	}, &out); err != nil {
