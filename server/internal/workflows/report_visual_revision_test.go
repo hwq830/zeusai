@@ -236,6 +236,20 @@ func TestPartialVisualCorrectionReportsBodyRejection(t *testing.T) {
 	require.Contains(t, feedback, `"missing_evidence":1`)
 }
 
+func TestScopeOnlyRejectionGetsShortScopeCorrectionWithinBudget(t *testing.T) {
+	findings, body := revisionEvidence()
+	badScope := strings.Replace(revisionNewChart, `"scope":"国内出游"`, `"scope":"国内出游规模"`, 1)
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":[` + badScope + `]}`}, {Content: `{"charts":[]}`}}}
+	a := Activities{LLM: provider}
+	_, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.Error(t, err)
+	require.Len(t, provider.requests, 2)
+	feedback := provider.requests[1].Messages[len(provider.requests[1].Messages)-1].Content
+	require.Contains(t, feedback, `"evidence_scope":1`)
+	require.Contains(t, feedback, "更短共同短语")
+	require.Contains(t, feedback, "不要扩写")
+}
+
 func TestMalformedFirstResponseUsesTheSharedPartialRetryBudget(t *testing.T) {
 	findings, body := revisionEvidence()
 	old := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")

@@ -149,23 +149,23 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	}()
 	resp, err := hc.Do(hreq)
 	if err != nil {
-		return Response{}, err
+		return Response{Call: trace}, err
 	}
 	defer resp.Body.Close()
 	httpStatus = resp.StatusCode
 	requestID = resp.Header.Get("X-Request-Id")
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if readErr != nil {
-		return Response{}, readErr
+		return Response{Call: trace}, readErr
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Response{}, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 512)]))}
+		return Response{Call: trace}, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 512)]))}
 	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
-		return Response{}, err
+		return Response{Call: trace}, err
 	}
-	out = Response{Provider: c.Name, Model: cr.Model, RequestID: cr.ID, UsageKnown: cr.Usage != nil}
+	out = Response{Provider: c.Name, Model: cr.Model, RequestID: cr.ID, UsageKnown: cr.Usage != nil, Call: trace}
 	if cr.Usage != nil {
 		out.Usage = Usage{InputTokens: cr.Usage.PromptTokens, OutputTokens: cr.Usage.CompletionTokens, CachedTokens: cr.Usage.PromptTokensDetails.CachedTokens}
 		out.ReasoningTokens = cr.Usage.CompletionTokensDetails.ReasoningTokens

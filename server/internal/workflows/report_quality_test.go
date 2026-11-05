@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/search"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
@@ -937,4 +940,84 @@ func TestRevisionMalformedJSONHonorsCancellation(t *testing.T) {
 	_, err := a.ReviseReport(ctx, ReportPlan{}, nil, reportDraft{}, reportReview{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, s.requests, 1)
+}
+
+type callResultProvider struct {
+	responses []llm.Response
+}
+
+func (p *callResultProvider) Complete(context.Context, llm.Request) (llm.Response, error) {
+	if len(p.responses) == 0 {
+		return llm.Response{}, errors.New("unexpected call")
+	}
+	out := p.responses[0]
+	p.responses = p.responses[1:]
+	return out, nil
+}
+
+type visualResultStore struct {
+	ends map[uuid.UUID]calllog.End
+}
+
+func (s *visualResultStore) Start(context.Context, calllog.Begin) error { return nil }
+func (s *visualResultStore) Finish(_ context.Context, id uuid.UUID, e calllog.End) error {
+	s.ends[id] = e
+	return nil
+}
+
+func newVisualCall(t *testing.T, store *visualResultStore) *calllog.Call {
+	t.Helper()
+	rec := &calllog.Recorder{Store: store}
+	call, err := rec.Start(context.Background(), calllog.Begin{Kind: "model", Provider: "deepseek", Scope: calllog.Scope{Purpose: "report.visual"}}, time.Minute)
+	require.NoError(t, err)
+	call.Finish(context.Background(), calllog.End{Status: "success", UsageKnown: true, InputTokens: 10, OutputTokens: 20})
+	return call
+}
+
+func TestVisualPromptDistinguishesGrowthFromChartability(t *testing.T) {
+	findings, body := revisionEvidence()
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":[]}`}, {Content: `{"charts":[]}`}}}
+	a := Activities{LLM: provider}
+	_, _ = a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NotEmpty(t, provider.requests)
+	system := provider.requests[0].System
+	require.Contains(t, system, "同指标、同单位、同统计对象")
+	require.Contains(t, system, "不能计算 CAGR/增速")
+	require.Contains(t, system, "不要强行出图")
+}
+
+func TestVisualResultCountRecordsAcceptedCharts(t *testing.T) {
+	findings, body := revisionEvidence()
+	store := &visualResultStore{ends: map[uuid.UUID]calllog.End{}}
+	call := newVisualCall(t, store)
+	provider := &callResultProvider{responses: []llm.Response{{Content: `{"charts":[` + revisionNewChart + `]}`, Call: call}}}
+	a := Activities{LLM: provider}
+	got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NoError(t, err)
+	require.Contains(t, got, "```zeus-chart")
+	require.Len(t, store.ends, 1)
+	for _, end := range store.ends {
+		require.NotNil(t, end.ResultCount)
+		require.Equal(t, 1, *end.ResultCount)
+	}
+}
+
+func TestVisualResultCountWritesZeroWhenNoChartAccepted(t *testing.T) {
+	findings, body := revisionEvidence()
+	store := &visualResultStore{ends: map[uuid.UUID]calllog.End{}}
+	first := newVisualCall(t, store)
+	second := newVisualCall(t, store)
+	provider := &callResultProvider{responses: []llm.Response{
+		{Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`, Call: first},
+		{Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"没有可比数据"}`, Call: second},
+	}}
+	a := Activities{LLM: provider}
+	got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Len(t, store.ends, 2)
+	for _, end := range store.ends {
+		require.NotNil(t, end.ResultCount)
+		require.Equal(t, 0, *end.ResultCount)
+	}
 }

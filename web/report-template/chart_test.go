@@ -180,6 +180,30 @@ func TestFilterChartsAcceptsOriginalNumericUnitAndRejectsMismatch(t *testing.T) 
 	}
 }
 
+func TestFilterChartsNormalizesOnlyPresentationDifferences(t *testing.T) {
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"出口总量\",\"scope\":\"甲省出口总量\",\"unit\":\"亿元\",\"period\":\"2023—2024\",\"points\":[{\"label\":\"2023\",\"value\":48.91,\"source\":1},{\"label\":\"2024\",\"value\":56.15,\"source\":1}]}\n```\n"
+	evidence := "2023 年 甲省 出口 总量 48.91 亿元 [1]\n\n2024 年 甲省 出口 总量 56.15 亿元 [1]"
+	if got, reasons := FilterChartsWithReasons(chart, evidence, 1); !strings.Contains(got, "zeus-chart") {
+		t.Fatalf("whitespace should be normalized: %v", reasons)
+	}
+	fullWidth := "２０２３年 甲省 出口 总量 ４８.９１ 亿元 [1]\n\n２０２４年 甲省 出口 总量 ５６.１５ 亿元 [1]"
+	if got, reasons := FilterChartsWithReasons(chart, fullWidth, 1); !strings.Contains(got, "zeus-chart") {
+		t.Fatalf("full-width digits should be normalized: %v", reasons)
+	}
+	bad := strings.Replace(chart, `"scope":"甲省出口总量"`, `"scope":"甲省出口总量与全国"`, 1)
+	if got, reasons := FilterChartsWithReasons(bad, evidence, 1); got != "" || reasons["evidence_scope"] != 1 {
+		t.Fatalf("a scope absent after normalization must be rejected: %v", reasons)
+	}
+}
+
+func TestFilterChartsDoesNotNormalizeTypos(t *testing.T) {
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"政务云\",\"scope\":\"中国政务云\",\"unit\":\"亿元\",\"period\":\"2023\",\"points\":[{\"label\":\"整体\",\"value\":794.5,\"source\":1},{\"label\":\"专属云\",\"value\":557.6,\"source\":1}]}\n```\n"
+	evidence := "2023中国年政务云整体市场规模为794.5亿元 [1]。政务专属云市场规模达557.6亿元 [1]。"
+	if got, reasons := FilterChartsWithReasons(chart, evidence, 1); got != "" || reasons["evidence_scope"] != 1 {
+		t.Fatalf("normalization must not expand or repair a typo: %v", reasons)
+	}
+}
+
 func TestFilterChartsDiagnosesClosestCitedPassageWithoutContent(t *testing.T) {
 	_, reasons := FilterChartsWithReasons(validChart, "2025 搜索 25% [1]", 1)
 	if reasons["missing_evidence"] != 1 || reasons["evidence_label"] != 1 || reasons["evidence_value_binding"] != 1 {
