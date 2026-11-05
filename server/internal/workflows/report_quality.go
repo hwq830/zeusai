@@ -491,6 +491,77 @@ func retryStructured(resp llm.Response, err error, limit int) bool {
 		(resp.Provider != "" && resp.FinishReason == "stop" && strings.TrimSpace(resp.Content) == "")
 }
 
+// Review responses are small, but DeepSeek consumes the whole output budget
+// with reasoning before it starts the JSON answer. A second reasoning-heavy
+// call at 24000 tokens only buys more reasoning, so the retry switches
+// thinking off and uses a cap that fits the JSON itself.
+const reviewFallbackMaxTokens = 4096
+
+// reviewReasoningSharePercent is the reasoning share above which a malformed
+// review response is treated as budget exhaustion rather than a formatting
+// error. It is consulted only after the first call already failed.
+const reviewReasoningSharePercent = 60
+
+type reviewRetryMode string
+
+const (
+	reviewRetryNone       reviewRetryMode = "none"
+	reviewRetryFormat     reviewRetryMode = "format"
+	reviewRetryNoThinking reviewRetryMode = "no_thinking"
+)
+
+const reviewNoThinkingInstruction = "\n这是兜底输出：不要复述证据或解释过程，直接输出一个完整合法的 JSON 对象；最多列 3 项 high 或 medium 问题，每项 evidence 与 suggestion 各不超过 100 字；无实质问题时返回 status=pass、issues=[]。"
+
+// decideReviewRetry picks the single bounded review retry. A valid review needs
+// no retry even when reasoning used almost all of the output budget; only a
+// failed structural result can select the non-thinking fallback.
+func decideReviewRetry(resp llm.Response, err error, limit int) reviewRetryMode {
+	if err == nil {
+		return reviewRetryNone
+	}
+	if resp.FinishReason != "" && resp.FinishReason != "stop" && resp.FinishReason != "length" {
+		return reviewRetryNone
+	}
+	if outputTruncated(resp, err, limit) {
+		return reviewRetryNoThinking
+	}
+	if resp.Provider != "" && resp.FinishReason == "stop" && strings.TrimSpace(resp.Content) == "" {
+		return reviewRetryNoThinking
+	}
+	var syntax *json.SyntaxError
+	if resp.Content != "" && errors.As(err, &syntax) {
+		if reviewReasoningDominant(resp, limit) {
+			return reviewRetryNoThinking
+		}
+		return reviewRetryFormat
+	}
+	return reviewRetryNone
+}
+
+// reviewReasoningDominant reports whether the failed response spent most of its
+// output on reasoning. Providers may omit reasoning_tokens; then a nearly full
+// output budget is the only available signal.
+func reviewReasoningDominant(resp llm.Response, limit int) bool {
+	if !resp.UsageKnown || resp.Usage.OutputTokens <= 0 {
+		return false
+	}
+	if resp.ReasoningTokens > 0 {
+		return resp.ReasoningTokens*100 >= resp.Usage.OutputTokens*reviewReasoningSharePercent
+	}
+	return resp.ReasoningContentPresent && limit > 0 && resp.Usage.OutputTokens*5 >= limit*4
+}
+
+func reviewReasoningPercent(resp llm.Response) int {
+	if !resp.UsageKnown || resp.Usage.OutputTokens <= 0 || resp.ReasoningTokens <= 0 {
+		return 0
+	}
+	percent := resp.ReasoningTokens * 100 / resp.Usage.OutputTokens
+	if percent > 100 {
+		percent = 100
+	}
+	return percent
+}
+
 func logStructuredAttempt(taskID uuid.UUID, attempt int, req llm.Request, resp llm.Response, err error) {
 	var syntax *json.SyntaxError
 	slog.Info("report structured model result", "task_id", taskID, "purpose", req.Purpose, "attempt", attempt,
@@ -532,8 +603,9 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 	req.System += "\n用户要求年度图时，若部分年份缺失或口径未核，允许展示有原文及正文依据的至少两点同口径子集并说明缺项，不强制补入不可比年份，也不要求单点图。审查年度方向判断时区分：明确归属于各自来源的年度值或同比方向，并充分保留口径待核等限制，不应仅因跨年范围未完全核实而判为重要错误；若无依据却断言统一口径的跨年增速、累计或复合增长率，或数字、统计对象、单位倍率有误，仍须指出并按实际影响确定严重程度。"
 	req.System += reportEvidenceRules + "\n审核对象是当前 summary、markdown 和实际渲染图表；题目、关注点和范围只是用户需求，不是正文声明。只根据当前报告判断未解决的不确定性，不把规划上下文当作报告自相矛盾。判断图表单位时结合标题或范围中的统计对象与 unit 的原始数值单位：例如标题或范围已写人次、unit 为亿时，共同表达亿人次；仍须核对原文，禁止混淆倍率、币种、人数与人次或修改原始数值单位。仅有不影响结论的 low 建议时返回 status=pass，可以保留这些 low 意见；high 或 medium 问题仍须 revise。"
 	resp, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
-	logReviewAttempt(p.TaskID, 1, req, resp, err)
-	if retryStructured(resp, err, req.MaxTokens) {
+	mode := decideReviewRetry(resp, err, req.MaxTokens)
+	logReviewAttempt(p.TaskID, 1, req, resp, err, reviewRetryNone, mode)
+	if mode != reviewRetryNone {
 		timer := time.NewTimer(250 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -541,15 +613,21 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 			return reportReview{}, ctx.Err()
 		case <-timer.C:
 		}
-		// One retry only. Both calls remain metered and obey the task budget and
-		// activity deadline; never treat a second truncated response as a pass.
-		if outputTruncated(resp, err, req.MaxTokens) {
-			req.MaxTokens = 24000
+		// One retry only. A reasoning-heavy failure switches thinking off at a
+		// small cap instead of raising max_tokens, which reasoning would consume
+		// again. Both calls stay metered and bounded; a second failure is an
+		// error, never a pass.
+		if mode == reviewRetryNoThinking {
+			req.DisableThinking = true
+			req.ReasoningEffort = ""
+			req.MaxTokens = reviewFallbackMaxTokens
+			req.System += reviewNoThinkingInstruction
+		} else {
+			req.System += structuredRetryInstruction
 		}
-		req.System += structuredRetryInstruction
 		out = reportReview{}
 		resp, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
-		logReviewAttempt(p.TaskID, 2, req, resp, err)
+		logReviewAttempt(p.TaskID, 2, req, resp, err, mode, reviewRetryNone)
 	}
 	if err != nil {
 		return reportReview{}, err
@@ -583,11 +661,16 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 	return out, nil
 }
 
-func logReviewAttempt(taskID uuid.UUID, attempt int, req llm.Request, resp llm.Response, err error) {
+func logReviewAttempt(taskID uuid.UUID, attempt int, req llm.Request, resp llm.Response, err error, mode, decision reviewRetryMode) {
+	var syntax *json.SyntaxError
 	slog.Info("report review model result", "task_id", taskID, "attempt", attempt,
 		"provider", resp.Provider, "model", resp.Model, "max_tokens", req.MaxTokens,
-		"finish_reason", resp.FinishReason, "output_tokens", resp.Usage.OutputTokens,
-		"reasoning_tokens", resp.ReasoningTokens, "reasoning_content_present", resp.ReasoningContentPresent,
+		"disable_thinking", req.DisableThinking, "reasoning_effort", req.ReasoningEffort,
+		"finish_reason", resp.FinishReason, "usage_known", resp.UsageKnown,
+		"output_tokens", resp.Usage.OutputTokens, "reasoning_tokens", resp.ReasoningTokens,
+		"reasoning_percent", reviewReasoningPercent(resp), "content_bytes", len(resp.Content),
+		"reasoning_content_present", resp.ReasoningContentPresent,
+		"retry_mode", string(mode), "retry_decision", string(decision), "json_syntax_error", errors.As(err, &syntax),
 		"error_type", fmt.Sprintf("%T", err))
 }
 

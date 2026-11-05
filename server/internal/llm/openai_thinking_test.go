@@ -84,6 +84,40 @@ func TestNoThinkingControlsOnlyKnownCompatibleModels(t *testing.T) {
 	}
 }
 
+func TestReviewFallbackWireUsesNoThinkingAndSmallCap(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, model string
+		wantThinking      bool
+	}{
+		{"deepseek", "https://api.deepseek.com/v1", "deepseek-flash", true},
+		{"qwen", "https://ws-example.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1", "qwen3.8-max", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]json.RawMessage
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"test","choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}`))}, nil
+			})}
+			provider := OpenAICompat{Name: "review", BaseURL: tc.base, HTTP: client}
+			_, err := provider.Complete(context.Background(), Request{Purpose: "report.review", Model: tc.model, MaxTokens: 4096, DisableThinking: true})
+			require.NoError(t, err)
+			var maxTokens int
+			require.NoError(t, json.Unmarshal(body["max_tokens"], &maxTokens))
+			require.Equal(t, 4096, maxTokens)
+			require.NotContains(t, body, "reasoning_effort")
+			if tc.wantThinking {
+				require.JSONEq(t, `{"type":"disabled"}`, string(body["thinking"]))
+				require.NotContains(t, body, "enable_thinking")
+			} else {
+				require.NotContains(t, body, "thinking")
+				var enable bool
+				require.NoError(t, json.Unmarshal(body["enable_thinking"], &enable))
+				require.False(t, enable)
+			}
+		})
+	}
+}
+
 func TestDeepSeekReviewSendsNoThinkingAndRetainsOnlyReasoningMetadata(t *testing.T) {
 	requestBody := make(chan map[string]json.RawMessage, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -191,13 +191,20 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 			require.Contains(t, s.requests[0].System, "不要为凑数制造问题")
 			require.Contains(t, s.requests[0].System, "不要把不同指标的独立图表使用不同单位当成事实错误")
 			if tc.calls == 2 {
-				wantTokens := 24000
-				if tc.name == "empty json mode response" || tc.name == "incomplete below cap" {
+				wantTokens := reviewFallbackMaxTokens
+				wantDisable := true
+				wantEffort := ""
+				wantInstruction := "兜底输出"
+				if tc.name == "incomplete below cap" {
 					wantTokens = 16000
+					wantDisable = false
+					wantEffort = "low"
+					wantInstruction = "上次输出不完整"
 				}
 				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
-				require.False(t, s.requests[1].DisableThinking)
-				require.Equal(t, "low", s.requests[1].ReasoningEffort)
+				require.Equal(t, wantDisable, s.requests[1].DisableThinking)
+				require.Equal(t, wantEffort, s.requests[1].ReasoningEffort)
+				require.Contains(t, s.requests[1].System, wantInstruction)
 			}
 			if tc.failed {
 				require.Error(t, err)
@@ -206,6 +213,77 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, "pass", got.Status)
 			}
+		})
+	}
+}
+func TestReviewNoThinkingFallbackOnReasoningExhaustion(t *testing.T) {
+	const good = `{"status":"pass","issues":[]}`
+	for _, tc := range []struct {
+		name       string
+		first      llm.Response
+		second     llm.Response
+		calls      int
+		wantErr    bool
+		wantStatus string
+	}{
+		{
+			name:   "length at cap",
+			first:  llm.Response{Provider: "deepseek", Model: "deepseek-flash", FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}, ReasoningTokens: 15900},
+			second: llm.Response{Content: good},
+			calls:  2, wantStatus: "pass",
+		},
+		{
+			name:   "stop blank after reasoning",
+			first:  llm.Response{Provider: "deepseek", Model: "deepseek-flash", FinishReason: "stop", UsageKnown: true, Usage: llm.Usage{OutputTokens: 10193}, ReasoningTokens: 9927, Content: strings.Repeat(" ", 266)},
+			second: llm.Response{Content: good},
+			calls:  2, wantStatus: "pass",
+		},
+		{
+			name:   "stop blank without usage",
+			first:  llm.Response{Provider: "deepseek", FinishReason: "stop", Content: "  "},
+			second: llm.Response{Content: good},
+			calls:  2, wantStatus: "pass",
+		},
+		{
+			name:   "stop partial json after reasoning",
+			first:  llm.Response{Provider: "deepseek", FinishReason: "stop", UsageKnown: true, Usage: llm.Usage{OutputTokens: 11219}, ReasoningTokens: 11123, Content: `{"status":"rev`},
+			second: llm.Response{Content: good},
+			calls:  2, wantStatus: "pass",
+		},
+		{
+			name:  "high reasoning valid json keeps one call",
+			first: llm.Response{Provider: "deepseek", FinishReason: "stop", UsageKnown: true, Usage: llm.Usage{OutputTokens: 13442}, ReasoningTokens: 13432, Content: good},
+			calls: 1, wantStatus: "pass",
+		},
+		{
+			name:   "fallback failure is still an error",
+			first:  llm.Response{Provider: "deepseek", FinishReason: "length"},
+			second: llm.Response{Provider: "deepseek", FinishReason: "length"},
+			calls:  2, wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: []llm.Response{tc.first, tc.second}}
+			a := Activities{LLM: s}
+			got, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{})
+			require.Len(t, s.requests, tc.calls)
+			if tc.calls == 1 {
+				require.False(t, s.requests[0].DisableThinking)
+				require.NoError(t, err)
+				require.Equal(t, tc.wantStatus, got.Status)
+				return
+			}
+			require.True(t, s.requests[1].DisableThinking)
+			require.Equal(t, reviewFallbackMaxTokens, s.requests[1].MaxTokens)
+			require.Empty(t, s.requests[1].ReasoningEffort)
+			require.Contains(t, s.requests[1].System, "兜底输出")
+			if tc.wantErr {
+				require.Error(t, err)
+				require.NotEqual(t, "pass", got.Status)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantStatus, got.Status)
 		})
 	}
 }
