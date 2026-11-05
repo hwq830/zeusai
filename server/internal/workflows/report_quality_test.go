@@ -563,7 +563,7 @@ func TestMockProviderHandlesGeneralEvidenceWithoutComparableData(t *testing.T) {
 	a := Activities{LLM: llm.Mock{}}
 	draft, err := a.PrepareReportVisuals(context.Background(), ReportPlan{Topic: "公共服务政策"}, findings, reportDraft{Markdown: "公共服务政策保障公众获得服务 [1]。"}, "")
 	require.NoError(t, err)
-	require.Contains(t, draft.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
+	require.Contains(t, draft.Markdown, "本主题在所给材料中没有可比较的同口径多期数据")
 }
 
 func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
@@ -630,7 +630,7 @@ func TestPrepareVisualsProducesSupportedGraphicAndExplainsAbsence(t *testing.T) 
 	got, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "如下图所示，资料不足。"}, "")
 	require.NoError(t, err)
 	require.NotContains(t, got.Markdown, "下图")
-	require.Contains(t, got.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
+	require.Contains(t, got.Markdown, "本主题在所给材料中没有可比较的同口径多期数据")
 	findings = append(findings, QuestionNotes{Question: "Demand", Notes: "Second source [1]", Sources: []search.Result{{URL: "https://example.org"}}})
 	draft.Markdown = "## Supply\n\nProduction is constrained [1].\n\n## Demand\n\nDemand depends on adoption [2]."
 	got, err = a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, draft, "")
@@ -722,8 +722,11 @@ func TestVisualMustMatchReportBody(t *testing.T) {
 	a := Activities{LLM: qualityProvider{result: `{"charts":[{"type":"bar","title":"Population","unit":"thousands","period":"2022","points":[{"label":"India","value":1417173,"source":1},{"label":"China","value":1412175,"source":1}]}]}`}}
 	findings := []QuestionNotes{{Question: "Population", Notes: "Population 2022 (thousands): India 1,417,173; China 1,412,175 [1]", Sources: []search.Result{{URL: "https://databankfiles.worldbank.org/public/ddpext_download/POP.pdf"}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "Population 2022 (thousands): India 1,417,173; China 1,412,175"}}}}
 	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Population\n\nThe report omits the original values [1]."}, "")
-	require.ErrorContains(t, err, "do not match report body")
-	require.Empty(t, got.Markdown)
+	// The body does not contain the chart values, so no chart can be validated;
+	// the safe outcome is a visible no-chart note, not a published mismatch.
+	require.NoError(t, err)
+	require.NotContains(t, got.Markdown, "```zeus-chart")
+	require.Contains(t, got.Markdown, "本主题在所给材料中没有可比较的同口径多期数据")
 }
 func TestReviewRejectsVisualThatCannotRender(t *testing.T) {
 	a := Activities{LLM: qualityProvider{result: `{"status":"pass","issues":[]}`}}
@@ -887,7 +890,7 @@ func TestVisualPreparationDistinguishesSourceReadFailure(t *testing.T) {
 	findings[0].SourceReadsSucceeded = 1
 	got, err := a.PrepareReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: "## Topic\n\nA source [1]."}, "")
 	require.NoError(t, err)
-	require.Contains(t, got.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
+	require.Contains(t, got.Markdown, "本主题在所给材料中没有可比较的同口径多期数据")
 }
 
 func TestRevisionRetriesMalformedJSONAtSameLimit(t *testing.T) {
