@@ -384,10 +384,12 @@ func TestInternalEvidenceStatusRequiresRevision(t *testing.T) {
 func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
 	evidence := "2024 城镇 16.3% 农村 9.9%"
-	findings := []QuestionNotes{{Question: "Q", Notes: "Notes [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp}}, SourceReadStatus: []string{"read"}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
+	qualitative := "这里提供了不含数字的可核验政策说明。"
+	findings := []QuestionNotes{{Question: "Q", Notes: "UNVERIFIED_NOTE 999 [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp, Snippet: "UNVERIFIED_SNIPPET"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: []SourceExcerpt{{Source: 1, Text: qualitative}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
 	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"ok","markdown":"2024 城镇 16.3% 农村 9.9% [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"只有一年数据"}`}}}
 	a := Activities{LLM: s}
-	writeRequest, err := reportDraftRequest(ReportPlan{}, findings, nil)
+	plan := ReportPlan{Topic: "主题", Focuses: []string{"关注政策"}, Scope: "地区", Uncertainties: []string{"范围待核"}}
+	writeRequest, err := reportDraftRequest(plan, findings, []string{"用户附加要求"})
 	require.NoError(t, err)
 	require.NotContains(t, writeRequest.System, "图表用独立 Markdown 代码块")
 	require.Contains(t, writeRequest.System, "只写正文")
@@ -395,25 +397,77 @@ func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, legacyPrompt, "图表用独立 Markdown 代码块")
 	draft := reportDraft{Summary: "ok", Markdown: "2024 城镇 16.3% 农村 9.9% [1]"}
-	_, err = a.ReviewReport(context.Background(), ReportPlan{}, findings, draft)
+	_, err = a.ReviewReport(context.Background(), plan, findings, draft)
 	require.NoError(t, err)
-	_, err = a.ReviseReport(context.Background(), ReportPlan{}, findings, draft, reportReview{Status: "revise"})
+	_, err = a.ReviseReport(context.Background(), plan, findings, draft, reportReview{Status: "revise"})
 	require.NoError(t, err)
-	_, err = a.planReportVisuals(context.Background(), ReportPlan{}, findings, draft.Markdown)
+	_, err = a.planReportVisuals(context.Background(), plan, findings, draft.Markdown)
 	require.NoError(t, err)
 	requests := append([]llm.Request{writeRequest}, s.requests...)
+	var shared any
 	for _, request := range requests {
 		var payload map[string]any
 		require.NoError(t, json.Unmarshal([]byte(request.Messages[0].Content), &payload))
-		require.Contains(t, payload, "source_excerpts")
-		require.Contains(t, payload["source_excerpts"], evidence)
+		require.Contains(t, payload, "evidence")
+		if shared == nil {
+			shared = payload["evidence"]
+		} else {
+			require.Equal(t, shared, payload["evidence"])
+		}
 		raw, _ := json.Marshal(payload)
 		require.Contains(t, string(raw), "https://example.test/official")
-		require.Contains(t, string(raw), "2025-01-21T16:00:00Z")
+		require.Contains(t, string(raw), evidence)
+		require.Contains(t, string(raw), qualitative)
+		require.NotContains(t, string(raw), "UNVERIFIED_NOTE")
+		require.NotContains(t, string(raw), "UNVERIFIED_SNIPPET")
+		require.NotContains(t, string(raw), "2025-01-21T16:00:00Z")
+		require.NotContains(t, string(raw), "publishedAt")
+		require.NotContains(t, string(raw), "dateLastCrawled")
 		require.Contains(t, string(raw), "readStatus")
 		require.Contains(t, request.System, "原文")
 	}
+	require.Contains(t, writeRequest.Messages[0].Content, "用户附加要求")
+	for _, request := range s.requests {
+		require.Contains(t, request.Messages[0].Content, "关注政策")
+		require.Contains(t, request.Messages[0].Content, "范围待核")
+	}
 	require.Contains(t, requests[1].System, "至少两个数据点")
+}
+
+func TestLegacyVisualPlannerKeepsLegacyEvidence(t *testing.T) {
+	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
+	findings := []QuestionNotes{{Question: "Q", Notes: "LEGACY_NOTE [1]", Sources: []search.Result{{URL: "https://example.test", PublishedAt: &stamp}}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":[]}`}}}
+	a := Activities{LLM: s}
+	_, err := a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
+	require.NoError(t, err)
+	require.Len(t, s.requests, 1)
+	require.Contains(t, s.requests[0].Messages[0].Content, "LEGACY_NOTE")
+	require.Contains(t, s.requests[0].Messages[0].Content, "2025-01-21T16:00:00Z")
+	require.Contains(t, s.requests[0].System, legacyReportEvidenceRules)
+}
+
+func TestQualitativeSourceFlowsThroughAllNewStages(t *testing.T) {
+	page := "首页 | 登录 | 搜索 | 帮助\n公共服务政策明确保障公众获得服务，并保护个人隐私。"
+	excerpts := sourceExcerptsForQuery(page, 1, false, "公共服务政策")
+	require.NotEmpty(t, excerpts)
+	findings := []QuestionNotes{{Question: "公共服务政策", Notes: "UNVERIFIED 999", Sources: []search.Result{{URL: "https://example.test/policy"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: excerpts}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"政策","markdown":"公众获得服务 [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
+	a := Activities{LLM: s}
+	p := ReportPlan{Topic: "公共服务政策"}
+	write, err := reportDraftRequest(p, findings, nil)
+	require.NoError(t, err)
+	draft := reportDraft{Markdown: "公众获得服务 [1]"}
+	_, err = a.ReviewReport(context.Background(), p, findings, draft)
+	require.NoError(t, err)
+	_, err = a.ReviseReport(context.Background(), p, findings, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	_, err = a.planReportVisuals(context.Background(), p, findings, draft.Markdown)
+	require.NoError(t, err)
+	for _, req := range append([]llm.Request{write}, s.requests...) {
+		require.Contains(t, req.Messages[0].Content, excerpts[0].Text)
+		require.NotContains(t, req.Messages[0].Content, "UNVERIFIED")
+	}
 }
 
 func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
