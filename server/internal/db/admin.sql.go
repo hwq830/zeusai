@@ -103,7 +103,7 @@ func (q *Queries) AdminDeleteTemplate(ctx context.Context, id uuid.UUID) (int64,
 }
 
 const adminGetReport = `-- name: AdminGetReport :one
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from FROM reports WHERE id = $1
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state FROM reports WHERE id = $1
 `
 
 func (q *Queries) AdminGetReport(ctx context.Context, id uuid.UUID) (Report, error) {
@@ -133,6 +133,7 @@ func (q *Queries) AdminGetReport(ctx context.Context, id uuid.UUID) (Report, err
 		&i.HiddenReason,
 		&i.HiddenBy,
 		&i.RegeneratedFrom,
+		&i.ReviewState,
 	)
 	return i, err
 }

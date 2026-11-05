@@ -20,7 +20,7 @@ LIMIT $2 OFFSET $3;
 -- name: CompleteReport :one
 UPDATE reports SET
     status = 'done', title = $3, summary = $4, markdown = $5, sources = $6, source_count = $7,
-    word_count = $8, completed_at = now()
+    word_count = $8, review_state = $9, completed_at = now()
 WHERE id = $1 AND user_id = $2
 RETURNING *;
 

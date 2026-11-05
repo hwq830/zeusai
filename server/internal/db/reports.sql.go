@@ -31,9 +31,9 @@ func (q *Queries) AppendReportMarkdown(ctx context.Context, arg AppendReportMark
 const completeReport = `-- name: CompleteReport :one
 UPDATE reports SET
     status = 'done', title = $3, summary = $4, markdown = $5, sources = $6, source_count = $7,
-    word_count = $8, completed_at = now()
+    word_count = $8, review_state = $9, completed_at = now()
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state
 `
 
 type CompleteReportParams struct {
@@ -45,6 +45,7 @@ type CompleteReportParams struct {
 	Sources     json.RawMessage
 	SourceCount int32
 	WordCount   int32
+	ReviewState *string
 }
 
 func (q *Queries) CompleteReport(ctx context.Context, arg CompleteReportParams) (Report, error) {
@@ -57,6 +58,7 @@ func (q *Queries) CompleteReport(ctx context.Context, arg CompleteReportParams) 
 		arg.Sources,
 		arg.SourceCount,
 		arg.WordCount,
+		arg.ReviewState,
 	)
 	var i Report
 	err := row.Scan(
@@ -83,6 +85,7 @@ func (q *Queries) CompleteReport(ctx context.Context, arg CompleteReportParams) 
 		&i.HiddenReason,
 		&i.HiddenBy,
 		&i.RegeneratedFrom,
+		&i.ReviewState,
 	)
 	return i, err
 }
@@ -106,7 +109,7 @@ func (q *Queries) CountReportsSince(ctx context.Context, arg CountReportsSincePa
 const createReport = `-- name: CreateReport :one
 INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, language)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state
 `
 
 type CreateReportParams struct {
@@ -156,6 +159,7 @@ func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Rep
 		&i.HiddenReason,
 		&i.HiddenBy,
 		&i.RegeneratedFrom,
+		&i.ReviewState,
 	)
 	return i, err
 }
@@ -178,7 +182,7 @@ func (q *Queries) DeleteReport(ctx context.Context, arg DeleteReportParams) (int
 }
 
 const getReport = `-- name: GetReport :one
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from FROM reports WHERE id = $1 AND user_id = $2
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state FROM reports WHERE id = $1 AND user_id = $2
 `
 
 type GetReportParams struct {
@@ -213,12 +217,13 @@ func (q *Queries) GetReport(ctx context.Context, arg GetReportParams) (Report, e
 		&i.HiddenReason,
 		&i.HiddenBy,
 		&i.RegeneratedFrom,
+		&i.ReviewState,
 	)
 	return i, err
 }
 
 const listReports = `-- name: ListReports :many
-SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from FROM reports
+SELECT id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state FROM reports
 WHERE user_id = $1
   AND ($4::text IS NULL OR status = $4)
   AND ($5::text IS NULL OR title ILIKE '%' || $5 || '%' OR topic ILIKE '%' || $5 || '%')
@@ -273,6 +278,7 @@ func (q *Queries) ListReports(ctx context.Context, arg ListReportsParams) ([]Rep
 			&i.HiddenReason,
 			&i.HiddenBy,
 			&i.RegeneratedFrom,
+			&i.ReviewState,
 		); err != nil {
 			return nil, err
 		}
