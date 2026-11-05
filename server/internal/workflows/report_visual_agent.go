@@ -19,7 +19,7 @@ const visualPlanningSystem = `你是报告插图规划器。只规划 1–6 个�
 - L2：由 notes 中数值确定可复算（占比、同比、CAGR、累计等），必须写 formula 和 inputs。
 - L3：估算/预测，必须写至少 2 条 assumptions、formula、inputs、metric_definition，且 anchor 必须落在趋势/展望/研判/情景/预测类章节；假设由你自拟但必须写清楚，不能把 L3 放进现状/数据/事实章节。
 - 所有级别都必须写 metric_definition；数值不得凭空估算，不得与 notes 冲突。
-- 每个 spec 的 anchor 必须是报告中的一个章节标题文本，精确匹配；找不到合适锚点就不要返回该图。不得把锚点写成“文末”“附录”或模糊描述。
+- 每个 spec 的 anchor 必须从用户消息的 headings 列表里逐字选择，不得自拟、不得改写、不得添加序号以外的任何字符；找不到合适标题就不要返回该图。不得把锚点写成“文末”“附录”或模糊描述。
 - 同一章节最多 1 张图；不同图的 anchor 可以相同，但总图数最多 6。
 
 输出 JSON，不要 markdown：
@@ -30,7 +30,13 @@ const visualPlanningSystem = `你是报告插图规划器。只规划 1–6 个�
 // PlanVisuals is the P1 visual-agent entry point. It only plans; it does not
 // insert or render. Any model/parse error is returned to the workflow, which
 // treats it as "no charts" rather than a report failure.
-func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []QuestionNotes) ([]reporttemplate.VisualSpec, error) {
+func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []QuestionNotes, headings []string) ([]reporttemplate.VisualSpec, error) {
+	if len(headings) == 0 {
+		// The planner cannot invent an anchor that will match the draft. Skip
+		// the model call entirely rather than paying for guaranteed drops.
+		logVisualsPlanned(p.TaskID, 0, 0, nil)
+		return nil, nil
+	}
 	merged, sources := mergeNotes(findings)
 	if len(sources) == 0 || strings.TrimSpace(merged) == "" {
 		logVisualsPlanned(p.TaskID, 0, 0, nil)
@@ -50,6 +56,7 @@ func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []Q
 		"scope":         p.Scope,
 		"uncertainties": p.Uncertainties,
 		"questions":     questions,
+		"headings":      headings,
 		"notes":         merged,
 	})
 	var out struct {
@@ -104,6 +111,43 @@ func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []Q
 		return nil, nil
 	}
 	return valid, nil
+}
+
+// reportHeadings extracts only H2/H3 titles from the draft, outside fenced
+// code blocks. The planner receives this exact list; insertion still matches
+// the same text exactly.
+func reportHeadings(markdown string) []string {
+	var headings []string
+	seen := map[string]bool{}
+	fence := ""
+	for _, line := range strings.Split(markdown, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			marker := trimmed[:3]
+			if fence == "" {
+				fence = marker
+			} else if fence == marker {
+				fence = ""
+			}
+			continue
+		}
+		if fence != "" {
+			continue
+		}
+		level := 0
+		for level < len(trimmed) && trimmed[level] == '#' {
+			level++
+		}
+		if level != 2 && level != 3 {
+			continue
+		}
+		title := strings.TrimSpace(trimmed[level:])
+		if title != "" && !seen[title] {
+			seen[title] = true
+			headings = append(headings, title)
+		}
+	}
+	return headings
 }
 
 func logVisualsPlanned(taskID uuid.UUID, candidates, valid int, levels map[string]int) {

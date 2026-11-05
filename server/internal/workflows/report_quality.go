@@ -50,9 +50,13 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 	}
 	var specs []reporttemplate.VisualSpec
 	if useVisualAgent {
-		// Failure isolation: a model/parse/validation error is just "no charts".
-		if err := workflow.ExecuteActivity(optional, a.PlanVisuals, plan, findings).Get(optional, &specs); err != nil {
-			specs = nil
+		// The planner can only choose anchors that exist in the actual draft.
+		headings := reportHeadings(draft.Markdown)
+		if len(headings) > 0 {
+			// Failure isolation: a model/parse/validation error is just "no charts".
+			if err := workflow.ExecuteActivity(optional, a.PlanVisuals, plan, findings, headings).Get(optional, &specs); err != nil {
+				specs = nil
+			}
 		}
 		draft.Markdown, _, _ = insertVisuals(plan.TaskID, draft.Markdown, specs)
 	} else {
@@ -202,7 +206,7 @@ func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []
 	merged, sources := mergeNotes(findings)
 	payload, _ := json.Marshal(map[string]any{"topic": p.Topic, "evidence": merged, "draft": d, "review": r})
 	var out reportDraft
-	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.revise", Tier: llm.TierStrong, MaxTokens: 8192, System: "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
+	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.revise", Tier: llm.TierStrong, MaxTokens: 8192, System: "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
 	if err != nil {
 		return reportDraft{}, err
 	}

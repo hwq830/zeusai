@@ -106,10 +106,10 @@ func TestQualityPipelineOutcomes(t *testing.T) {
 			p := ReportPlan{}
 			var findings []QuestionNotes
 			var notes []string
-			draft := reportDraft{Summary: "original", Markdown: "body"}
-			revised := reportDraft{Summary: "revised", Markdown: "fixed"}
+			draft := reportDraft{Summary: "original", Markdown: "## 一、规模\n\nbody"}
+			revised := reportDraft{Summary: "revised", Markdown: "## 一、规模\n\nfixed"}
 			env.OnActivity(a.DraftReport, mock.Anything, p, findings, notes).Return(draft, nil).Once()
-			env.OnActivity(a.PlanVisuals, mock.Anything, p, findings).Return([]reporttemplate.VisualSpec(nil), nil).Once()
+			env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return([]reporttemplate.VisualSpec(nil), nil).Once()
 			if tc.reviewErr {
 				failure := error(errors.New("review unavailable"))
 				if tc.timeout {
@@ -224,7 +224,9 @@ func TestReportVisualAgentPipeline(t *testing.T) {
 	}
 	var published reportDraft
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
-	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings).Return(specs, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func(headings []string) bool {
+		return len(headings) == 2 && headings[0] == "一、规模" && headings[1] == "五、未来趋势研判（2026-2030）"
+	})).Return(specs, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
 	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		published = args.Get(3).(reportDraft)
@@ -260,7 +262,7 @@ func TestReportVisualAgentReinsertsAfterRevise(t *testing.T) {
 	}
 	var published reportDraft
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
-	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings).Return(specs, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return(specs, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
 	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(revised, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
@@ -288,7 +290,7 @@ func TestReportVisualAgentFailureIsolated(t *testing.T) {
 	draft := reportDraft{Summary: "original", Markdown: "# Report\n\n## 一、规模\n\n正文\n"}
 	var published reportDraft
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
-	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings).Return([]reporttemplate.VisualSpec(nil), errors.New("plan failed")).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return([]reporttemplate.VisualSpec(nil), errors.New("plan failed")).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
 	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		published = args.Get(3).(reportDraft)

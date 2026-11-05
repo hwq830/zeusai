@@ -53,7 +53,7 @@ func TestPlanVisualsDropsInvalidAndKeepsValid(t *testing.T) {
 		Notes:    "2024 100 万人，2025 200 万人 [1]",
 		Sources:  []search.Result{{URL: "https://example.test"}},
 	}}
-	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings)
+	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings, []string{"一、规模"})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, "L1", got[0].Level)
@@ -61,6 +61,7 @@ func TestPlanVisualsDropsInvalidAndKeepsValid(t *testing.T) {
 	require.Equal(t, llm.TierStrong, provider.requests[0].Tier)
 	require.Equal(t, 8000, provider.requests[0].MaxTokens)
 	require.Equal(t, "report.visual", provider.requests[0].Purpose)
+	require.Contains(t, provider.requests[0].Messages[0].Content, `"headings":["一、规模"]`)
 }
 
 func TestPlanVisualsAcceptsLegacyChartsKeyAndTruncatesSix(t *testing.T) {
@@ -73,7 +74,7 @@ func TestPlanVisualsAcceptsLegacyChartsKeyAndTruncatesSix(t *testing.T) {
 	provider := &sequenceProvider{responses: []llm.Response{{Content: string(response)}}}
 	a := &Activities{LLM: provider}
 	findings := []QuestionNotes{{Question: "Q", Notes: "2024 100 2025 200 [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
-	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings)
+	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings, []string{"一、规模"})
 	require.NoError(t, err)
 	require.Len(t, got, 6, "batch limit must cap at six")
 }
@@ -81,16 +82,40 @@ func TestPlanVisualsAcceptsLegacyChartsKeyAndTruncatesSix(t *testing.T) {
 func TestPlanVisualsNoSourcesDoesNotCallModel(t *testing.T) {
 	provider := &sequenceProvider{}
 	a := &Activities{LLM: provider}
-	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, nil)
+	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, nil, []string{"一、规模"})
 	require.NoError(t, err)
 	require.Empty(t, got)
 	require.Empty(t, provider.requests)
 }
 
+func TestPlanVisualsEmptyHeadingsDoesNotCallModel(t *testing.T) {
+	provider := &sequenceProvider{}
+	a := &Activities{LLM: provider}
+	findings := []QuestionNotes{{Question: "Q", Notes: "2024 100 [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
+	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings, nil)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Empty(t, provider.requests)
+}
+
+func TestReportHeadingsExtractsH2H3AndSkipsCode(t *testing.T) {
+	md := "# 报告\n\n## 一、规模\n\n### 1.1 场地\n\n```\n## 代码里的假标题\n```\n\n## 五、未来趋势研判（2026-2030）\n"
+	require.Equal(t, []string{"一、规模", "1.1 场地", "五、未来趋势研判（2026-2030）"}, reportHeadings(md))
+}
+
+func TestReviseReportPromptKeepsHeadings(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"s","markdown":"## 一、规模\n\n修订正文"}`}}}
+	a := Activities{LLM: provider}
+	_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "## 一、规模\n\n正文"}, reportReview{Status: "revise", Issues: []reviewIssue{{Severity: "high", Evidence: "e", Suggestion: "s"}}})
+	require.NoError(t, err)
+	require.Contains(t, provider.requests[0].System, "保留所有 ## / ### 章节标题原文不变")
+	require.Contains(t, provider.requests[0].System, "不得新增或删除章节标题")
+}
+
 func TestPlanVisualsModelErrorIsReturnedForIsolation(t *testing.T) {
 	a := &Activities{LLM: qualityProvider{err: errors.New("model down")}}
 	findings := []QuestionNotes{{Question: "Q", Notes: "2024 100 [1]", Sources: []search.Result{{URL: "https://example.test"}}}}
-	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings)
+	got, err := a.PlanVisuals(context.Background(), ReportPlan{}, findings, []string{"一、规模"})
 	require.Error(t, err)
 	require.Empty(t, got)
 }
