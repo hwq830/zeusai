@@ -180,6 +180,56 @@ func TestFilterChartsAcceptsOriginalNumericUnitAndRejectsMismatch(t *testing.T) 
 	}
 }
 
+func TestFilterChartsBindsRateBeforeLabel(t *testing.T) {
+	evidence := "IDC全球2024年12月份调研发现，已经有69%的人使用了生成式AI应用，22%的人每天都在使用生成式AI应用 [1]。"
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"生成式AI使用率\",\"unit\":\"%\",\"period\":\"2024\",\"scope\":\"全球\",\"points\":[{\"label\":\"生成式AI应用\",\"value\":69,\"source\":1},{\"label\":\"每天\",\"value\":22,\"source\":1}]}\n```\n"
+	if got, reasons := FilterChartsWithReasons(chart, evidence, 1); !strings.Contains(got, "zeus-chart") {
+		t.Fatalf("rate-before-label should bind: %v", reasons)
+	}
+	for _, bad := range []string{
+		// swapped values
+		"```zeus-chart\n{\"type\":\"bar\",\"title\":\"生成式AI使用率\",\"unit\":\"%\",\"period\":\"2024\",\"scope\":\"全球\",\"points\":[{\"label\":\"生成式AI应用\",\"value\":22,\"source\":1},{\"label\":\"每天\",\"value\":69,\"source\":1}]}\n```\n",
+		// label only appears in the other clause
+		strings.Replace(chart, `"label":"生成式AI应用"`, `"label":"使用生成式AI应用"`, 1),
+		// a third label that is not in the rate clause
+		strings.Replace(chart, `"label":"每天"`, `"label":"其他"`, 1),
+		// unit mismatch
+		strings.Replace(chart, `"unit":"%"`, `"unit":"人次"`, 1),
+	} {
+		if got, reasons := FilterChartsWithReasons(bad, evidence, 1); got != "" {
+			t.Fatalf("invalid rate candidate accepted: %v", reasons)
+		}
+	}
+}
+
+func TestFilterChartsBindsRespectivelyList(t *testing.T) {
+	evidence := "新快报讯，研究机构Quest Mobile发布的《2025年AI应用层发展核心报告》显示，国内AI原生App月活分化。其中，豆包与DeepSeek分别以2.26亿和1.35亿的月活规模位列冠亚军 [1]。"
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"AI原生App月活\",\"unit\":\"亿\",\"period\":\"2025\",\"scope\":\"国内\",\"points\":[{\"label\":\"豆包\",\"value\":2.26,\"source\":1},{\"label\":\"DeepSeek\",\"value\":1.35,\"source\":1}]}\n```\n"
+	if got, reasons := FilterChartsWithReasons(chart, evidence, 1); !strings.Contains(got, "zeus-chart") {
+		t.Fatalf("respectively list should bind: %v", reasons)
+	}
+	swapped := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"AI原生App月活\",\"unit\":\"亿\",\"period\":\"2025\",\"scope\":\"国内\",\"points\":[{\"label\":\"豆包\",\"value\":1.35,\"source\":1},{\"label\":\"DeepSeek\",\"value\":2.26,\"source\":1}]}\n```\n"
+	if got, reasons := FilterChartsWithReasons(swapped, evidence, 1); got != "" {
+		t.Fatalf("swapped respectively values accepted: %v", reasons)
+	}
+	swappedLabels := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"AI原生App月活\",\"unit\":\"亿\",\"period\":\"2025\",\"scope\":\"国内\",\"points\":[{\"label\":\"DeepSeek\",\"value\":2.26,\"source\":1},{\"label\":\"豆包\",\"value\":1.35,\"source\":1}]}\n```\n"
+	if got, reasons := FilterChartsWithReasons(swappedLabels, evidence, 1); got != "" {
+		t.Fatalf("swapped respectively labels accepted: %v", reasons)
+	}
+	extraNumber := "新快报讯，研究机构Quest Mobile发布的《2025年AI应用层发展核心报告》显示，国内AI原生App月活分化。其中，豆包与DeepSeek分别以2.26亿、1.35亿和1.14亿的月活规模位列冠亚军 [1]。"
+	if got, reasons := FilterChartsWithReasons(chart, extraNumber, 1); got != "" {
+		t.Fatalf("extra respectively value accepted: %v", reasons)
+	}
+	extraLabel := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"AI原生App月活\",\"unit\":\"亿\",\"period\":\"2025\",\"scope\":\"国内\",\"points\":[{\"label\":\"豆包\",\"value\":2.26,\"source\":1},{\"label\":\"DeepSeek\",\"value\":1.35,\"source\":1},{\"label\":\"元宝\",\"value\":1.14,\"source\":1}]}\n```\n"
+	if got, reasons := FilterChartsWithReasons(extraLabel, evidence, 1); got != "" {
+		t.Fatalf("extra respectively label accepted: %v", reasons)
+	}
+	wrongUnit := strings.Replace(chart, `"unit":"亿"`, `"unit":"万"`, 1)
+	if got, reasons := FilterChartsWithReasons(wrongUnit, evidence, 1); got != "" {
+		t.Fatalf("respectively unit mismatch accepted: %v", reasons)
+	}
+}
+
 func TestFilterChartsNormalizesOnlyPresentationDifferences(t *testing.T) {
 	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"出口总量\",\"scope\":\"甲省出口总量\",\"unit\":\"亿元\",\"period\":\"2023—2024\",\"points\":[{\"label\":\"2023\",\"value\":48.91,\"source\":1},{\"label\":\"2024\",\"value\":56.15,\"source\":1}]}\n```\n"
 	evidence := "2023 年 甲省 出口 总量 48.91 亿元 [1]\n\n2024 年 甲省 出口 总量 56.15 亿元 [1]"

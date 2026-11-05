@@ -6,6 +6,7 @@ import (
 	"html"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -96,7 +97,132 @@ func pointValueMatches(text string, chart Chart, point ChartPoint) bool {
 			}
 		}
 	}
+	if rateBeforeLabelMatches(text, chart, point) || respectivelyValueMatches(text, chart, point) {
+		return true
+	}
 	return scopedAnnualValueMatches(originalText, chart, point)
+}
+
+var rateConnectors = []string{"的人", "人", "的受访者", "受访者", "的用户", "用户", "的消费者", "消费者", "的企业", "企业"}
+
+// rateBeforeLabelMatches accepts the common Chinese form "69%的人使用了生成式
+// AI应用". It is a structural rule: the value must be followed by a percent
+// sign and a rate connector; the first chart label after that connector (before
+// the next number or clause boundary) must be this point's label. It does not
+// convert percentages or compare meanings.
+func rateBeforeLabelMatches(text string, chart Chart, point ChartPoint) bool {
+	if strings.TrimSpace(chart.Unit) != "%" {
+		return false
+	}
+	for _, loc := range evidenceNumber.FindAllStringIndex(text, -1) {
+		if !containsEvidenceNumber(text[loc[0]:loc[1]], string(point.Value)) {
+			continue
+		}
+		suffix := strings.TrimLeft(text[loc[1]:], " \t")
+		if !strings.HasPrefix(suffix, "%") {
+			continue
+		}
+		after := strings.TrimLeft(suffix[1:], " \t")
+		connector := ""
+		for _, candidate := range rateConnectors {
+			if strings.HasPrefix(after, candidate) {
+				connector = candidate
+				break
+			}
+		}
+		if connector == "" {
+			continue
+		}
+		segment := after[len(connector):]
+		if end := strings.IndexAny(segment, "\n;；。"); end >= 0 {
+			segment = segment[:end]
+		}
+		if next := evidenceNumber.FindStringIndex(segment); next != nil {
+			segment = segment[:next[0]]
+		}
+		first, label := -1, ""
+		for _, candidate := range chart.Points {
+			if i := strings.Index(segment, candidate.Label); i >= 0 && (first < 0 || i < first || (i == first && len(candidate.Label) > len(label))) {
+				first, label = i, candidate.Label
+			}
+		}
+		if first >= 0 && label == point.Label {
+			return true
+		}
+	}
+	return false
+}
+
+// respectivelyValueMatches accepts the common Chinese list form
+// "豆包与DeepSeek分别以2.26亿和1.35亿...". It pairs chart labels with the
+// following values by source order; counts and units must match exactly, and
+// any extra label, number or mismatched unit rejects the whole clause. It does
+// not swap, convert or infer values.
+func respectivelyValueMatches(text string, chart Chart, point ChartPoint) bool {
+	if len(chart.Points) < 2 || strings.TrimSpace(chart.Unit) == "" {
+		return false
+	}
+	for offset := 0; offset < len(text); {
+		idx := strings.Index(text[offset:], "分别")
+		if idx < 0 {
+			return false
+		}
+		idx += offset
+		markerEnd := idx + len("分别")
+		start := strings.LastIndexAny(text[:idx], "\n;；。") + 1
+		end := len(text)
+		if boundary := strings.IndexAny(text[markerEnd:], "\n;；。"); boundary >= 0 {
+			end = markerEnd + boundary
+		}
+		left, right := text[start:idx], text[markerEnd:end]
+		type positionedLabel struct {
+			index int
+			label string
+		}
+		var labels []positionedLabel
+		for _, candidate := range chart.Points {
+			if i := strings.Index(left, candidate.Label); i >= 0 {
+				labels = append(labels, positionedLabel{index: i, label: candidate.Label})
+			}
+		}
+		sort.SliceStable(labels, func(i, j int) bool {
+			if labels[i].index != labels[j].index {
+				return labels[i].index < labels[j].index
+			}
+			return len(labels[i].label) > len(labels[j].label)
+		})
+		if len(labels) != len(chart.Points) {
+			offset = markerEnd
+			continue
+		}
+		type positionedValue struct {
+			token, unit string
+		}
+		var values []positionedValue
+		for _, loc := range evidenceNumber.FindAllStringIndex(right, -1) {
+			token := right[loc[0]:loc[1]]
+			unit := strings.TrimLeft(right[loc[1]:], " \t")
+			values = append(values, positionedValue{token: token, unit: unit})
+		}
+		if len(values) != len(chart.Points) {
+			offset = markerEnd
+			continue
+		}
+		pointIndex := -1
+		for i, label := range labels {
+			if label.label == point.Label {
+				pointIndex = i
+				break
+			}
+		}
+		if pointIndex >= 0 &&
+			containsEvidenceNumber(values[pointIndex].token, string(point.Value)) &&
+			strings.HasPrefix(values[pointIndex].unit, chart.Unit) {
+			return true
+		}
+		offset = markerEnd
+	}
+	return false
 }
 
 // Some official annual releases state the year in one paragraph line and put
