@@ -41,6 +41,9 @@ type reportReview struct {
 // activity and filter are intentionally kept.
 const useVisualAgent = true
 
+// reportReviewResolved means the FINAL review verdict is pass. It does not mean
+// a revision activity merely ran: a final revise or unavailable verdict is
+// unresolved, even when the revision itself completed.
 const (
 	reportReviewResolved   = "resolved"
 	reportReviewUnresolved = "unresolved"
@@ -70,11 +73,12 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 			draft.Markdown += "\n\n" + visual
 		}
 	}
-	reviewState := reportReviewResolved
+	reviewState := reportReviewUnresolved
 	var review reportReview
 	if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &review); err != nil {
 		review = reportReview{Status: "unavailable"}
 		logReviewVerdict(plan.TaskID, 1, "unavailable", nil)
+		slog.Info("report review unavailable", "task_id", plan.TaskID, "report_id", plan.ReportID, "reason", "review_unavailable")
 	}
 	if review.Status == "revise" {
 		var revised reportDraft
@@ -89,13 +93,19 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 			if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &recheck); err != nil {
 				review.Status = "unavailable"
 				logReviewVerdict(plan.TaskID, 1, "unavailable", nil)
+				slog.Info("report review unavailable", "task_id", plan.TaskID, "report_id", plan.ReportID, "reason", "review_unavailable")
 			} else {
 				review = recheck
 			}
 		} else {
-			reviewState = reportReviewUnresolved
 			slog.Info("report revise unresolved", "task_id", plan.TaskID, "report_id", plan.ReportID, "reason", reviseFailureReason(err))
 		}
+	}
+	// review_state follows the final verdict, not "did the revision activity
+	// run". A final revise or unavailable verdict is unresolved, and the report
+	// is still published.
+	if review.Status == "pass" {
+		reviewState = reportReviewResolved
 	}
 	return workflow.ExecuteActivity(ctx, a.PublishReviewedReport, plan, findings, draft, review, reviewState).Get(ctx, nil)
 }

@@ -460,3 +460,75 @@ func TestReportVisualAgentReviseStaleChartsCleared(t *testing.T) {
 	require.NotContains(t, published.Markdown, "旧标题一")
 	require.NotContains(t, published.Markdown, "旧标题二")
 }
+
+func TestReviewStateFinalVerdict(t *testing.T) {
+	cases := []struct {
+		name            string
+		pass            bool
+		reviseSuccess   bool
+		secondRevise    bool
+		reviewErr       bool
+		wantState       string
+		wantUnavailable bool
+	}{
+		{name: "final pass", pass: true, wantState: reportReviewResolved},
+		{name: "second review revise", reviseSuccess: true, secondRevise: true, wantState: reportReviewUnresolved},
+		{name: "revision failed", reviseSuccess: false, wantState: reportReviewUnresolved},
+		{name: "review unavailable", reviewErr: true, wantState: reportReviewUnresolved, wantUnavailable: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+			defer slog.SetDefault(old)
+
+			var suite testsuite.WorkflowTestSuite
+			env := suite.NewTestWorkflowEnvironment()
+			a := &Activities{}
+			env.RegisterActivity(a)
+			p := ReportPlan{}
+			var findings []QuestionNotes
+			draft := reportDraft{Summary: "original", Markdown: "## 一、规模\n\n正文"}
+			revised := reportDraft{Summary: "revised", Markdown: "## 一、规模\n\n修订正文"}
+			env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
+			env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return([]reporttemplate.VisualSpec(nil), nil).Once()
+			switch {
+			case tc.reviewErr:
+				env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{}, errors.New("review down")).Once()
+			case tc.pass:
+				env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
+			default:
+				env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
+				if tc.reviseSuccess {
+					env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(revised, nil).Once()
+					if tc.secondRevise {
+						env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
+					} else {
+						env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
+					}
+				} else {
+					env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(reportDraft{}, errors.New("revise down")).Once()
+				}
+			}
+			published := 0
+			publishedState := ""
+			env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+				published++
+				publishedState = args.Get(5).(string)
+			}).Return(nil).Once()
+			env.ExecuteWorkflow(func(ctx workflow.Context) error {
+				ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+				return reportQualityPipeline(ctx, p, findings, nil)
+			})
+			require.NoError(t, env.GetWorkflowError())
+			env.AssertExpectations(t)
+			require.Equal(t, 1, published, "publish must happen in every verdict case")
+			require.Equal(t, tc.wantState, publishedState)
+			if tc.wantUnavailable {
+				require.Contains(t, logs.String(), "report review unavailable")
+				require.Contains(t, logs.String(), "reason=review_unavailable")
+			}
+		})
+	}
+}
