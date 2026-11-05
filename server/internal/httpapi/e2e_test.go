@@ -844,14 +844,33 @@ func TestReportPDF(t *testing.T) {
 	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 409, &e) // still running
 	h.streamEvents(tk.ID, 0)
 
+	reportID, err := uuid.Parse(tk.ReportID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	waitReady := func() string {
-		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
-			h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
-			if link.Status == "ready" {
-				return link.URL
+		// Chromium itself has a 60s timeout. Give its first attempt time to
+		// finish plus bounded scheduling and persistence overhead.
+		deadline := time.Now().Add(75 * time.Second)
+		var pdfStatus string
+		for time.Now().Before(deadline) {
+			row, err := h.q.AdminGetReport(context.Background(), reportID)
+			if err != nil {
+				t.Fatalf("read PDF status: %v", err)
 			}
+			pdfStatus = row.PdfStatus
+			if pdfStatus == "failed" {
+				t.Fatal("PDF generation failed")
+			}
+			if pdfStatus == "ready" {
+				h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
+				if link.Status == "ready" {
+					return link.URL
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		t.Fatalf("PDF never ready: %+v", link)
+		t.Fatalf("PDF never ready within 75s: status=%s link=%+v", pdfStatus, link)
 		return ""
 	}
 	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)

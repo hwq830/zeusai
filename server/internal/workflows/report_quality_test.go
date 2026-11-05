@@ -462,7 +462,7 @@ func TestQualitativeSourceFlowsThroughAllNewStages(t *testing.T) {
 	excerpts := sourceExcerptsForQuery(page, 1, false, "公共服务政策")
 	require.NotEmpty(t, excerpts)
 	findings := []QuestionNotes{{Question: "公共服务政策", Notes: "UNVERIFIED 999", Sources: []search.Result{{URL: "https://example.test/policy"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: excerpts}}
-	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"政策","markdown":"公众获得服务 [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"政策","markdown":"公众获得服务 [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"没有数值"}`}}}
 	a := Activities{LLM: s}
 	p := ReportPlan{Topic: "公共服务政策"}
 	write, err := reportDraftRequest(p, findings, nil)
@@ -478,6 +478,14 @@ func TestQualitativeSourceFlowsThroughAllNewStages(t *testing.T) {
 		require.Contains(t, req.Messages[0].Content, excerpts[0].Text)
 		require.NotContains(t, req.Messages[0].Content, "UNVERIFIED")
 	}
+}
+
+func TestMockProviderHandlesGeneralEvidenceWithoutComparableData(t *testing.T) {
+	findings := []QuestionNotes{{Question: "公共服务政策", Sources: []search.Result{{URL: "https://example.test/policy"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: []SourceExcerpt{{Source: 1, Text: "公共服务政策明确保障公众获得服务，并保护个人隐私。"}}}}
+	a := Activities{LLM: llm.Mock{}}
+	draft, err := a.PrepareReportVisuals(context.Background(), ReportPlan{Topic: "公共服务政策"}, findings, reportDraft{Markdown: "公共服务政策保障公众获得服务 [1]。"}, "")
+	require.NoError(t, err)
+	require.Contains(t, draft.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
 }
 
 func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
@@ -565,6 +573,7 @@ func TestVisualPipelineRechecksAfterRevision(t *testing.T) {
 	revised := reportDraft{Markdown: "revised"}
 	final := reportDraft{Markdown: "revised with visual"}
 	first := reportReview{Status: "revise", Issues: []reviewIssue{{Severity: "high", Evidence: "mismatch", Suggestion: "correct"}}}
+	env.OnGetVersion("report-visual-revision-v4", workflow.DefaultVersion, workflow.Version(1)).Return(workflow.DefaultVersion).Once()
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, notes).Return(draft, nil).Once()
 	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, draft, "").Return(visual, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, visual).Return(first, nil).Once()
@@ -594,6 +603,35 @@ func TestVisualPipelineReplaysLegacyPublication(t *testing.T) {
 	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, draft, "").Return(draft, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, draft).Return(reportReview{Status: "pass"}, nil).Once()
 	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, draft, mock.Anything).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportVisualPipeline(ctx, p, findings, notes)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+}
+
+func TestVisualPipelinePassesReviewToRevisedVisuals(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	var notes []string
+	draft := reportDraft{Markdown: "draft"}
+	visual := reportDraft{Markdown: "old visual"}
+	revised := reportDraft{Markdown: "revised"}
+	prepared := reportDraft{Markdown: "revised and new visual"}
+	review := reportReview{Status: "revise", Issues: []reviewIssue{{Severity: "medium", Evidence: "missing annual chart", Suggestion: "add chart"}}}
+	env.OnGetVersion("report-visual-revision-v4", workflow.DefaultVersion, workflow.Version(1)).Return(workflow.Version(1)).Once()
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, notes).Return(draft, nil).Once()
+	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, draft, "").Return(visual, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, visual).Return(review, nil).Once()
+	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, visual, review).Return(revised, nil).Once()
+	env.OnActivity(a.PrepareRevisedReportVisuals, mock.Anything, p, findings, revised, visual.Markdown, review).Return(prepared, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, prepared).Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishVisualReport, mock.Anything, p, findings, prepared, mock.Anything).Return(nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
 		return reportVisualPipeline(ctx, p, findings, notes)
@@ -693,7 +731,8 @@ func TestVisualPipelineStopsWhenReviewRemainsUnresolved(t *testing.T) {
 	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, draft, "").Return(visual, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, visual).Return(issue, nil).Once()
 	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, visual, issue).Return(revised, nil).Once()
-	env.OnActivity(a.PrepareReportVisuals, mock.Anything, p, findings, revised, visual.Markdown).Return(prepared, nil).Once()
+	env.OnGetVersion("report-visual-revision-v4", workflow.DefaultVersion, workflow.Version(1)).Return(workflow.Version(1)).Once()
+	env.OnActivity(a.PrepareRevisedReportVisuals, mock.Anything, p, findings, revised, visual.Markdown, issue).Return(prepared, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, prepared).Return(issue, nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
