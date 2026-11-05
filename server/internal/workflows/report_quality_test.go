@@ -426,16 +426,47 @@ func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
 	require.ErrorContains(t, validateReviewedVisuals(ReportPlan{}, findings, draft, 1), "publication validation")
 }
 
-func TestRevisionRetriesTruncatedAndDisablesThinking(t *testing.T) {
-	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 8192}}, {Content: `{"summary":"ok","markdown":"Evidence [1]"}`}}}
+func TestRevisionUsesBoundedReasoningAndRetryBudget(t *testing.T) {
+	valid := llm.Response{Content: `{"summary":"ok","markdown":"Evidence [1]"}`}
+	for _, tc := range []struct {
+		name      string
+		responses []llm.Response
+		maxTokens []int
+		wantErr   bool
+	}{
+		{"single response", []llm.Response{valid}, []int{16000}, false},
+		{"truncated then valid", []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}}, valid}, []int{16000, 24000}, false},
+		{"malformed then valid", []llm.Response{{Content: `{"summary":`}, valid}, []int{16000, 16000}, false},
+		{"truncated twice", []llm.Response{{FinishReason: "length"}, {FinishReason: "length"}}, []int{16000, 24000}, true},
+		{"empty revision", []llm.Response{{Content: `{"summary":"ok","markdown":""}`}}, []int{16000}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: tc.responses}
+			a := Activities{LLM: s}
+			_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{}, reportReview{})
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, s.requests, len(tc.maxTokens))
+			for i, request := range s.requests {
+				require.False(t, request.DisableThinking)
+				require.Equal(t, "low", request.ReasoningEffort)
+				require.Equal(t, tc.maxTokens[i], request.MaxTokens)
+			}
+		})
+	}
+}
+
+func TestRevisionRetryHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length"}}}
 	a := Activities{LLM: s}
-	_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{}, reportReview{})
-	require.NoError(t, err)
-	require.Len(t, s.requests, 2)
-	require.True(t, s.requests[0].DisableThinking)
-	require.True(t, s.requests[1].DisableThinking)
-	require.Equal(t, 8192, s.requests[0].MaxTokens)
-	require.Equal(t, 12000, s.requests[1].MaxTokens)
+	_, err := a.ReviseReport(ctx, ReportPlan{}, nil, reportDraft{}, reportReview{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, s.requests, 1)
 }
 
 func TestPrepareVisualsProducesSupportedGraphicAndExplainsAbsence(t *testing.T) {
@@ -698,8 +729,8 @@ func TestRevisionRetriesMalformedJSONAtSameLimit(t *testing.T) {
 				require.Error(t, err)
 			}
 			require.Len(t, s.requests, 2)
-			require.Equal(t, 8192, s.requests[0].MaxTokens)
-			require.Equal(t, 8192, s.requests[1].MaxTokens)
+			require.Equal(t, 16000, s.requests[0].MaxTokens)
+			require.Equal(t, 16000, s.requests[1].MaxTokens)
 			require.True(t, s.requests[0].JSON)
 			require.True(t, s.requests[1].JSON)
 			require.Contains(t, s.requests[1].System, "JSON 语法有误")
