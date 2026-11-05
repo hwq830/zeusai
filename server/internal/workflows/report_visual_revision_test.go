@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -73,10 +74,39 @@ func TestRevisedVisualsReplanAndKeepCorrectedTitle(t *testing.T) {
 	require.Len(t, provider.requests, 1)
 	require.Contains(t, provider.requests[0].Messages[0].Content, "缺少年度趋势图")
 	require.Contains(t, provider.requests[0].Messages[0].Content, "existing_charts")
+	var payload struct {
+		ExistingCharts string `json:"existing_charts"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(provider.requests[0].Messages[0].Content), &payload))
+	require.Equal(t, 1, strings.Count(payload.ExistingCharts, "```zeus-chart"))
+	require.Contains(t, payload.ExistingCharts, "城乡出游（转载，原文未核对）")
 	require.Equal(t, 2, strings.Count(got.Markdown, "```zeus-chart"))
 	require.Contains(t, got.Markdown, "城乡出游（转载，原文未核对）")
 	require.NotContains(t, got.Markdown, `"title":"城乡出游"`)
 	require.Contains(t, got.Markdown, "年度国内出游人次")
+	require.NoError(t, validateReviewedVisuals(ReportPlan{}, findings, got, 3))
+}
+
+func TestReplannedChartCorrectsTitleOfUnchangedRevisedChart(t *testing.T) {
+	findings, body := revisionEvidence()
+	prior := body + "\n\n" + revisionOldChart
+	correctedJSON := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")
+	correctedJSON = strings.Replace(correctedJSON, "城乡出游", "城乡出游（转载，原文未核对）", 1)
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":[` + correctedJSON + `]}`}}}
+	a := Activities{LLM: provider}
+	review := reportReview{Status: "revise", Issues: []reviewIssue{{Severity: "medium", Evidence: "图表标题缺少来源说明", Suggestion: "注明转载且原文未核对"}}}
+	got, err := a.PrepareRevisedReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: prior}, prior, review)
+	require.NoError(t, err)
+	require.Len(t, provider.requests, 1)
+	require.Contains(t, provider.requests[0].System, "同数据返回项会替换现有图")
+	require.Contains(t, provider.requests[0].System, "未返回的有效图表仍会保留")
+	var payload struct {
+		ExistingCharts string `json:"existing_charts"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(provider.requests[0].Messages[0].Content), &payload))
+	require.Equal(t, 1, strings.Count(payload.ExistingCharts, "```zeus-chart"))
+	require.Equal(t, 1, strings.Count(got.Markdown, "```zeus-chart"))
+	require.Contains(t, got.Markdown, "城乡出游（转载，原文未核对）")
 	require.NoError(t, validateReviewedVisuals(ReportPlan{}, findings, got, 3))
 }
 

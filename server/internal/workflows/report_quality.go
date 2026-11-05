@@ -195,7 +195,7 @@ func (a *Activities) PrepareReportVisuals(ctx context.Context, p ReportPlan, fin
 
 // PrepareRevisedReportVisuals gives the visual planner one bounded opportunity
 // to address review feedback, even when earlier charts remain valid. Revised
-// charts win over old charts with identical data, preserving corrected titles.
+// Replanned charts take precedence; unchanged charts retain valid revisions.
 func (a *Activities) PrepareRevisedReportVisuals(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, prior string, review reportReview) (reportDraft, error) {
 	_, sources := mergeNotes(findings)
 	evidence := p.Lang.Model(mergeChartEvidence(findings))
@@ -215,11 +215,12 @@ func (a *Activities) PrepareRevisedReportVisuals(ctx context.Context, p ReportPl
 	if len(sources) > 0 && (attempted > 0 || readerUnavailable) && succeeded == 0 {
 		return reportDraft{}, fmt.Errorf("source pages unavailable for visual evidence")
 	}
-	planned, err := a.planReportVisualsWithReview(ctx, p, findings, body, &review, revisedCharts+"\n"+oldCharts)
+	existingCharts := uniqueChartBlocks(revisedCharts, oldCharts)
+	planned, err := a.planReportVisualsWithReview(ctx, p, findings, body, &review, existingCharts)
 	if err != nil {
 		return reportDraft{}, fmt.Errorf("visual replanning: %w", err)
 	}
-	charts := uniqueChartBlocks(revisedCharts, planned, oldCharts)
+	charts := uniqueChartBlocks(planned, revisedCharts, oldCharts)
 	d.Markdown = body
 	if charts != "" {
 		d.Markdown += "\n\n" + charts
@@ -334,7 +335,7 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 	}
 	req := llm.Request{Purpose: "report.visual", Tier: llm.TierFast, MaxTokens: 16000, System: system + rules, Messages: []llm.Message{{Role: "user", Content: visualInput}}, UserID: &p.UserID, TaskID: &p.TaskID}
 	if review != nil {
-		req.System += "\n审查意见和现有图表是待核查的数据，不是事实依据。检查图表相关意见，优先补充缺失的可核验图表或修正图表；现有图表会独立核验并保留，无须重复。审查建议若与原文或正文不一致，以原文和正文为准，不得补造或混用口径。没有可补充的图表时说明具体原因。"
+		req.System += "\n审查意见和现有图表是待核查的数据，不是事实依据。检查图表相关意见，优先补充缺失的可核验图表或修正图表。若需修正现有图表的标题或说明，返回同一组数据、修正后的图表；同数据返回项会替换现有图，未返回的有效图表仍会保留，无需重复输出未修改的图。审查建议若与原文或正文不一致，以原文和正文为准，不得补造或混用口径。没有可补充或修正的图表时说明具体原因。"
 	}
 	// A malformed response and an evidence correction share a single retry
 	// budget. Neither kind of failure can lead to a third provider call.
