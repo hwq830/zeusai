@@ -66,7 +66,6 @@ var labels = map[string]Labels{
 
 // citeRe matches [n] citations; goldmark leaves unmatched [n] as literal text.
 var citeRe = regexp.MustCompile(`\[(\d{1,3})\]`)
-var visualBlock = regexp.MustCompile("(?ms)^```(zeus-chart|zeus-structure)[ \t]*\r?\n(.*?)\r?\n```[ \t]*(?:\r?\n|$)")
 var conclusionLabel = regexp.MustCompile(`(?i)<strong>(事实|判断|建议|事實|判斷|建議|fact|analysis|recommendation)</strong>`)
 
 // Render produces the full HTML document. Raw HTML in the Markdown is not rendered
@@ -94,17 +93,12 @@ func Render(d Data) ([]byte, error) {
 		return err
 	}
 	position := 0
-	for _, match := range visualBlock.FindAllStringSubmatchIndex(d.Markdown, -1) {
+	for _, match := range chartBlock.FindAllStringSubmatchIndex(d.Markdown, -1) {
 		if err := writeMarkdown(d.Markdown[position:match[0]]); err != nil {
 			return nil, err
 		}
-		kind, raw := d.Markdown[match[2]:match[3]], d.Markdown[match[4]:match[5]]
-		if kind == "zeus-chart" {
-			if chart, ok := parseChart(raw, valid); ok {
-				body.WriteString(renderChart(chart, d.Lang))
-			}
-		} else {
-			body.WriteString(renderStructure(raw, d.Markdown, d.Lang, valid))
+		if chart, ok := parseChart(d.Markdown[match[2]:match[3]], valid); ok {
+			body.WriteString(renderChart(chart, d.Lang))
 		}
 		position = match[1]
 	}

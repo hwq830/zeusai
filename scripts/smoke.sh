@@ -4,9 +4,6 @@
 #   ZEUS_API=http://192.168.1.10:8080 scripts/smoke.sh
 # 需要 api 以 ZEUS_DEV_SMS_CODE 启动（默认 246810），orchestrator 在跑；控制台检查需要
 # ZEUS_SMOKE_ADMIN_EMAIL / ZEUS_SMOKE_ADMIN_PASSWORD（zeusctl admin-create 创建的账号），不设则跳过。
-#
-# 变量后面紧跟中文或全角标点时，一律写成 ${VAR}：macOS 自带的 bash 3.2 在 UTF-8
-# locale 下会把紧跟变量的多字节字符并进变量名，然后报 unbound variable。
 set -euo pipefail
 
 API=${ZEUS_API:-http://localhost:8080}
@@ -54,7 +51,7 @@ SESSION=$(call POST /v1/auth/sms/verify "{\"phone\":\"$PHONE\",\"code\":\"$CODE\
 TOKEN=$(jq -r .accessToken <<<"$SESSION")
 REFRESH=$(jq -r .refreshToken <<<"$SESSION")
 [[ -n $TOKEN && $TOKEN != null ]] || fail "短信登录没有返回 accessToken"
-pass "短信登录 ${PHONE}（新用户：$(jq -r .isNewUser <<<"$SESSION")）"
+pass "短信登录 $PHONE（新用户：$(jq -r .isNewUser <<<"$SESSION")）"
 
 call GET /v1/me >/dev/null && pass "/v1/me"
 call GET /v1/me/usage | jq -c . >/dev/null && pass "/v1/me/usage 额度"
@@ -73,7 +70,7 @@ pass "创建定时简报 $SUB_ID"
 RUN=$(call POST "/v1/briefing-subscriptions/$SUB_ID/run")
 RUN_TASK=$(jq -r .id <<<"$RUN")
 status=$(wait_task "$RUN_TASK")
-[[ $status == done ]] || fail "立即生成简报：任务 ${RUN_TASK} 状态 ${status}（看 orchestrator 日志）"
+[[ $status == done ]] || fail "立即生成简报：任务 $RUN_TASK 状态 $status（看 orchestrator 日志）"
 pass "立即生成简报（Temporal → orchestrator → 消息中心）"
 TODAY=$(call GET /v1/briefings/today) && pass "今日简报"
 BRIEFING_ID=$(jq -r '[.items[] | select(.status == "ready")][0].id // empty' <<<"$TODAY")

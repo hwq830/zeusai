@@ -11,7 +11,6 @@ Zeus（暂定名）个人 AI 助理的服务端：Go 1.25，单模块；接口�
 - 不要直接推 main。每项改动开一个分支和一个 PR，等 Jason 合并。
 - 提交前跑：`go build ./... && go vet ./... && go test ./...`。数据库测试需要 `ZEUS_TEST_DATABASE_URL`，接口端到端测试还要 `ZEUS_TEST_REDIS_URL` 和 `ZEUS_TEST_TEMPORAL_HOST`；本地没有这些服务时测试会跳过，以 CI 结果为准。
 - 改了 `api/openapi.yaml`：通知 iOS 跑 `scripts/sync-openapi.sh`。改了 `api/admin.yaml`：在 zeusai-admin 跑 `npm run sync:api`。
-- 改了 `web/report-template/` 的 DOM、CSS 或主题变量：通知 iOS 重新生成 Mock 快照，并核对 `zeusai-admin` 的 `src/lib/reportPreview.ts`——那里注入的 `:root` 是模板主题变量的副本，模板新增变量时要同步补上，否则后台预览的配色会和 App / 分享页不一致。
 - 新迁移按编号顺序加在 `server/migrations`，不要修改已经部署过的迁移。
 - `.env`、`secrets/`、任何 API Key、密码都不能进仓库、PR 描述或对话。
 
@@ -62,16 +61,16 @@ Zeus（暂定名）个人 AI 助理的服务端：Go 1.25，单模块；接口�
 
 ### 部署
 
-4. **推送代码。** 已知坑：`git archive | tar -x` 直接解压到原目录不会删除 git 里已经删掉的文件，残留的旧文件曾经把控制台构建弄坏。所以先解压到干净的临时目录，再用 `rsync --delete` 同步过去，同时保留 `.env`、`.env.bak-*`（历史密钥备份）和 `secrets/`。排除项必须用通配：`.env*`、`secrets*`，只写 `.env`、`secrets/` 会把 `.env.bak-20261102c` 这类文件当成多余文件删掉（2026-11-05 部署时 dry-run 拦下 6 份）。不要整个目录 `mv` 替换：容器里绑定挂载着 `secrets/`、`Caddyfile` 等文件，换目录会让没重建的容器指向旧路径。
+4. **推送代码。** 已知坑：`git archive | tar -x` 直接解压到原目录不会删除 git 里已经删掉的文件，残留的旧文件曾经把控制台构建弄坏。所以先解压到干净的临时目录，再用 `rsync --delete` 同步过去，同时保留 `.env` 和 `secrets/`。不要整个目录 `mv` 替换：容器里绑定挂载着 `secrets/`、`Caddyfile` 等文件，换目录会让没重建的容器指向旧路径。
    ```sh
    for r in zeusai zeusai-admin; do
      (cd ~/claude/$r && git archive --format=tar HEAD) | ssh huwq@47.83.140.118 "sudo bash -c '
        rm -rf /opt/zeus/$r.new && mkdir -p /opt/zeus/$r.new && tar -x -C /opt/zeus/$r.new &&
-       rsync -a --delete --exclude=/deploy/cloud-dev/.env* --exclude=/deploy/cloud-dev/secrets* --exclude=/node_modules/ \
+       rsync -a --delete --exclude=/deploy/cloud-dev/.env --exclude=/deploy/cloud-dev/secrets/ --exclude=/node_modules/ \
          /opt/zeus/$r.new/ /opt/zeus/$r/ && rm -rf /opt/zeus/$r.new'"
    done
    ```
-   先加 `--dry-run -i` 跑一次，看清会删哪些文件再正式执行：`*deleting` 里**不允许**出现 `.env*`、`secrets*`、`Caddyfile`、`moderation-keywords.txt` 这类只存在于服务器的文件；有就停下来查排除项。
+   先加 `--dry-run -i` 跑一次，看清会删哪些文件再正式执行。
 
 5. **重建并启动：**
    ```sh
@@ -86,7 +85,7 @@ Zeus（暂定名）个人 AI 助理的服务端：Go 1.25，单模块；接口�
 
 ### 部署后
 
-7. **冒烟测试**（在 Mac 的 `~/claude/zeusai` 下跑），期望最后一行输出 `全部通过`（目前最多 23 个 ✓；「简报分享链接」是条件项，简报未 ready 时跳过，所以不要数行数）：
+7. **冒烟测试**（在 Mac 的 `~/claude/zeusai` 下跑），期望全部通过（目前 22 项）：
    ```sh
    ZEUS_SMOKE_TIMEOUT=300 ZEUS_API=https://api-dev.huhuhome.top ZEUS_ADMIN_API=https://admin-dev.huhuhome.top \
    ZEUS_SMOKE_ADMIN_EMAIL=hwq830@gmail.com ZEUS_SMOKE_ADMIN_PASSWORD="$(cat <桌面密码文件>)" scripts/smoke.sh

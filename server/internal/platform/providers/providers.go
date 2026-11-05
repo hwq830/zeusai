@@ -159,10 +159,10 @@ func SearchRouting(ctx context.Context, q *db.Queries) (search.Routing, error) {
 	return c, nil
 }
 
-// Browse returns a reader appropriate to the selected search provider.
+// Browse returns the page reader, or nil with mock search: fake result URLs do not resolve.
 func Browse(cfg config.Config) (browse.Reader, error) {
 	if cfg.SearchProvider == "" || cfg.SearchProvider == "mock" {
-		return browse.Mock{}, nil
+		return nil, nil
 	}
 	h := &browse.HTTP{}
 	if cfg.EgressProxy != "" {

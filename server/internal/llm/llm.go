@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/hwq830/zeusai/server/internal/billing"
-	"github.com/hwq830/zeusai/server/internal/calllog"
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/moderation"
 )
@@ -50,9 +49,6 @@ type Request struct {
 	// DisableThinking requests direct output for short structured decisions. The
 	// OpenAI-compatible adapter sends only a vendor-supported control field.
 	DisableThinking bool
-	// ReasoningEffort is an optional vendor-supported reasoning level. Unknown
-	// providers ignore it; disabling thinking takes precedence.
-	ReasoningEffort string
 	// Temperature, when set, is sent as is (console tests); otherwise the endpoint default.
 	Temperature *float64
 	UserID      *uuid.UUID
@@ -76,10 +72,6 @@ type Response struct {
 	Provider                string
 	Model                   string
 	Usage                   Usage
-	// Call retains the external-call ledger handle so a caller that validates
-	// the response can record its effective result count (for example accepted
-	// charts for report.visual). It is nil when no ledger is configured.
-	Call *calllog.Call
 	// CostMicros is in 1e-6 CNY, filled in by the gateway when known.
 	CostMicros int64
 }

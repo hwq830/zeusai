@@ -40,8 +40,7 @@ type chatRequest struct {
 	Thinking       *struct {
 		Type string `json:"type"`
 	} `json:"thinking,omitempty"`
-	EnableThinking  *bool  `json:"enable_thinking,omitempty"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 
 type chatResponse struct {
@@ -100,8 +99,6 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	base := c.base(ctx)
 	if req.DisableThinking {
 		setNoThinking(&body, c.Name, base)
-	} else {
-		setReasoningEffort(&body, base, req.ReasoningEffort)
 	}
 	b, _ := json.Marshal(body)
 	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))
@@ -149,23 +146,23 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	}()
 	resp, err := hc.Do(hreq)
 	if err != nil {
-		return Response{Call: trace}, err
+		return Response{}, err
 	}
 	defer resp.Body.Close()
 	httpStatus = resp.StatusCode
 	requestID = resp.Header.Get("X-Request-Id")
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if readErr != nil {
-		return Response{Call: trace}, readErr
+		return Response{}, readErr
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Response{Call: trace}, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 512)]))}
+		return Response{}, &StatusError{Provider: c.Name, Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw[:min(len(raw), 512)]))}
 	}
 	var cr chatResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
-		return Response{Call: trace}, err
+		return Response{}, err
 	}
-	out = Response{Provider: c.Name, Model: cr.Model, RequestID: cr.ID, UsageKnown: cr.Usage != nil, Call: trace}
+	out = Response{Provider: c.Name, Model: cr.Model, RequestID: cr.ID, UsageKnown: cr.Usage != nil}
 	if cr.Usage != nil {
 		out.Usage = Usage{InputTokens: cr.Usage.PromptTokens, OutputTokens: cr.Usage.CompletionTokens, CachedTokens: cr.Usage.PromptTokensDetails.CachedTokens}
 		out.ReasoningTokens = cr.Usage.CompletionTokensDetails.ReasoningTokens
@@ -177,21 +174,6 @@ func (c OpenAICompat) Complete(ctx context.Context, req Request) (out Response, 
 	out.ReasoningContentPresent = cr.Choices[0].Message.ReasoningContent != ""
 	out.FinishReason = cr.Choices[0].FinishReason
 	return out, nil
-}
-
-// Limit the optional reasoning field to models and the official endpoint that
-// document it. In particular, fallback OpenAI-compatible vendors do not see it.
-func setReasoningEffort(body *chatRequest, base, effort string) {
-	u, err := url.Parse(base)
-	if err != nil || !strings.EqualFold(u.Hostname(), "api.deepseek.com") {
-		return
-	}
-	if body.Model != "deepseek-flash" && body.Model != "deepseek-v4-pro" {
-		return
-	}
-	if effort == "low" || effort == "high" || effort == "max" {
-		body.ReasoningEffort = effort
-	}
 }
 
 // Only known-compatible endpoints receive a non-standard thinking toggle.

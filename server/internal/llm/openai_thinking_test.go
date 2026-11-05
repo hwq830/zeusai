@@ -3,56 +3,12 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-func TestReasoningEffortOnlyForSupportedDeepSeekRequests(t *testing.T) {
-	for _, tc := range []struct {
-		name, base, model, effort, want string
-		disable                         bool
-	}{
-		{"official flash", "https://api.deepseek.com", "deepseek-flash", "low", "low", false},
-		{"official pro", "https://api.deepseek.com/v1", "deepseek-v4-pro", "high", "high", false},
-		{"empty", "https://api.deepseek.com", "deepseek-flash", "", "", false},
-		{"invalid level", "https://api.deepseek.com", "deepseek-flash", "unsupported", "", false},
-		{"older model", "https://api.deepseek.com", "deepseek-chat", "low", "", false},
-		{"other host", "https://example.com/v1", "deepseek-flash", "low", "", false},
-		{"lookalike host", "https://api.deepseek.com.example.com", "deepseek-flash", "low", "", false},
-		{"qwen fallback", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3.8-max", "low", "", false},
-		{"disabled takes precedence", "https://api.deepseek.com", "deepseek-flash", "low", "", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var body map[string]json.RawMessage
-			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"test","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))}, nil
-			})}
-			provider := OpenAICompat{Name: "deepseek", BaseURL: tc.base, HTTP: client}
-			_, err := provider.Complete(context.Background(), Request{Model: tc.model, ReasoningEffort: tc.effort, DisableThinking: tc.disable})
-			require.NoError(t, err)
-			if tc.want == "" {
-				require.NotContains(t, body, "reasoning_effort")
-			} else {
-				var effort string
-				require.NoError(t, json.Unmarshal(body["reasoning_effort"], &effort))
-				require.Equal(t, tc.want, effort)
-			}
-			if tc.disable {
-				require.JSONEq(t, `{"type":"disabled"}`, string(body["thinking"]))
-			}
-		})
-	}
-}
 
 func TestNoThinkingControlsOnlyKnownCompatibleModels(t *testing.T) {
 	for _, tc := range []struct {
@@ -79,40 +35,6 @@ func TestNoThinkingControlsOnlyKnownCompatibleModels(t *testing.T) {
 				encoded, err := json.Marshal(body)
 				require.NoError(t, err)
 				require.Contains(t, string(encoded), `"enable_thinking":false`)
-			}
-		})
-	}
-}
-
-func TestReviewFallbackWireUsesNoThinkingAndSmallCap(t *testing.T) {
-	for _, tc := range []struct {
-		name, base, model string
-		wantThinking      bool
-	}{
-		{"deepseek", "https://api.deepseek.com/v1", "deepseek-flash", true},
-		{"qwen", "https://ws-example.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1", "qwen3.8-max", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var body map[string]json.RawMessage
-			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"model":"test","choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}`))}, nil
-			})}
-			provider := OpenAICompat{Name: "review", BaseURL: tc.base, HTTP: client}
-			_, err := provider.Complete(context.Background(), Request{Purpose: "report.review", Model: tc.model, MaxTokens: 4096, DisableThinking: true})
-			require.NoError(t, err)
-			var maxTokens int
-			require.NoError(t, json.Unmarshal(body["max_tokens"], &maxTokens))
-			require.Equal(t, 4096, maxTokens)
-			require.NotContains(t, body, "reasoning_effort")
-			if tc.wantThinking {
-				require.JSONEq(t, `{"type":"disabled"}`, string(body["thinking"]))
-				require.NotContains(t, body, "enable_thinking")
-			} else {
-				require.NotContains(t, body, "thinking")
-				var enable bool
-				require.NoError(t, json.Unmarshal(body["enable_thinking"], &enable))
-				require.False(t, enable)
 			}
 		})
 	}

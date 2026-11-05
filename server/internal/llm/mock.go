@@ -50,7 +50,7 @@ func (Mock) Complete(_ context.Context, req Request) (Response, error) {
 	case "report.write":
 		out = mockWrite(user)
 	case "report.visual":
-		out = map[string]any{"charts": []any{}, "no_chart_reason": "insufficient_comparable_data", "no_chart_explanation": "模拟数据没有可用于制图的可比较数值"}
+		out = map[string]any{"charts": []any{}}
 	case "report.review":
 		out = map[string]any{"status": "pass", "issues": []any{}}
 	case "report.revise":

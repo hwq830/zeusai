@@ -41,12 +41,9 @@ type End struct {
 	HTTPStatus                              int
 	UsageKnown                              bool
 	InputTokens, OutputTokens, CachedTokens int
-	// ResultCount is the number of valid results: search hits for search calls,
-	// accepted charts for report.visual. Zero is written explicitly; nil means
-	// no result was observed (for example a transport failure).
-	ResultCount *int
-	FinishedAt  time.Time
-	DurationMS  int64
+	ResultCount                             *int
+	FinishedAt                              time.Time
+	DurationMS                              int64
 }
 type Store interface {
 	Start(context.Context, Begin) error
@@ -59,7 +56,6 @@ type Recorder struct {
 type Call struct {
 	r     *Recorder
 	begin Begin
-	end   End
 }
 
 // Writes use their own bounded context so cancellation cannot erase a completed attempt.
@@ -126,24 +122,9 @@ func (c *Call) Finish(ctx context.Context, e End) {
 	}
 	e.FinishedAt = time.Now().UTC()
 	e.DurationMS = max(0, e.FinishedAt.Sub(c.begin.StartedAt).Milliseconds())
-	c.end = e
 	if err := c.r.persist(ctx, func(ctx context.Context) error { return c.r.Store.Finish(ctx, c.begin.ID, e) }); err != nil {
 		// The initial record remains queryable and becomes 'unknown' after its deadline.
 		c.r.logger().Error("external call finish persistence failed", "call_id", c.begin.ID, "provider", c.begin.Provider)
-	}
-}
-
-// SetResultCount updates the effective result count after the caller has
-// validated the response. Model calls use it for accepted charts; search calls
-// already set it on Finish. Zero is persisted as 0, not NULL.
-func (c *Call) SetResultCount(ctx context.Context, count int) {
-	if c == nil || c.end.FinishedAt.IsZero() {
-		return
-	}
-	e := c.end
-	e.ResultCount = &count
-	if err := c.r.persist(ctx, func(ctx context.Context) error { return c.r.Store.Finish(ctx, c.begin.ID, e) }); err != nil {
-		c.r.logger().Error("external call result count persistence failed", "call_id", c.begin.ID, "provider", c.begin.Provider)
 	}
 }
 func (r *Recorder) Skip(ctx context.Context, b Begin, reason string) error {
