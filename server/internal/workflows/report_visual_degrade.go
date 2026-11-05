@@ -110,6 +110,49 @@ func visualSeriesObservations(text string, sourceIndex int) []visualSeriesObserv
 	return out
 }
 
+func uniqueSortedStrings(values []string) []string {
+	sort.Strings(values)
+	out := values[:0]
+	for _, value := range values {
+		if len(out) == 0 || out[len(out)-1] != value {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func uniqueStringsInOrder(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func uniqueSortedInts(values []int) []int {
+	sort.Ints(values)
+	out := values[:0]
+	for _, value := range values {
+		if len(out) == 0 || out[len(out)-1] != value {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func sourceListLabel(values []int) string {
+	values = uniqueSortedInts(values)
+	parts := make([]string, len(values))
+	for i, value := range values {
+		parts[i] = strconv.Itoa(value)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
 // visualPotentialSeries is a conservative gate that only blocks a degrade. It
 // is intentionally loose: a missed series allows a visible degrade, which QA
 // can audit; a false positive only keeps the current fail-and-fix behavior.
@@ -158,33 +201,30 @@ func visualPotentialSeries(findings []QuestionNotes, body string) (bool, string)
 				if left.year == right.year || !contains(left) || !contains(right) {
 					continue
 				}
-				years := []string{left.year, right.year}
-				sort.Strings(years)
-				sources := []int{left.source, right.source}
-				sort.Ints(sources)
-				sourceLabel := fmt.Sprintf("[%d,%d]", sources[0], sources[1])
-				if sources[0] == sources[1] {
-					sourceLabel = fmt.Sprintf("[%d]", sources[0])
+				years := uniqueSortedStrings([]string{left.year, right.year})
+				if len(years) < 2 {
+					continue
 				}
-				return true, clip(fmt.Sprintf("%s@%s:%s", unit, sourceLabel, strings.Join(years, ",")), 120)
+				return true, clip(fmt.Sprintf("type=annual unit=%s source=%s years=%s", unit, sourceListLabel([]int{left.source, right.source}), strings.Join(years, ",")), 120)
 			}
 		}
 		// Single-period category chart: at least two distinct values from the
 		// source that also appear in the body with the same citation.
-		matched := 0
-		var sources []int
-		var years []string
+		var matched []visualSeriesObservation
 		for _, observation := range observations {
 			if contains(observation) {
-				matched++
-				sources = append(sources, observation.source)
-				years = append(years, observation.year)
+				matched = append(matched, observation)
 			}
 		}
-		if matched >= 2 {
-			sort.Ints(sources)
-			sort.Strings(years)
-			return true, clip(fmt.Sprintf("%s@[%d]:%s", unit, sources[0], strings.Join(years, ",")), 120)
+		if len(matched) >= 2 {
+			var sources []int
+			var years, values []string
+			for _, observation := range matched {
+				sources = append(sources, observation.source)
+				years = append(years, observation.year)
+				values = append(values, observation.value)
+			}
+			return true, clip(fmt.Sprintf("type=category unit=%s source=%s period=%s values=%s", unit, sourceListLabel(sources), strings.Join(uniqueStringsInOrder(years), ","), strings.Join(uniqueStringsInOrder(values), ",")), 120)
 		}
 	}
 	return false, visualDegradeGateNone

@@ -59,9 +59,28 @@ func TestVisualPotentialSeriesFindsSameSourceActualAndForecast(t *testing.T) {
 	findings, body := comparableVisualEvidence()
 	ok, evidence := visualPotentialSeries(findings, body)
 	require.True(t, ok)
-	require.Contains(t, evidence, "亿元@[1]")
+	require.Contains(t, evidence, "type=annual unit=亿元 source=[1] years=2024,2026")
+	require.NotContains(t, evidence, "%@")
 	require.Contains(t, evidence, "2024")
 	require.Contains(t, evidence, "2026")
+}
+
+func TestVisualPotentialSeriesFormatsCategoryEvidence(t *testing.T) {
+	findings, body := comparableVisualEvidence()
+	// Replace the annual pair with two same-year percentages from the failed
+	// smoke task; the gate stays conservative (category potential) but the
+	// evidence must be readable, deduplicated and type-tagged.
+	findings[0].SourceExcerpts = []SourceExcerpt{{Source: 1, Text: "IDC全球2024年12月份的调研发现，69%的人使用了生成式AI应用，22%的人每天都在使用生成式AI应用 [1]。"}}
+	body = "IDC全球2024年12月份的调研发现，69%的人使用了生成式AI应用，22%的人每天都在使用生成式AI应用 [1]。"
+	ok, evidence := visualPotentialSeries(findings, body)
+	require.True(t, ok)
+	require.Contains(t, evidence, "type=category")
+	require.Contains(t, evidence, "unit=%")
+	require.Contains(t, evidence, "source=[1]")
+	require.Contains(t, evidence, "period=2024")
+	require.Contains(t, evidence, "values=69,22")
+	require.NotContains(t, evidence, "%@")
+	require.NotContains(t, evidence, "2024,2024")
 }
 
 func TestVisualPotentialSeriesIgnoresQualitativeReport(t *testing.T) {
@@ -96,7 +115,7 @@ func TestVisualDegradeBlockedWhenSeriesExists(t *testing.T) {
 	require.ErrorIs(t, err, errVisualDataPresent)
 	require.NotContains(t, logs.String(), "report visual degraded")
 	require.Contains(t, logs.String(), "report visual degrade blocked")
-	require.Contains(t, logs.String(), "亿元@[1]:2024,2026")
+	require.Contains(t, logs.String(), "type=annual unit=亿元 source=[1] years=2024,2026")
 }
 
 func TestVisualDegradeNoSources(t *testing.T) {
