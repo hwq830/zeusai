@@ -161,10 +161,23 @@ func TestInsertVisualsIsIdempotent(t *testing.T) {
 	spec := agentVisualSpec("一、规模", "L1", "bar")
 	once, inserted, _ := insertVisuals(uuid.Nil, md, []reporttemplate.VisualSpec{spec})
 	require.Equal(t, 1, inserted)
+	// Clear-then-insert is idempotent in state: the second call replaces the
+	// block rather than appending it.
 	twice, inserted, _ := insertVisuals(uuid.Nil, once, []reporttemplate.VisualSpec{spec})
-	require.Equal(t, 0, inserted)
+	require.Equal(t, 1, inserted)
 	require.Equal(t, once, twice)
 	require.Equal(t, 1, strings.Count(twice, "```zeus-chart"))
+}
+
+func TestInsertVisualsClearsStaleChartBlocks(t *testing.T) {
+	md := "## 一、规模\n\n```zeus-chart\n{\"anchor\":\"一、规模\",\"title\":\"旧标题\",\"level\":\"L1\"}\n```\n\n正文\n"
+	spec := agentVisualSpec("一、规模", "L1", "bar")
+	got, inserted, missing := insertVisuals(uuid.Nil, md, []reporttemplate.VisualSpec{spec})
+	require.Equal(t, 1, inserted)
+	require.Equal(t, 0, missing)
+	require.Equal(t, 1, strings.Count(got, "```zeus-chart"))
+	require.NotContains(t, got, "旧标题")
+	require.Contains(t, got, `"title":"测试图 L1"`)
 }
 
 func TestInsertVisualsDoesNotUseHeadingInsideCodeFence(t *testing.T) {

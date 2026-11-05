@@ -387,3 +387,76 @@ func TestReportVisualAgentReviseUnresolvedPublishesCharts(t *testing.T) {
 	require.Contains(t, logs.String(), "report revise unresolved")
 	require.Contains(t, logs.String(), "reason=output_truncated")
 }
+
+func TestRevisePayloadStripsCharts(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"s","markdown":"## 一、规模\n\n修订"}`}}}
+	a := Activities{LLM: provider}
+	draft := reportDraft{Markdown: "## 一、规模\n\n正文\n\n```zeus-chart\n{\"title\":\"图A\",\"level\":\"L1\"}\n```\n"}
+	_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	require.Len(t, provider.requests, 1)
+	content := provider.requests[0].Messages[0].Content
+	require.NotContains(t, content, "zeus-chart")
+	require.NotContains(t, content, "图A")
+	require.Contains(t, provider.requests[0].System, "图表会由系统在修订后自动回填")
+}
+
+func TestReviewPayloadKeepsCharts(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}}}
+	a := Activities{LLM: provider}
+	draft := reportDraft{Markdown: "## 一、规模\n\n正文\n\n```zeus-chart\n{\"title\":\"图A\",\"level\":\"L1\"}\n```\n"}
+	_, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, draft)
+	require.NoError(t, err)
+	require.Contains(t, provider.requests[0].Messages[0].Content, "zeus-chart")
+}
+
+func TestReviewVerdictLogsCountsWithoutIssueText(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(old)
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"revise","issues":[{"severity":"high","evidence":"SECRET_EVIDENCE","suggestion":"SECRET_SUGGESTION"},{"severity":"low","evidence":"low-evidence","suggestion":"low-suggestion"}]}`}}}
+	a := Activities{LLM: provider}
+	out, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "## 一、规模\n\n正文"})
+	require.NoError(t, err)
+	require.Equal(t, "revise", out.Status)
+	got := logs.String()
+	for _, want := range []string{"report review verdict", "attempt=1", "status=revise", "issue_count=2", "severity_high=1", "severity_medium=0", "severity_low=1"} {
+		require.Contains(t, got, want)
+	}
+	require.NotContains(t, got, "SECRET_EVIDENCE")
+	require.NotContains(t, got, "SECRET_SUGGESTION")
+}
+
+func TestReportVisualAgentReviseStaleChartsCleared(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	draft := reportDraft{Summary: "original", Markdown: "# Report\n\n## 一、规模\n\n正文一\n\n## 五、未来趋势研判（2026-2030）\n\n正文二\n"}
+	revised := reportDraft{Summary: "revised", Markdown: "# Report\n\n## 一、规模\n\n修订一\n\n```zeus-chart\n{\"anchor\":\"一、规模\",\"title\":\"旧标题一\",\"level\":\"L1\"}\n```\n\n## 五、未来趋势研判（2026-2030）\n\n修订二\n\n```zeus-chart\n{\"anchor\":\"五、未来趋势研判（2026-2030）\",\"title\":\"旧标题二\",\"level\":\"L3\"}\n```\n"}
+	specs := []reporttemplate.VisualSpec{
+		agentVisualSpec("一、规模", "L1", "bar"),
+		agentVisualSpec("五、未来趋势研判（2026-2030）", "L3", "line"),
+	}
+	var published reportDraft
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return(specs, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
+	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(revised, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		published = args.Get(3).(reportDraft)
+	}).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportQualityPipeline(ctx, p, findings, nil)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+	require.Equal(t, 2, strings.Count(published.Markdown, "```zeus-chart"), "stale model charts must be cleared before reinserting")
+	require.NotContains(t, published.Markdown, "旧标题一")
+	require.NotContains(t, published.Markdown, "旧标题二")
+}

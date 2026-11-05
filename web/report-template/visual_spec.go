@@ -212,30 +212,6 @@ func parseVisualSpec(raw string) (VisualSpec, bool) {
 	return spec, true
 }
 
-// ContainsVisualSpec reports whether markdown already has an identical VisualSpec
-// block. Compare the normalized JSON, not the raw whitespace, so a revision that
-// pretty-prints a block does not cause a duplicate insertion.
-func ContainsVisualSpec(markdown string, spec VisualSpec) bool {
-	want, err := json.Marshal(spec)
-	if err != nil {
-		return false
-	}
-	for _, match := range chartBlock.FindAllStringSubmatch(markdown, -1) {
-		if len(match) != 2 {
-			continue
-		}
-		var existing VisualSpec
-		if json.Unmarshal([]byte(match[1]), &existing) != nil || existing.Level == "" {
-			continue
-		}
-		got, err := json.Marshal(existing)
-		if err == nil && string(got) == string(want) {
-			return true
-		}
-	}
-	return false
-}
-
 // RenderVisualSpec validates and renders one self-contained figure. The visible
 // L2/L3 badge is produced here, not read from the agent-written caption. The SVG
 // is mobile-first: viewBox width 360, bar height 240, line height 300.
