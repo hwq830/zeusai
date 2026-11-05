@@ -1,8 +1,10 @@
 package workflows
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -135,7 +137,7 @@ func TestQualityPipelineOutcomes(t *testing.T) {
 					env.OnActivity(a.ReviewReport, mock.Anything, p, findings, revised).Return(reportReview{Status: "pass"}, nil).Once()
 				}
 			}
-			env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.MatchedBy(func(r reportReview) bool { return r.Status == tc.want })).Return(nil).Once()
+			env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.MatchedBy(func(r reportReview) bool { return r.Status == tc.want }), mock.Anything).Return(nil).Once()
 			env.ExecuteWorkflow(func(ctx workflow.Context) error {
 				ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
 				return reportQualityPipeline(ctx, p, findings, notes)
@@ -223,13 +225,15 @@ func TestReportVisualAgentPipeline(t *testing.T) {
 		agentVisualSpec("五、未来趋势研判（2026-2030）", "L3", "line"),
 	}
 	var published reportDraft
+	var publishedState string
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
 	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func(headings []string) bool {
 		return len(headings) == 2 && headings[0] == "一、规模" && headings[1] == "五、未来趋势研判（2026-2030）"
 	})).Return(specs, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
-	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		published = args.Get(3).(reportDraft)
+		publishedState = args.Get(5).(string)
 	}).Return(nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
@@ -238,6 +242,7 @@ func TestReportVisualAgentPipeline(t *testing.T) {
 	require.NoError(t, env.GetWorkflowError())
 	env.AssertExpectations(t)
 	require.Equal(t, 2, strings.Count(published.Markdown, "```zeus-chart"))
+	require.Equal(t, reportReviewResolved, publishedState)
 	firstHeading := strings.Index(published.Markdown, "## 一、规模")
 	firstChart := strings.Index(published.Markdown, `"anchor":"一、规模"`)
 	secondHeading := strings.Index(published.Markdown, "## 五、未来趋势研判（2026-2030）")
@@ -261,13 +266,15 @@ func TestReportVisualAgentReinsertsAfterRevise(t *testing.T) {
 		agentVisualSpec("五、未来趋势研判（2026-2030）", "L3", "line"),
 	}
 	var published reportDraft
+	var publishedState string
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
 	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return(specs, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
 	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(revised, nil).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
-	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		published = args.Get(3).(reportDraft)
+		publishedState = args.Get(5).(string)
 	}).Return(nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
 		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
@@ -276,6 +283,7 @@ func TestReportVisualAgentReinsertsAfterRevise(t *testing.T) {
 	require.NoError(t, env.GetWorkflowError())
 	env.AssertExpectations(t)
 	require.Equal(t, 2, strings.Count(published.Markdown, "```zeus-chart"), "revise must reinsert charts")
+	require.Equal(t, reportReviewResolved, publishedState)
 	require.Contains(t, published.Markdown, "修订一")
 	require.Contains(t, published.Markdown, `"anchor":"一、规模"`)
 }
@@ -292,7 +300,7 @@ func TestReportVisualAgentFailureIsolated(t *testing.T) {
 	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
 	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return([]reporttemplate.VisualSpec(nil), errors.New("plan failed")).Once()
 	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
-	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		published = args.Get(3).(reportDraft)
 	}).Return(nil).Once()
 	env.ExecuteWorkflow(func(ctx workflow.Context) error {
@@ -303,4 +311,79 @@ func TestReportVisualAgentFailureIsolated(t *testing.T) {
 	env.AssertExpectations(t)
 	require.NotContains(t, published.Markdown, "zeus-chart")
 	require.Contains(t, published.Markdown, "正文")
+}
+
+func TestReviseTruncationRetriesOnceWithoutThinking(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{
+		{FinishReason: "length"},
+		{Content: `{"summary":"revised","markdown":"## 一、规模\n\n修订正文"}`},
+	}}
+	a := Activities{LLM: provider}
+	out, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "## 一、规模\n\n正文"}, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	require.Contains(t, out.Markdown, "修订正文")
+	require.Len(t, provider.requests, 2)
+	require.Equal(t, 16384, provider.requests[0].MaxTokens)
+	require.False(t, provider.requests[0].DisableThinking)
+	require.Equal(t, 24576, provider.requests[1].MaxTokens)
+	require.True(t, provider.requests[1].DisableThinking)
+}
+
+func TestReviseTruncationTwiceFails(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{FinishReason: "length"}, {FinishReason: "length"}}}
+	a := Activities{LLM: provider}
+	_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "## 一、规模\n\n正文"}, reportReview{Status: "revise"})
+	require.Error(t, err)
+	require.Len(t, provider.requests, 2)
+	require.Equal(t, 24576, provider.requests[1].MaxTokens)
+	require.Equal(t, "output_truncated", reviseFailureReason(err))
+}
+
+func TestReviseEmptyOutputIsClassified(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"s","markdown":"  "}`}}}
+	a := Activities{LLM: provider}
+	_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "## 一、规模\n\n正文"}, reportReview{Status: "revise"})
+	require.ErrorIs(t, err, errReviseEmptyOutput)
+	require.Len(t, provider.requests, 1)
+	require.Equal(t, "empty_output", reviseFailureReason(err))
+	require.Equal(t, "model_error", reviseFailureReason(errors.New("provider down")))
+}
+
+func TestReportVisualAgentReviseUnresolvedPublishesCharts(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(old)
+
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	draft := reportDraft{Summary: "original", Markdown: "# Report\n\n## 一、规模\n\n正文一\n\n## 五、未来趋势研判（2026-2030）\n\n正文二\n"}
+	specs := []reporttemplate.VisualSpec{
+		agentVisualSpec("一、规模", "L1", "bar"),
+		agentVisualSpec("五、未来趋势研判（2026-2030）", "L3", "line"),
+	}
+	var published reportDraft
+	var publishedState string
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return(specs, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
+	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(reportDraft{}, llm.ErrOutputTruncated).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		published = args.Get(3).(reportDraft)
+		publishedState = args.Get(5).(string)
+	}).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportQualityPipeline(ctx, p, findings, nil)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+	require.Equal(t, reportReviewUnresolved, publishedState)
+	require.Equal(t, 2, strings.Count(published.Markdown, "```zeus-chart"), "charts must survive a failed revision")
+	require.Contains(t, logs.String(), "report revise unresolved")
+	require.Contains(t, logs.String(), "reason=output_truncated")
 }

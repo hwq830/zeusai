@@ -41,6 +41,11 @@ type reportReview struct {
 // activity and filter are intentionally kept.
 const useVisualAgent = true
 
+const (
+	reportReviewResolved   = "resolved"
+	reportReviewUnresolved = "unresolved"
+)
+
 func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []QuestionNotes, notes []string) error {
 	var a *Activities
 	optional := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: 7 * time.Minute, RetryPolicy: &temporal.RetryPolicy{MaximumAttempts: 1}})
@@ -65,6 +70,7 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 			draft.Markdown += "\n\n" + visual
 		}
 	}
+	reviewState := reportReviewResolved
 	var review reportReview
 	if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &review); err != nil {
 		review = reportReview{Status: "unavailable"}
@@ -84,9 +90,12 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 			} else {
 				review = recheck
 			}
+		} else {
+			reviewState = reportReviewUnresolved
+			slog.Info("report revise unresolved", "task_id", plan.TaskID, "report_id", plan.ReportID, "reason", reviseFailureReason(err))
 		}
 	}
-	return workflow.ExecuteActivity(ctx, a.PublishReviewedReport, plan, findings, draft, review).Get(ctx, nil)
+	return workflow.ExecuteActivity(ctx, a.PublishReviewedReport, plan, findings, draft, review, reviewState).Get(ctx, nil)
 }
 
 func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, notes []string) (reportDraft, error) {
@@ -202,23 +211,63 @@ func logReviewAttempt(taskID uuid.UUID, attempt int, req llm.Request, resp llm.R
 		"error_type", fmt.Sprintf("%T", err))
 }
 
+var errReviseEmptyOutput = errors.New("empty revised report")
+
+const (
+	reviseBaseTokens  = 16384
+	reviseRetryTokens = 24576
+)
+
 func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, r reportReview) (reportDraft, error) {
 	merged, sources := mergeNotes(findings)
 	payload, _ := json.Marshal(map[string]any{"topic": p.Topic, "evidence": merged, "draft": d, "review": r})
+	req := llm.Request{
+		Purpose:   "report.revise",
+		Tier:      llm.TierStrong,
+		MaxTokens: reviseBaseTokens,
+		System:    "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。",
+		Messages:  []llm.Message{{Role: "user", Content: string(payload)}},
+		UserID:    &p.UserID,
+		TaskID:    &p.TaskID,
+	}
 	var out reportDraft
-	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.revise", Tier: llm.TierStrong, MaxTokens: 8192, System: "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
+	_, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
+	if err != nil && errors.Is(err, llm.ErrOutputTruncated) {
+		// A revision must emit the whole markdown. Thinking competes with the
+		// output budget, so the single retry disables it and raises the cap.
+		// The baseline Request has no ReasoningEffort field; DisableThinking is
+		// the adapter's supported switch for the same outcome.
+		req.MaxTokens = reviseRetryTokens
+		req.DisableThinking = true
+		out = reportDraft{}
+		_, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
+	}
 	if err != nil {
 		return reportDraft{}, err
 	}
 	if strings.TrimSpace(out.Markdown) == "" {
-		return reportDraft{}, fmt.Errorf("empty revised report")
+		return reportDraft{}, errReviseEmptyOutput
 	}
 	out.Summary = p.Lang.Model(out.Summary)
 	out.Markdown = reporttemplate.FilterCharts(p.Lang.Model(out.Markdown), p.Lang.Model(merged), len(sources))
 	return out, nil
 }
 
-func (a *Activities) PublishReviewedReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, r reportReview) error {
+func reviseFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	if errors.Is(err, llm.ErrOutputTruncated) || strings.Contains(message, "output_truncated") || strings.Contains(message, "output truncated") {
+		return "output_truncated"
+	}
+	if errors.Is(err, errReviseEmptyOutput) || strings.Contains(message, "empty revised report") {
+		return "empty_output"
+	}
+	return "model_error"
+}
+
+func (a *Activities) PublishReviewedReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, r reportReview, reviewState string) error {
 	merged, sources := mergeNotes(findings)
 	d.Markdown = reporttemplate.FilterCharts(d.Markdown, p.Lang.Model(merged), len(sources))
 	if r.Status != "pass" || len(r.Issues) > 0 {
@@ -238,7 +287,11 @@ func (a *Activities) PublishReviewedReport(ctx context.Context, p ReportPlan, fi
 		return err
 	}
 	src, _ := json.Marshal(orEmptySources(sources))
-	if _, err := a.Q.CompleteReport(ctx, db.CompleteReportParams{ID: p.ReportID, UserID: p.UserID, Title: p.Title, Summary: d.Summary, Markdown: d.Markdown, Sources: src, SourceCount: int32(len(sources)), WordCount: int32(wordCount(p.Lang, reporttemplate.WithoutCharts(d.Markdown)))}); err != nil {
+	if reviewState != reportReviewResolved && reviewState != reportReviewUnresolved {
+		reviewState = reportReviewResolved
+	}
+	state := reviewState
+	if _, err := a.Q.CompleteReport(ctx, db.CompleteReportParams{ID: p.ReportID, UserID: p.UserID, Title: p.Title, Summary: d.Summary, Markdown: d.Markdown, Sources: src, SourceCount: int32(len(sources)), WordCount: int32(wordCount(p.Lang, reporttemplate.WithoutCharts(d.Markdown))), ReviewState: &state}); err != nil {
 		return err
 	}
 	step := writeStep(p.UILang, len(p.Questions)+1)

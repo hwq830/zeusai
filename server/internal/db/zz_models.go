@@ -495,6 +495,7 @@ type Report struct {
 	HiddenReason         string
 	HiddenBy             *uuid.UUID
 	RegeneratedFrom      *uuid.UUID
+	ReviewState          *string
 }
 
 type ReportFeedback struct {

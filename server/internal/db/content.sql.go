@@ -189,7 +189,7 @@ func (q *Queries) AdminContentIssues(ctx context.Context, arg AdminContentIssues
 const adminCreateRegeneratedReport = `-- name: AdminCreateRegeneratedReport :one
 INSERT INTO reports (user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, language, regenerated_from)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from
+RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state
 `
 
 type AdminCreateRegeneratedReportParams struct {
@@ -241,6 +241,7 @@ func (q *Queries) AdminCreateRegeneratedReport(ctx context.Context, arg AdminCre
 		&i.HiddenReason,
 		&i.HiddenBy,
 		&i.RegeneratedFrom,
+		&i.ReviewState,
 	)
 	return i, err
 }
@@ -1046,7 +1047,7 @@ func (q *Queries) AdminSetBriefingSections(ctx context.Context, arg AdminSetBrie
 
 const adminSetReportHidden = `-- name: AdminSetReportHidden :one
 UPDATE reports SET hidden_at = $1, hidden_reason = $2, hidden_by = $3
-WHERE id = $4 RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from
+WHERE id = $4 RETURNING id, user_id, task_id, title, topic, depth, focuses, source_briefing_item_id, status, summary, markdown, sources, source_count, word_count, pdf_key, pdf_status, created_at, completed_at, language, hidden_at, hidden_reason, hidden_by, regenerated_from, review_state
 `
 
 type AdminSetReportHiddenParams struct {
@@ -1088,6 +1089,7 @@ func (q *Queries) AdminSetReportHidden(ctx context.Context, arg AdminSetReportHi
 		&i.HiddenReason,
 		&i.HiddenBy,
 		&i.RegeneratedFrom,
+		&i.ReviewState,
 	)
 	return i, err
 }

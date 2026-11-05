@@ -100,3 +100,33 @@ func TestQueriesAgainstSchema(t *testing.T) {
 		t.Fatal("account deletion must cascade")
 	}
 }
+
+func TestCompleteReportPersistsReviewState(t *testing.T) {
+	ctx := context.Background()
+	q := db.New(testdb.New(t))
+	user, err := q.CreateUser(ctx, db.CreateUserParams{Nickname: "review-state", Phone: ptr("+8613800000099"), Timezone: "Asia/Shanghai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := q.CreateReport(ctx, db.CreateReportParams{UserID: user.ID, Title: "状态", Topic: "状态", Depth: "standard", Focuses: []string{}, Language: "zh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := "unresolved"
+	if _, err := q.CompleteReport(ctx, db.CompleteReportParams{
+		ID:          report.ID,
+		UserID:      user.ID,
+		Title:       "状态",
+		Sources:     []byte(`[]`),
+		ReviewState: &state,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := q.GetReport(ctx, db.GetReportParams{ID: report.ID, UserID: user.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReviewState == nil || *got.ReviewState != state {
+		t.Fatalf("review_state = %v, want %q", got.ReviewState, state)
+	}
+}
