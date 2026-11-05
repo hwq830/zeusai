@@ -416,6 +416,96 @@ func ChartBlocks(markdown string) string {
 	return strings.Join(chartBlock.FindAllString(markdown, -1), "\n")
 }
 
+// normalizeChartText removes only presentation differences: whitespace,
+// full-width digits/letters and the full-width percent sign. It never expands
+// synonyms, abbreviations or metric names, so containment after normalization
+// is still literal containment of the original words.
+func normalizeChartText(s string) string {
+	return normalizeChartTextWithSpaces(s, false)
+}
+
+// normalizeChartTextKeepSpaces normalizes width and case but keeps one space
+// between tokens. Value binding relies on word boundaries (for example
+// "in mid-2022"), so it cannot use the compact form.
+func normalizeChartTextKeepSpaces(s string) string {
+	return normalizeChartTextWithSpaces(s, true)
+}
+
+func normalizeChartTextWithSpaces(s string, keepSpaces bool) string {
+	runes := []rune(s)
+	var b strings.Builder
+	last := rune(0)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r == '\n' && keepSpaces {
+			if b.Len() > 0 && last != '\n' {
+				b.WriteRune('\n')
+			}
+			last = '\n'
+			continue
+		}
+		if unicode.IsSpace(r) {
+			j := i + 1
+			for j < len(runes) && unicode.IsSpace(runes[j]) {
+				j++
+			}
+			if keepSpaces {
+				if b.Len() > 0 && last != ' ' && last != '\n' {
+					b.WriteRune(' ')
+					last = ' '
+				}
+			} else if j < len(runes) && unicode.IsDigit(last) && isChartDigit(runes[j]) {
+				// Keep one separator between two digits so a year and its value
+				// are not concatenated.
+				b.WriteRune(' ')
+				last = ' '
+			}
+			continue
+		}
+		switch {
+		case r >= '０' && r <= '９':
+			r = '0' + (r - '０')
+		case r >= 'Ａ' && r <= 'Ｚ':
+			r = 'A' + (r - 'Ａ')
+		case r >= 'ａ' && r <= 'ｚ':
+			r = 'a' + (r - 'ａ')
+		case r == '％':
+			r = '%'
+		}
+		r = unicode.ToLower(r)
+		b.WriteRune(r)
+		last = r
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func isChartDigit(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= '０' && r <= '９')
+}
+
+func normalizedChart(c Chart) Chart {
+	return normalizedChartWith(c, normalizeChartText)
+}
+
+func normalizedChartKeepSpaces(c Chart) Chart {
+	return normalizedChartWith(c, normalizeChartTextKeepSpaces)
+}
+
+func normalizedChartWith(c Chart, normalize func(string) string) Chart {
+	out := c
+	out.Title = normalize(c.Title)
+	out.Period = normalize(c.Period)
+	out.Unit = normalize(c.Unit)
+	out.Scope = normalize(c.Scope)
+	out.Qualifier = normalize(c.Qualifier)
+	out.Points = make([]ChartPoint, len(c.Points))
+	for i, point := range c.Points {
+		point.Label = normalize(point.Label)
+		out.Points[i] = point
+	}
+	return out
+}
+
 // FilterCharts only retains charts whose labels, values, unit and period appear
 // together with the cited source in one research-notes paragraph. The prose is
 // written independently, so rejecting a chart never removes the report text.
@@ -472,9 +562,12 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 			reasons["invalid_period"]++
 			return ""
 		}
-		for _, point := range c.Points {
+		nc := normalizedChart(c)
+		vc := normalizedChartKeepSpaces(c)
+		for pointIndex := range c.Points {
+			npoint := nc.Points[pointIndex]
 			supported := false
-			cite := regexp.MustCompile(`\[` + strconv.Itoa(point.Source) + `\]`)
+			cite := regexp.MustCompile(`\[` + strconv.Itoa(npoint.Source) + `\]`)
 			// Diagnose the closest paragraph from the cited source only. These
 			// flags contain no labels, values, quotations or source content.
 			bestScore := -1
@@ -483,12 +576,13 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 				if !cite.MatchString(para) {
 					continue
 				}
-				lower := strings.ToLower(para)
-				qualifier := strings.ToLower(c.Qualifier)
+				npara := normalizeChartText(para)
+				vpara := normalizeChartTextKeepSpaces(para)
+				qualifier := nc.Qualifier
 				marked := false
 				mismatch := false
 				for _, word := range []string{"预测", "預測", "预估", "預估", "估算", "估计", "估計", "假设", "假設", "情景", "forecast", "estimate", "projected", "projection", "scenario"} {
-					if strings.Contains(lower, word) {
+					if strings.Contains(npara, word) {
 						marked = true
 						if !strings.Contains(qualifier, word) {
 							mismatch = true
@@ -497,19 +591,19 @@ func FilterChartsWithReasons(markdown, evidence string, sourceCount int) (string
 				}
 				// A mixed forecast/actual paragraph cannot safely establish which
 				// category a co-occurring number belongs to.
-				periodPresent := strings.Contains(para, c.Period) || (len(rangeDates) > 0 && strings.Contains(para, point.Label))
+				periodPresent := strings.Contains(npara, nc.Period) || (len(rangeDates) > 0 && strings.Contains(npara, npoint.Label))
 				checks := []struct {
 					name string
 					ok   bool
 				}{
-					{"label", strings.Contains(para, point.Label)},
-					{"unit", strings.Contains(para, c.Unit)},
+					{"label", strings.Contains(npara, npoint.Label)},
+					{"unit", strings.Contains(npara, nc.Unit)},
 					{"period", periodPresent},
-					{"title", c.Type != "line" || strings.Contains(para, c.Title)},
-					{"scope", c.Scope == "" || strings.Contains(para, c.Scope)},
-					{"qualifier", c.Qualifier == "" || strings.Contains(para, c.Qualifier)},
-					{"value_binding", pointValueMatches(para, c, point)},
-					{"forecast_context", !mismatch && !(marked && (strings.Contains(lower, "实际") || strings.Contains(lower, "實際") || strings.Contains(lower, "actual")))},
+					{"title", c.Type != "line" || strings.Contains(npara, nc.Title)},
+					{"scope", nc.Scope == "" || strings.Contains(npara, nc.Scope)},
+					{"qualifier", nc.Qualifier == "" || strings.Contains(npara, nc.Qualifier)},
+					{"value_binding", pointValueMatches(vpara, vc, vc.Points[pointIndex])},
+					{"forecast_context", !mismatch && !(marked && (strings.Contains(npara, "实际") || strings.Contains(npara, "實際") || strings.Contains(npara, "actual")))},
 				}
 				var failed []string
 				for _, check := range checks {

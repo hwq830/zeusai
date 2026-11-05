@@ -463,7 +463,7 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 		feedback, _ := json.Marshal(rejected)
 		req.Messages = append(req.Messages,
 			llm.Message{Role: "assistant", Content: resp.Content},
-			llm.Message{Role: "user", Content: "上一版部分或全部图表未通过校验。按原候选数组的 1 起始序号列出拒绝阶段和固定类别（仅供定位）:" + string(feedback) + "。已通过原文和正文校验的图将保留，无需重复；请优先修正被拒项，逐点核对来源、标签、数值、单位、时间、范围和限定词。单位须与该数值的原词一致，统计对象写在范围或标题，不得混淆人数和人次、倍率或币种；仅使用原文与正文均明确支持的数据，不得推算或补造。若已通过的图存在且其余候选无法修正，返回 charts 空数组及非空 unresolved_chart_explanation，说明剩余候选的具体缺口，不得称全部数据不可比较。只输出符合要求的 JSON。"},
+			llm.Message{Role: "user", Content: "上一版部分或全部图表未通过校验。按原候选数组的 1 起始序号列出拒绝阶段和固定类别（仅供定位）:" + string(feedback) + "。已通过原文和正文校验的图将保留，无需重复；请优先修正被拒项，逐点核对来源、标签、数值、单位、时间、范围和限定词。若拒绝原因是 evidence_scope，说明 scope 未逐字出现在原文；请改用原文中确实存在的更短共同短语（例如只保留行政区或主题词），不要扩写或改写成正文口径。单位须与该数值的原词一致，统计对象写在范围或标题，不得混淆人数和人次、倍率或币种；仅使用原文与正文均明确支持的数据，不得推算或补造。若已通过的图存在且其余候选无法修正，返回 charts 空数组及非空 unresolved_chart_explanation，说明剩余候选的具体缺口，不得称全部数据不可比较。只输出符合要求的 JSON。"},
 		)
 	}
 	return "", fmt.Errorf("visual planning exhausted retries")
