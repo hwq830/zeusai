@@ -319,6 +319,9 @@ func (a *Activities) planReportVisualsWithReview(ctx context.Context, p ReportPl
 	if draft != "" {
 		chartEvidence = mergeChartEvidence(findings)
 		hints := visualCandidateHints(findings, draft, len(sources))
+		// hint_count attributes a later empty or rejected visual plan to the
+		// hint extractor instead of guessing from the final chart count.
+		slog.Info("report visual hints", "task_id", p.TaskID, "source_count", len(sources), "hint_count", len(hints))
 		data, _ := json.Marshal(map[string]any{"topic": p.Topic, "focuses": p.Focuses, "scope": p.Scope, "uncertainties": p.Uncertainties, "evidence": buildReportEvidence(findings), "report": draft, "candidate_hints": hints, "review": review, "existing_charts": existingCharts})
 		visualInput = string(data)
 	}

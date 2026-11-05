@@ -31,7 +31,7 @@ func TestVisualCandidateHintsRequireMatchedSourceAndReportSentences(t *testing.T
 	require.Equal(t, 1, check(findings, strings.Replace(body, "[2]", "[1]", 1)))
 	require.Equal(t, 1, check(findings, strings.Replace(body, "56.15", "99.15", 1)))
 	require.Equal(t, 1, check(findings, strings.Replace(body, "出口总量56.15亿", "出口收入56.15亿", 1)))
-	require.Equal(t, 1, check(findings, strings.Replace(body, "2024年，", "2024年，预计", 1)))
+	require.Equal(t, 2, check(findings, strings.Replace(body, "2024年，", "2024年，预计", 1)))
 	require.Equal(t, 1, check(findings, strings.Replace(body, "2024年，", "2024年，第一季度", 1)))
 }
 
@@ -66,4 +66,20 @@ func TestVisualCandidateHintsKeepSourceContextAndIgnoreUncitedConflicts(t *testi
 	require.Len(t, hints, 1)
 	require.Contains(t, hints[0].SourceContext, "甲地区统计")
 	require.NotContains(t, hints[0].SourceContext, "乙地区")
+}
+
+func TestVisualCandidateHintsIncludeApproximateAndForecastValues(t *testing.T) {
+	findings := []QuestionNotes{{
+		Sources:         []search.Result{{URL: "https://example.test/market"}},
+		NumericExcerpts: []NumericExcerpt{{Source: 1, Text: "数据显示， 2024 年 中国 Al 大模型 市场 规模约为294.16亿元，预计2026年将突破700亿元。"}},
+	}}
+	body := "## 市场规模\n\n2024年中国AI大模型市场规模约294.16亿元 [1]。同一材料预计2026年将突破700亿元 [1]。"
+	hints := visualCandidateHints(findings, body, 1)
+	require.Len(t, hints, 2)
+	require.Equal(t, "2024", hints[0].Year)
+	require.Equal(t, "294.16", string(hints[0].Value))
+	require.Equal(t, "约", hints[0].Qualifier)
+	require.Equal(t, "2026", hints[1].Year)
+	require.Equal(t, "700", string(hints[1].Value))
+	require.Equal(t, "预计", hints[1].Qualifier)
 }
