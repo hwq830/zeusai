@@ -11,6 +11,7 @@ Zeus（暂定名）个人 AI 助理的服务端：Go 1.25，单模块；接口�
 - 不要直接推 main。每项改动开一个分支和一个 PR，等 Jason 合并。
 - 提交前跑：`go build ./... && go vet ./... && go test ./...`。数据库测试需要 `ZEUS_TEST_DATABASE_URL`，接口端到端测试还要 `ZEUS_TEST_REDIS_URL` 和 `ZEUS_TEST_TEMPORAL_HOST`；本地没有这些服务时测试会跳过，以 CI 结果为准。
 - 改了 `api/openapi.yaml`：通知 iOS 跑 `scripts/sync-openapi.sh`。改了 `api/admin.yaml`：在 zeusai-admin 跑 `npm run sync:api`。
+- 改了 `web/report-template/` 的 DOM、CSS 或主题变量：通知 iOS 重新生成 Mock 快照，并核对 `zeusai-admin` 的 `src/lib/reportPreview.ts`——那里注入的 `:root` 是模板主题变量的副本，模板新增变量时要同步补上，否则后台预览的配色会和 App / 分享页不一致。
 - 新迁移按编号顺序加在 `server/migrations`，不要修改已经部署过的迁移。
 - `.env`、`secrets/`、任何 API Key、密码都不能进仓库、PR 描述或对话。
 
