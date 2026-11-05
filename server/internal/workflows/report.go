@@ -101,6 +101,8 @@ type QuestionNotes struct {
 	Sources  []search.Result
 	// Numeric excerpts are verbatim source text, with local source indices.
 	NumericExcerpts []NumericExcerpt `json:",omitempty"`
+	// Source excerpts are verbatim partial text from successfully read pages.
+	SourceExcerpts []SourceExcerpt `json:",omitempty"`
 	// Indexed like Sources. A successful read means text was extracted, not
 	// that every claim or the publisher's identity has been verified.
 	SourceReadStatus        []string `json:",omitempty"`
@@ -109,6 +111,10 @@ type QuestionNotes struct {
 	SourceReaderUnavailable bool     `json:",omitempty"`
 }
 type NumericExcerpt struct {
+	Source int
+	Text   string
+}
+type SourceExcerpt struct {
 	Source int
 	Text   string
 }
@@ -390,18 +396,7 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 		}
 		list, statuses := researchSources(sources, full, readOK, attempted)
 		out.SourceReadStatus = statuses
-		// Preserve complete numeric source paragraphs within a fixed per-question budget.
-		for j, text := range full {
-			if text == "" {
-				continue
-			}
-			clipped := utf8.RuneCountInString(text) > 40000
-			out.NumericExcerpts = append(out.NumericExcerpts, numericSourceExcerptsForQuery(clip(text, 40000), j+1, clipped, q.Question+" "+plan.Topic)...)
-			if len(out.NumericExcerpts) >= 8 {
-				out.NumericExcerpts = out.NumericExcerpts[:8]
-				break
-			}
-		}
+		out.NumericExcerpts, out.SourceExcerpts = collectResearchExcerpts(full, readOK, q.Question+" "+plan.Topic)
 		raw, _ := json.Marshal(list)
 		var res struct {
 			Notes string `json:"notes"`

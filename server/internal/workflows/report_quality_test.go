@@ -186,6 +186,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 			require.Len(t, s.requests, tc.calls)
 			require.Equal(t, 16000, s.requests[0].MaxTokens)
 			require.False(t, s.requests[0].DisableThinking)
+			require.Equal(t, "low", s.requests[0].ReasoningEffort)
 			require.Contains(t, s.requests[0].System, "最多列 5 项")
 			require.Contains(t, s.requests[0].System, "不要为凑数制造问题")
 			require.Contains(t, s.requests[0].System, "不要把不同指标的独立图表使用不同单位当成事实错误")
@@ -196,6 +197,7 @@ func TestReviewRetriesMalformedOrTruncatedResponse(t *testing.T) {
 				}
 				require.Equal(t, wantTokens, s.requests[1].MaxTokens)
 				require.False(t, s.requests[1].DisableThinking)
+				require.Equal(t, "low", s.requests[1].ReasoningEffort)
 			}
 			if tc.failed {
 				require.Error(t, err)
@@ -382,10 +384,12 @@ func TestInternalEvidenceStatusRequiresRevision(t *testing.T) {
 func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
 	evidence := "2024 城镇 16.3% 农村 9.9%"
-	findings := []QuestionNotes{{Question: "Q", Notes: "Notes [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp}}, SourceReadStatus: []string{"read"}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
+	qualitative := "这里提供了不含数字的可核验政策说明。"
+	findings := []QuestionNotes{{Question: "Q", Notes: "UNVERIFIED_NOTE 999 [1]", Sources: []search.Result{{URL: "https://example.test/official", PublishedAt: &stamp, Snippet: "UNVERIFIED_SNIPPET"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: []SourceExcerpt{{Source: 1, Text: qualitative}}, NumericExcerpts: []NumericExcerpt{{Source: 1, Text: evidence}}}}
 	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"ok","markdown":"2024 城镇 16.3% 农村 9.9% [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"只有一年数据"}`}}}
 	a := Activities{LLM: s}
-	writeRequest, err := reportDraftRequest(ReportPlan{}, findings, nil)
+	plan := ReportPlan{Topic: "主题", Focuses: []string{"关注政策"}, Scope: "地区", Uncertainties: []string{"范围待核"}}
+	writeRequest, err := reportDraftRequest(plan, findings, []string{"用户附加要求"})
 	require.NoError(t, err)
 	require.NotContains(t, writeRequest.System, "图表用独立 Markdown 代码块")
 	require.Contains(t, writeRequest.System, "只写正文")
@@ -393,25 +397,87 @@ func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, legacyPrompt, "图表用独立 Markdown 代码块")
 	draft := reportDraft{Summary: "ok", Markdown: "2024 城镇 16.3% 农村 9.9% [1]"}
-	_, err = a.ReviewReport(context.Background(), ReportPlan{}, findings, draft)
+	_, err = a.ReviewReport(context.Background(), plan, findings, draft)
 	require.NoError(t, err)
-	_, err = a.ReviseReport(context.Background(), ReportPlan{}, findings, draft, reportReview{Status: "revise"})
+	_, err = a.ReviseReport(context.Background(), plan, findings, draft, reportReview{Status: "revise"})
 	require.NoError(t, err)
-	_, err = a.planReportVisuals(context.Background(), ReportPlan{}, findings, draft.Markdown)
+	_, err = a.planReportVisuals(context.Background(), plan, findings, draft.Markdown)
 	require.NoError(t, err)
 	requests := append([]llm.Request{writeRequest}, s.requests...)
+	var shared any
 	for _, request := range requests {
 		var payload map[string]any
 		require.NoError(t, json.Unmarshal([]byte(request.Messages[0].Content), &payload))
-		require.Contains(t, payload, "source_excerpts")
-		require.Contains(t, payload["source_excerpts"], evidence)
+		require.Contains(t, payload, "evidence")
+		if shared == nil {
+			shared = payload["evidence"]
+		} else {
+			require.Equal(t, shared, payload["evidence"])
+		}
 		raw, _ := json.Marshal(payload)
 		require.Contains(t, string(raw), "https://example.test/official")
-		require.Contains(t, string(raw), "2025-01-21T16:00:00Z")
+		require.Contains(t, string(raw), evidence)
+		require.Contains(t, string(raw), qualitative)
+		require.NotContains(t, string(raw), "UNVERIFIED_NOTE")
+		require.NotContains(t, string(raw), "UNVERIFIED_SNIPPET")
+		require.NotContains(t, string(raw), "2025-01-21T16:00:00Z")
+		require.NotContains(t, string(raw), "publishedAt")
+		require.NotContains(t, string(raw), "dateLastCrawled")
 		require.Contains(t, string(raw), "readStatus")
 		require.Contains(t, request.System, "原文")
 	}
+	require.Contains(t, writeRequest.Messages[0].Content, "用户附加要求")
+	for _, request := range s.requests {
+		require.Contains(t, request.Messages[0].Content, "关注政策")
+		if request.Purpose == "report.review" {
+			require.NotContains(t, request.Messages[0].Content, "范围待核")
+		} else {
+			require.Contains(t, request.Messages[0].Content, "范围待核")
+		}
+	}
+	var reviewPayload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(s.requests[0].Messages[0].Content), &reviewPayload))
+	require.NotContains(t, reviewPayload, "uncertainties")
+	require.Equal(t, draft.Summary, reviewPayload["summary"])
+	require.Equal(t, draft.Markdown, reviewPayload["markdown"])
+	require.Equal(t, "地区", reviewPayload["scope"])
 	require.Contains(t, requests[1].System, "至少两个数据点")
+}
+
+func TestLegacyVisualPlannerKeepsLegacyEvidence(t *testing.T) {
+	stamp := time.Date(2025, 1, 21, 16, 0, 0, 0, time.UTC)
+	findings := []QuestionNotes{{Question: "Q", Notes: "LEGACY_NOTE [1]", Sources: []search.Result{{URL: "https://example.test", PublishedAt: &stamp}}}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":[]}`}}}
+	a := Activities{LLM: s}
+	_, err := a.PlanReportVisuals(context.Background(), ReportPlan{}, findings)
+	require.NoError(t, err)
+	require.Len(t, s.requests, 1)
+	require.Contains(t, s.requests[0].Messages[0].Content, "LEGACY_NOTE")
+	require.Contains(t, s.requests[0].Messages[0].Content, "2025-01-21T16:00:00Z")
+	require.Contains(t, s.requests[0].System, legacyReportEvidenceRules)
+}
+
+func TestQualitativeSourceFlowsThroughAllNewStages(t *testing.T) {
+	page := "首页 | 登录 | 搜索 | 帮助\n公共服务政策明确保障公众获得服务，并保护个人隐私。"
+	excerpts := sourceExcerptsForQuery(page, 1, false, "公共服务政策")
+	require.NotEmpty(t, excerpts)
+	findings := []QuestionNotes{{Question: "公共服务政策", Notes: "UNVERIFIED 999", Sources: []search.Result{{URL: "https://example.test/policy"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: excerpts}}
+	s := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[]}`}, {Content: `{"summary":"政策","markdown":"公众获得服务 [1]"}`}, {Content: `{"charts":[],"no_chart_reason":"insufficient_comparable_data"}`}}}
+	a := Activities{LLM: s}
+	p := ReportPlan{Topic: "公共服务政策"}
+	write, err := reportDraftRequest(p, findings, nil)
+	require.NoError(t, err)
+	draft := reportDraft{Markdown: "公众获得服务 [1]"}
+	_, err = a.ReviewReport(context.Background(), p, findings, draft)
+	require.NoError(t, err)
+	_, err = a.ReviseReport(context.Background(), p, findings, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	_, err = a.planReportVisuals(context.Background(), p, findings, draft.Markdown)
+	require.NoError(t, err)
+	for _, req := range append([]llm.Request{write}, s.requests...) {
+		require.Contains(t, req.Messages[0].Content, excerpts[0].Text)
+		require.NotContains(t, req.Messages[0].Content, "UNVERIFIED")
+	}
 }
 
 func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
@@ -424,16 +490,47 @@ func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
 	require.ErrorContains(t, validateReviewedVisuals(ReportPlan{}, findings, draft, 1), "publication validation")
 }
 
-func TestRevisionRetriesTruncatedAndDisablesThinking(t *testing.T) {
-	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 8192}}, {Content: `{"summary":"ok","markdown":"Evidence [1]"}`}}}
+func TestRevisionUsesBoundedReasoningAndRetryBudget(t *testing.T) {
+	valid := llm.Response{Content: `{"summary":"ok","markdown":"Evidence [1]"}`}
+	for _, tc := range []struct {
+		name      string
+		responses []llm.Response
+		maxTokens []int
+		wantErr   bool
+	}{
+		{"single response", []llm.Response{valid}, []int{16000}, false},
+		{"truncated then valid", []llm.Response{{FinishReason: "length", UsageKnown: true, Usage: llm.Usage{OutputTokens: 16000}}, valid}, []int{16000, 24000}, false},
+		{"malformed then valid", []llm.Response{{Content: `{"summary":`}, valid}, []int{16000, 16000}, false},
+		{"truncated twice", []llm.Response{{FinishReason: "length"}, {FinishReason: "length"}}, []int{16000, 24000}, true},
+		{"empty revision", []llm.Response{{Content: `{"summary":"ok","markdown":""}`}}, []int{16000}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sequenceProvider{responses: tc.responses}
+			a := Activities{LLM: s}
+			_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{}, reportReview{})
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Len(t, s.requests, len(tc.maxTokens))
+			for i, request := range s.requests {
+				require.False(t, request.DisableThinking)
+				require.Equal(t, "low", request.ReasoningEffort)
+				require.Equal(t, tc.maxTokens[i], request.MaxTokens)
+			}
+		})
+	}
+}
+
+func TestRevisionRetryHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &sequenceProvider{responses: []llm.Response{{FinishReason: "length"}}}
 	a := Activities{LLM: s}
-	_, err := a.ReviseReport(context.Background(), ReportPlan{}, nil, reportDraft{}, reportReview{})
-	require.NoError(t, err)
-	require.Len(t, s.requests, 2)
-	require.True(t, s.requests[0].DisableThinking)
-	require.True(t, s.requests[1].DisableThinking)
-	require.Equal(t, 8192, s.requests[0].MaxTokens)
-	require.Equal(t, 12000, s.requests[1].MaxTokens)
+	_, err := a.ReviseReport(ctx, ReportPlan{}, nil, reportDraft{}, reportReview{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, s.requests, 1)
 }
 
 func TestPrepareVisualsProducesSupportedGraphicAndExplainsAbsence(t *testing.T) {
@@ -696,8 +793,8 @@ func TestRevisionRetriesMalformedJSONAtSameLimit(t *testing.T) {
 				require.Error(t, err)
 			}
 			require.Len(t, s.requests, 2)
-			require.Equal(t, 8192, s.requests[0].MaxTokens)
-			require.Equal(t, 8192, s.requests[1].MaxTokens)
+			require.Equal(t, 16000, s.requests[0].MaxTokens)
+			require.Equal(t, 16000, s.requests[1].MaxTokens)
 			require.True(t, s.requests[0].JSON)
 			require.True(t, s.requests[1].JSON)
 			require.Contains(t, s.requests[1].System, "JSON 语法有误")

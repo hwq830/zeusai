@@ -163,6 +163,23 @@ func TestFilterChartsRejectsCombinedScopeAndUnsupportedUnit(t *testing.T) {
 	}
 }
 
+func TestFilterChartsAcceptsOriginalNumericUnitAndRejectsMismatch(t *testing.T) {
+	evidence := "2023年国内出游人次48.91亿 [1]\n\n2024年国内出游人次56.15亿 [2]"
+	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"国内出游人次\",\"scope\":\"国内出游人次\",\"unit\":\"亿\",\"period\":\"2023—2024\",\"points\":[{\"label\":\"2023\",\"value\":48.91,\"source\":1},{\"label\":\"2024\",\"value\":56.15,\"source\":2}]}\n```\n"
+	if got, reasons := FilterChartsWithReasons(chart, evidence, 2); !strings.Contains(got, "zeus-chart") {
+		t.Fatalf("original unit should be accepted: %v", reasons)
+	}
+	for _, bad := range []string{
+		strings.Replace(chart, `"unit":"亿"`, `"unit":"亿人次"`, 1),
+		strings.Replace(chart, `"value":56.15`, `"value":65.22`, 1),
+		strings.Replace(chart, `"scope":"国内出游人次"`, `"scope":"国内出游人数"`, 1),
+	} {
+		if got, reasons := FilterChartsWithReasons(bad, evidence, 2); got != "" {
+			t.Fatalf("unsupported unit, value or scope unexpectedly accepted: %v", reasons)
+		}
+	}
+}
+
 func TestFilterChartsDiagnosesClosestCitedPassageWithoutContent(t *testing.T) {
 	_, reasons := FilterChartsWithReasons(validChart, "2025 搜索 25% [1]", 1)
 	if reasons["missing_evidence"] != 1 || reasons["evidence_label"] != 1 || reasons["evidence_value_binding"] != 1 {
