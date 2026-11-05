@@ -114,6 +114,7 @@ func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []Q
 	_, err = llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.write", Tier: llm.TierStrong, System: sys + "\n只写正文，不输出图表代码块。", Messages: []llm.Message{{Role: "user", Content: "<notes>\n" + merged + "</notes>"}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
 	out.Summary = p.Lang.Model(out.Summary)
 	out.Markdown = reporttemplate.WithoutCharts(p.Lang.Model(out.Markdown))
+	out.Markdown = reporttemplate.TrimLeadingTitle(out.Markdown, p.Title)
 	if err == nil && strings.TrimSpace(out.Markdown) == "" {
 		err = fmt.Errorf("empty report draft")
 	}
@@ -239,6 +240,26 @@ const (
 	reviseRetryTokens = 24576
 )
 
+const reviseSystemPrompt = `根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。summary 是给读者的报告摘要，必须概括报告结论本身，不是本次修改的说明；不得出现“修订”“按审查意见”“保留原有章节”“删除/修改了…”这类描述修改过程的措辞。返回 JSON：{"summary":"...","markdown":"..."}。`
+
+const reviseSummaryRetryPrompt = reviseSystemPrompt + `
+上一次 summary 写成了修改过程说明；这次 summary 必须只写报告结论摘要，不得提修改过程。`
+
+var reviseSummaryChangelogWords = []string{
+	"修订", "按审查意见", "保留原", "删除", "修改为", "调整为", "本次", "修改了", "删去", "删掉",
+	"this revision", "per the review", "kept the original", "removed", "changed to", "adjusted to",
+}
+
+func reviseSummaryHasChangelog(summary string) bool {
+	lower := strings.ToLower(summary)
+	for _, word := range reviseSummaryChangelogWords {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, r reportReview) (reportDraft, error) {
 	merged, sources := mergeNotes(findings)
 	cleanDraft := d
@@ -248,31 +269,52 @@ func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []
 		Purpose:   "report.revise",
 		Tier:      llm.TierStrong,
 		MaxTokens: reviseBaseTokens,
-		System:    "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。",
+		System:    reviseSystemPrompt,
 		Messages:  []llm.Message{{Role: "user", Content: string(payload)}},
 		UserID:    &p.UserID,
 		TaskID:    &p.TaskID,
 	}
 	var out reportDraft
-	_, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
-	if err != nil && errors.Is(err, llm.ErrOutputTruncated) {
-		// A revision must emit the whole markdown. Thinking competes with the
-		// output budget, so the single retry disables it and raises the cap.
-		// The baseline Request has no ReasoningEffort field; DisableThinking is
-		// the adapter's supported switch for the same outcome.
-		req.MaxTokens = reviseRetryTokens
-		req.DisableThinking = true
+	summaryFallback := false
+	for attempt := 1; attempt <= 2; attempt++ {
 		out = reportDraft{}
-		_, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
+		_, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
+		if err != nil {
+			if errors.Is(err, llm.ErrOutputTruncated) && attempt == 1 {
+				// A revision must emit the whole markdown. Thinking competes
+				// with the output budget, so the single retry disables it and
+				// raises the cap. There is never a third call.
+				req.MaxTokens = reviseRetryTokens
+				req.DisableThinking = true
+				continue
+			}
+			return reportDraft{}, err
+		}
+		if strings.TrimSpace(out.Markdown) == "" {
+			return reportDraft{}, errReviseEmptyOutput
+		}
+		if !reviseSummaryHasChangelog(out.Summary) {
+			break
+		}
+		if attempt == 1 {
+			req.System = reviseSummaryRetryPrompt
+			continue
+		}
+		// The second attempt also wrote a changelog. Keep the revised body,
+		// but never show the process note as the reader-facing summary.
+		summaryFallback = true
+		break
 	}
-	if err != nil {
-		return reportDraft{}, err
-	}
-	if strings.TrimSpace(out.Markdown) == "" {
-		return reportDraft{}, errReviseEmptyOutput
+	if summaryFallback {
+		out.Summary = d.Summary
+		slog.Info("report summary fell back", "task_id", p.TaskID, "reason", "revision_changelog")
 	}
 	out.Summary = p.Lang.Model(out.Summary)
 	out.Markdown = reporttemplate.FilterCharts(p.Lang.Model(out.Markdown), p.Lang.Model(merged), len(sources))
+	out.Markdown = reporttemplate.TrimLeadingTitle(out.Markdown, p.Title)
+	if strings.TrimSpace(out.Markdown) == "" {
+		return reportDraft{}, errReviseEmptyOutput
+	}
 	return out, nil
 }
 

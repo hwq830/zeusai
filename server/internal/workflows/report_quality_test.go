@@ -460,3 +460,82 @@ func TestReportVisualAgentReviseStaleChartsCleared(t *testing.T) {
 	require.NotContains(t, published.Markdown, "旧标题一")
 	require.NotContains(t, published.Markdown, "旧标题二")
 }
+
+func TestReviseSummaryChangelogRetriesOnce(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{
+		{Content: `{"summary":"本次修订删除了不支持的对比。","markdown":"## A\n\n修订一"}`},
+		{Content: `{"summary":"报告结论摘要。","markdown":"## A\n\n修订二"}`},
+	}}
+	a := Activities{LLM: provider}
+	draft := reportDraft{Summary: "原摘要", Markdown: "## A\n\n正文"}
+	out, err := a.ReviseReport(context.Background(), ReportPlan{Title: "报告标题"}, nil, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	require.Equal(t, "报告结论摘要。", out.Summary)
+	require.Contains(t, out.Markdown, "修订二")
+	require.Len(t, provider.requests, 2, "summary retry must stay within the 2-call budget")
+	require.Contains(t, provider.requests[1].System, "只写报告结论摘要")
+}
+
+func TestReviseSummaryChangelogFallsBackToOriginal(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(old)
+	provider := &sequenceProvider{responses: []llm.Response{
+		{Content: `{"summary":"本次修订删除图表。","markdown":"## A\n\n修订一"}`},
+		{Content: `{"summary":"按审查意见保留原有章节。","markdown":"## A\n\n修订二"}`},
+	}}
+	a := Activities{LLM: provider}
+	draft := reportDraft{Summary: "原摘要", Markdown: "## A\n\n正文"}
+	out, err := a.ReviseReport(context.Background(), ReportPlan{Title: "报告标题"}, nil, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	require.Equal(t, "原摘要", out.Summary)
+	require.Contains(t, out.Markdown, "修订二")
+	require.Len(t, provider.requests, 2)
+	require.Contains(t, logs.String(), "report summary fell back")
+	require.Contains(t, logs.String(), "reason=revision_changelog")
+}
+
+func TestReviseTruncationThenInvalidSummaryFallsBack(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{
+		{FinishReason: "length"},
+		{Content: `{"summary":"本次修订调整了结论。","markdown":"## A\n\n修订二"}`},
+	}}
+	a := Activities{LLM: provider}
+	draft := reportDraft{Summary: "原摘要", Markdown: "## A\n\n正文"}
+	out, err := a.ReviseReport(context.Background(), ReportPlan{Title: "报告标题"}, nil, draft, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	require.Equal(t, "原摘要", out.Summary)
+	require.Equal(t, 24576, provider.requests[1].MaxTokens)
+	require.True(t, provider.requests[1].DisableThinking)
+	require.Len(t, provider.requests, 2)
+}
+
+func TestReviseStripsMatchingLeadingTitle(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"报告结论摘要。","markdown":"# 报告标题\n\n## A\n\n正文"}`}}}
+	a := Activities{LLM: provider}
+	out, err := a.ReviseReport(context.Background(), ReportPlan{Title: "报告标题"}, nil, reportDraft{Summary: "原摘要", Markdown: "## A\n\n正文"}, reportReview{Status: "revise"})
+	require.NoError(t, err)
+	require.NotContains(t, out.Markdown, "# 报告标题")
+	require.True(t, strings.HasPrefix(out.Markdown, "## A"))
+}
+
+func TestSummaryChangelogWords(t *testing.T) {
+	for _, summary := range []string{
+		"本次修订收敛了结论。", "按审查意见删除了图表。", "保留原有章节。", "删除了不支持的对比。",
+		"修改为更保守的结论。", "调整为基准情景。", "This revision removed a chart.",
+	} {
+		require.True(t, reviseSummaryHasChangelog(summary), summary)
+	}
+	require.False(t, reviseSummaryHasChangelog("报告结论：2026 年市场仍将保持增长。"))
+	require.Contains(t, reviseSystemPrompt, "给读者的报告摘要")
+	require.Contains(t, reviseSystemPrompt, "不是本次修改的说明")
+}
+
+func TestReviseMatchingTitleOnlyIsEmptyOutput(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"summary":"报告结论摘要。","markdown":"# 报告标题"}`}}}
+	a := Activities{LLM: provider}
+	_, err := a.ReviseReport(context.Background(), ReportPlan{Title: "报告标题"}, nil, reportDraft{Summary: "原摘要", Markdown: "## A\n\n正文"}, reportReview{Status: "revise"})
+	require.ErrorIs(t, err, errReviseEmptyOutput)
+	require.Len(t, provider.requests, 1)
+}
