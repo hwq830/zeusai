@@ -68,9 +68,43 @@ var labels = map[string]Labels{
 var citeRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 var conclusionLabel = regexp.MustCompile(`(?i)<strong>(事实|判断|建议|事實|判斷|建議|fact|analysis|recommendation)</strong>`)
 
+// TrimLeadingTitle removes a leading H1 only when its text is the same as the
+// report title. A different leading H1 is intentional content and is preserved.
+func TrimLeadingTitle(markdown, title string) string {
+	target := strings.Join(strings.Fields(title), " ")
+	if target == "" {
+		return markdown
+	}
+	lines := strings.Split(markdown, "\n")
+	first := 0
+	for first < len(lines) && strings.TrimSpace(lines[first]) == "" {
+		first++
+	}
+	if first >= len(lines) {
+		return markdown
+	}
+	line := strings.TrimSpace(lines[first])
+	if len(line) < 2 || line[0] != '#' || (line[1] != ' ' && line[1] != '\t') {
+		return markdown
+	}
+	heading := strings.Join(strings.Fields(strings.TrimSpace(line[1:])), " ")
+	if heading != target {
+		return markdown
+	}
+	next := first + 1
+	for next < len(lines) && strings.TrimSpace(lines[next]) == "" {
+		next++
+	}
+	return strings.Join(lines[next:], "\n")
+}
+
 // Render produces the full HTML document. Raw HTML in the Markdown is not rendered
 // (goldmark's default), so model output cannot inject markup.
 func Render(d Data) ([]byte, error) {
+	// Defensive: older or externally rendered reports may still start with the
+	// same H1 as the hero title. The workflow cleaners are primary; this is the
+	// render-side fallback.
+	d.Markdown = TrimLeadingTitle(d.Markdown, d.Title)
 	valid := map[int]bool{}
 	for _, source := range d.Sources {
 		valid[source.Index] = true
