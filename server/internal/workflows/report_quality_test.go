@@ -480,6 +480,14 @@ func TestQualitativeSourceFlowsThroughAllNewStages(t *testing.T) {
 	}
 }
 
+func TestMockProviderHandlesGeneralEvidenceWithoutComparableData(t *testing.T) {
+	findings := []QuestionNotes{{Question: "公共服务政策", Sources: []search.Result{{URL: "https://example.test/policy"}}, SourceReadStatus: []string{"read"}, SourceExcerpts: []SourceExcerpt{{Source: 1, Text: "公共服务政策明确保障公众获得服务，并保护个人隐私。"}}}}
+	a := Activities{LLM: llm.Mock{}}
+	draft, err := a.PrepareReportVisuals(context.Background(), ReportPlan{Topic: "公共服务政策"}, findings, reportDraft{Markdown: "公共服务政策保障公众获得服务 [1]。"}, "")
+	require.NoError(t, err)
+	require.Contains(t, draft.Markdown, "未找到同时可核对来源和正文的可比较原始数值")
+}
+
 func TestReviewedChartsArePreservedOrPublicationFails(t *testing.T) {
 	const evidence = "Population 2022 (thousands): India 1,417,173; China 1,412,175"
 	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"Population\",\"unit\":\"thousands\",\"period\":\"2022\",\"points\":[{\"label\":\"India\",\"value\":1417173,\"source\":1},{\"label\":\"China\",\"value\":1412175,\"source\":1}]}\n```\n"
