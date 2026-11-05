@@ -11,7 +11,7 @@ iPhone ──HTTPS──▶ Caddy :443 ─▶ api :8080 ─┐
 ## 1. 开机器（约 10 分钟）
 
 - **地域**：推荐**中国香港**，域名不需要 ICP 备案，马上就能用 HTTPS。选境内地域的话，备案下来之前 80/443 不能用域名访问。
-- **规格**：4 vCPU / 8 GiB（如 ecs.g7.xlarge 或 u1 通用型），系统盘 ESSD 60 GiB，镜像选 Ubuntu 24.04 或 Alibaba Cloud Linux 3。
+- **规格**：实测当前机器是 **2 vCPU / 3.62 GiB 内存 / 4 GiB swap / 40 GiB 系统盘**，不是早期文档写的 4 vCPU / 8 GiB。建议规格仍是 4 vCPU / 8 GiB（如 ecs.g7.xlarge 或 u1 通用型）+ ESSD 60 GiB；用 2 核时冷构建约 11 分钟，构建期内存余量很小（Go 编译与 npm 并行会顶到 swap），不要在这个规格上再跑别的重活。镜像选 Ubuntu 24.04 或 Alibaba Cloud Linux 3。
 - **公网**：分配公网 IP（按流量计费即可）。
 - **安全组**：入方向放行 22（只放你的 IP）、80、443。不要放行 5432/6379/7233/8080/8081。
 - **域名解析**：两条 A 记录指向公网 IP，例如 `api-dev.<你的域名>`、`admin-dev.<你的域名>`。
@@ -29,7 +29,7 @@ git clone https://<token>@github.com/hwq830/zeusai-admin.git
 
 两个仓库必须放在同一个目录下（compose 从 `../../../zeusai-admin` 构建控制台）。
 
-## 3. 配置并启动（首次构建约 5–10 分钟）
+## 3. 配置并启动（首次是冷构建，2 vCPU 实测约 10–20 分钟）
 
 ```sh
 cd /opt/zeus/zeusai/deploy/cloud-dev
@@ -43,6 +43,8 @@ docker compose ps -a     # migrate / seed / console / volumes-init 是 Exited (0
 ```
 
 启动顺序由 compose 保证：卷权限 → 迁移 → 种子数据 → api / orchestrator / admin → Caddy 申请证书（第一次要 1 分钟左右）。
+
+耗时分档（2026-11-05 实测）：build cache 为空时冷构建约 11 分钟（2 vCPU，`COMPOSE_PARALLEL_LIMIT=1`），有缓存时 3–6 分钟；冷构建峰值磁盘约 +4–6 GB。按 4 核预估会明显偏乐观。
 
 创建控制台账号（不设 `ZEUS_ADMIN_PASSWORD` 时会打印一次随机密码）：
 
