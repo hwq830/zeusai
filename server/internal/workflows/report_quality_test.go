@@ -429,8 +429,18 @@ func TestEvidenceIsPassedThroughWriteReviewAndRevision(t *testing.T) {
 	require.Contains(t, writeRequest.Messages[0].Content, "用户附加要求")
 	for _, request := range s.requests {
 		require.Contains(t, request.Messages[0].Content, "关注政策")
-		require.Contains(t, request.Messages[0].Content, "范围待核")
+		if request.Purpose == "report.review" {
+			require.NotContains(t, request.Messages[0].Content, "范围待核")
+		} else {
+			require.Contains(t, request.Messages[0].Content, "范围待核")
+		}
 	}
+	var reviewPayload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(s.requests[0].Messages[0].Content), &reviewPayload))
+	require.NotContains(t, reviewPayload, "uncertainties")
+	require.Equal(t, draft.Summary, reviewPayload["summary"])
+	require.Equal(t, draft.Markdown, reviewPayload["markdown"])
+	require.Equal(t, "地区", reviewPayload["scope"])
 	require.Contains(t, requests[1].System, "至少两个数据点")
 }
 
