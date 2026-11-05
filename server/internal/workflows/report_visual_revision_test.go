@@ -141,3 +141,121 @@ func TestRevisedVisualsStopIfSourceReaderUnavailable(t *testing.T) {
 	require.ErrorContains(t, err, "source pages unavailable")
 	require.Empty(t, provider.requests)
 }
+
+func TestPartialVisualRejectionCanBeCorrectedWithinBudget(t *testing.T) {
+	findings, body := revisionEvidence()
+	old := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")
+	bad := strings.Replace(revisionNewChart, `"unit":"亿"`, `"unit":"亿人次"`, 1)
+	first := `{"charts":[` + old + "," + bad + `]}`
+	provider := &sequenceProvider{responses: []llm.Response{{Content: first}, {Content: `{"charts":[` + revisionNewChart + `]}`}}}
+	a := Activities{LLM: provider}
+	got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NoError(t, err)
+	require.Len(t, provider.requests, 2)
+	require.Equal(t, 2, strings.Count(got, "```zeus-chart"))
+	require.Contains(t, got, "城乡出游")
+	require.Contains(t, got, "年度国内出游人次")
+	require.NotContains(t, got, `"unit":"亿人次","period":"2023-2024"`)
+	require.NoError(t, validateReviewedVisuals(ReportPlan{}, findings, reportDraft{Markdown: body + "\n\n" + got}, 3))
+	msgs := provider.requests[1].Messages
+	require.Equal(t, first, msgs[len(msgs)-2].Content)
+	require.Contains(t, msgs[len(msgs)-1].Content, `"index":2`)
+	require.Contains(t, msgs[len(msgs)-1].Content, `"stage":"source"`)
+	require.Contains(t, msgs[len(msgs)-1].Content, `"evidence_unit":1`)
+	require.Contains(t, msgs[len(msgs)-1].Content, "已通过原文和正文校验的图将保留")
+}
+
+func TestPartialVisualCorrectionKeepsValidatedAndRejectsFailures(t *testing.T) {
+	findings, body := revisionEvidence()
+	old := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")
+	bad := strings.Replace(revisionNewChart, `"unit":"亿"`, `"unit":"亿人次"`, 1)
+	first := `{"charts":[` + old + "," + bad + `]}`
+	for _, tc := range []struct {
+		name, second string
+		wantErr      bool
+	}{
+		{"explicitly unresolved", `{"charts":[],"unresolved_chart_explanation":"剩余图缺少可核对的单位"}`, false},
+		{"unsupported correction", `{"charts":[` + strings.Replace(revisionNewChart, "56.15", "99.15", 1) + `]}`, false},
+		{"global no-chart claim", `{"charts":[],"no_chart_reason":"insufficient_comparable_data","no_chart_explanation":"无法制图"}`, true},
+		{"missing explanation", `{"charts":[]}`, true},
+		{"malformed output", `{"charts":`, true},
+		{"invalid schema", `{"charts":[{}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &sequenceProvider{responses: []llm.Response{{Content: first}, {Content: tc.second}}}
+			a := Activities{LLM: provider}
+			got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+			require.Len(t, provider.requests, 2)
+			if tc.wantErr {
+				require.Error(t, err)
+				require.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, 1, strings.Count(got, "```zeus-chart"))
+			require.Contains(t, got, "城乡出游")
+			require.NotContains(t, got, "99.15")
+		})
+	}
+	provider := &sequenceProvider{responses: []llm.Response{{Content: first}}}
+	a := Activities{LLM: provider}
+	_, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.ErrorContains(t, err, "unexpected call")
+	require.Len(t, provider.requests, 2)
+}
+
+func TestPartialVisualRetryUsesLatestValidatedTitleAndNeverCallsThirdTime(t *testing.T) {
+	findings, body := revisionEvidence()
+	old := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")
+	bad := strings.Replace(revisionNewChart, `"unit":"亿"`, `"unit":"亿人次"`, 1)
+	corrected := strings.Replace(old, "城乡出游", "城乡出游（来源说明）", 1)
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":[` + old + "," + bad + `]}`}, {Content: `{"charts":[` + corrected + "," + bad + `]}`}}}
+	a := Activities{LLM: provider}
+	got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NoError(t, err)
+	require.Len(t, provider.requests, 2)
+	require.Equal(t, 1, strings.Count(got, "```zeus-chart"))
+	require.Contains(t, got, "城乡出游（来源说明）")
+	require.NotContains(t, got, `"title":"城乡出游"`)
+}
+
+func TestPartialVisualCorrectionReportsBodyRejection(t *testing.T) {
+	findings, body := revisionEvidence()
+	body = strings.Replace(body, "56.15", "56.16", 1)
+	old := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")
+	first := `{"charts":[` + old + "," + revisionNewChart + `]}`
+	provider := &sequenceProvider{responses: []llm.Response{{Content: first}, {Content: `{"charts":[],"unresolved_chart_explanation":"正文缺少对应数值"}`}}}
+	a := Activities{LLM: provider}
+	got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NoError(t, err)
+	require.Len(t, provider.requests, 2)
+	require.Equal(t, 1, strings.Count(got, "```zeus-chart"))
+	feedback := provider.requests[1].Messages[len(provider.requests[1].Messages)-1].Content
+	require.Contains(t, feedback, `"index":2`)
+	require.Contains(t, feedback, `"stage":"body"`)
+	require.Contains(t, feedback, `"missing_evidence":1`)
+}
+
+func TestMalformedFirstResponseUsesTheSharedPartialRetryBudget(t *testing.T) {
+	findings, body := revisionEvidence()
+	old := strings.TrimSuffix(strings.TrimPrefix(revisionOldChart, "```zeus-chart\n"), "\n```")
+	bad := strings.Replace(revisionNewChart, `"unit":"亿"`, `"unit":"亿人次"`, 1)
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"charts":`}, {Content: `{"charts":[` + old + "," + bad + `]}`}}}
+	a := Activities{LLM: provider}
+	got, err := a.planReportVisuals(context.Background(), ReportPlan{}, findings, body)
+	require.NoError(t, err)
+	require.Len(t, provider.requests, 2)
+	require.Equal(t, 1, strings.Count(got, "```zeus-chart"))
+	require.Contains(t, got, "城乡出游")
+}
+
+func TestReviewPromptAllowsEvidencedSubsetWithoutWeakeningSeverityGate(t *testing.T) {
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"pass","issues":[{"severity":"medium","evidence":"数值错误","suggestion":"核对原文"}]}`}}}
+	a := Activities{LLM: provider}
+	got, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "正文"})
+	require.NoError(t, err)
+	require.Equal(t, "revise", got.Status)
+	require.Contains(t, provider.requests[0].System, "至少两点同口径子集")
+	require.Contains(t, provider.requests[0].System, "复合增长率")
+	require.Contains(t, provider.requests[0].System, "统计对象、单位倍率有误")
+}
