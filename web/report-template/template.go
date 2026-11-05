@@ -97,7 +97,12 @@ func Render(d Data) ([]byte, error) {
 		if err := writeMarkdown(d.Markdown[position:match[0]]); err != nil {
 			return nil, err
 		}
-		if chart, ok := parseChart(d.Markdown[match[2]:match[3]], valid); ok {
+		raw := d.Markdown[match[2]:match[3]]
+		if spec, ok := parseVisualSpec(raw); ok {
+			if rendered, err := RenderVisualSpec(spec); err == nil {
+				body.WriteString(rendered)
+			}
+		} else if chart, ok := parseChart(raw, valid); ok {
 			body.WriteString(renderChart(chart, d.Lang))
 		}
 		position = match[1]

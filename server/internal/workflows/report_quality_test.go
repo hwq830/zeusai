@@ -3,11 +3,13 @@ package workflows
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hwq830/zeusai/server/internal/llm"
 	"github.com/hwq830/zeusai/server/internal/search"
+	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	enums "go.temporal.io/api/enums/v1"
@@ -104,10 +106,10 @@ func TestQualityPipelineOutcomes(t *testing.T) {
 			p := ReportPlan{}
 			var findings []QuestionNotes
 			var notes []string
-			draft := reportDraft{Summary: "original", Markdown: "body"}
-			revised := reportDraft{Summary: "revised", Markdown: "fixed"}
+			draft := reportDraft{Summary: "original", Markdown: "## 一、规模\n\nbody"}
+			revised := reportDraft{Summary: "revised", Markdown: "## 一、规模\n\nfixed"}
 			env.OnActivity(a.DraftReport, mock.Anything, p, findings, notes).Return(draft, nil).Once()
-			env.OnActivity(a.PlanReportVisuals, mock.Anything, p, findings).Return("", errors.New("visual unavailable")).Once()
+			env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return([]reporttemplate.VisualSpec(nil), nil).Once()
 			if tc.reviewErr {
 				failure := error(errors.New("review unavailable"))
 				if tc.timeout {
@@ -206,4 +208,99 @@ func TestReviewTruncationHonorsCancellation(t *testing.T) {
 	_, err := a.ReviewReport(ctx, ReportPlan{}, nil, reportDraft{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, s.requests, 1)
+}
+
+func TestReportVisualAgentPipeline(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	draft := reportDraft{Summary: "original", Markdown: "# Report\n\n## 一、规模\n\n正文一\n\n## 五、未来趋势研判（2026-2030）\n\n正文二\n"}
+	specs := []reporttemplate.VisualSpec{
+		agentVisualSpec("一、规模", "L1", "bar"),
+		agentVisualSpec("五、未来趋势研判（2026-2030）", "L3", "line"),
+	}
+	var published reportDraft
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func(headings []string) bool {
+		return len(headings) == 2 && headings[0] == "一、规模" && headings[1] == "五、未来趋势研判（2026-2030）"
+	})).Return(specs, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		published = args.Get(3).(reportDraft)
+	}).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportQualityPipeline(ctx, p, findings, nil)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+	require.Equal(t, 2, strings.Count(published.Markdown, "```zeus-chart"))
+	firstHeading := strings.Index(published.Markdown, "## 一、规模")
+	firstChart := strings.Index(published.Markdown, `"anchor":"一、规模"`)
+	secondHeading := strings.Index(published.Markdown, "## 五、未来趋势研判（2026-2030）")
+	secondChart := strings.Index(published.Markdown, `"anchor":"五、未来趋势研判（2026-2030）"`)
+	require.Less(t, firstHeading, firstChart)
+	require.Less(t, firstChart, secondHeading)
+	require.Less(t, secondHeading, secondChart)
+}
+
+func TestReportVisualAgentReinsertsAfterRevise(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	draft := reportDraft{Summary: "original", Markdown: "# Report\n\n## 一、规模\n\n正文一\n\n## 五、未来趋势研判（2026-2030）\n\n正文二\n"}
+	revised := reportDraft{Summary: "revised", Markdown: "# Report\n\n## 一、规模\n\n修订一\n\n## 五、未来趋势研判（2026-2030）\n\n修订二\n"}
+	specs := []reporttemplate.VisualSpec{
+		agentVisualSpec("一、规模", "L1", "bar"),
+		agentVisualSpec("五、未来趋势研判（2026-2030）", "L3", "line"),
+	}
+	var published reportDraft
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return(specs, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "revise"}, nil).Once()
+	env.OnActivity(a.ReviseReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Return(revised, nil).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		published = args.Get(3).(reportDraft)
+	}).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportQualityPipeline(ctx, p, findings, nil)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+	require.Equal(t, 2, strings.Count(published.Markdown, "```zeus-chart"), "revise must reinsert charts")
+	require.Contains(t, published.Markdown, "修订一")
+	require.Contains(t, published.Markdown, `"anchor":"一、规模"`)
+}
+
+func TestReportVisualAgentFailureIsolated(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	a := &Activities{}
+	env.RegisterActivity(a)
+	p := ReportPlan{}
+	var findings []QuestionNotes
+	draft := reportDraft{Summary: "original", Markdown: "# Report\n\n## 一、规模\n\n正文\n"}
+	var published reportDraft
+	env.OnActivity(a.DraftReport, mock.Anything, p, findings, mock.Anything).Return(draft, nil).Once()
+	env.OnActivity(a.PlanVisuals, mock.Anything, p, findings, mock.MatchedBy(func([]string) bool { return true })).Return([]reporttemplate.VisualSpec(nil), errors.New("plan failed")).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, p, findings, mock.Anything).Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, p, findings, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		published = args.Get(3).(reportDraft)
+	}).Return(nil).Once()
+	env.ExecuteWorkflow(func(ctx workflow.Context) error {
+		ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})
+		return reportQualityPipeline(ctx, p, findings, nil)
+	})
+	require.NoError(t, env.GetWorkflowError())
+	env.AssertExpectations(t)
+	require.NotContains(t, published.Markdown, "zeus-chart")
+	require.Contains(t, published.Markdown, "正文")
 }

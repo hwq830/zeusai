@@ -1,6 +1,7 @@
 package reporttemplate
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -187,6 +188,48 @@ func visualTrendAnchor(anchor string) bool {
 	}
 	for _, word := range visualTrendKeywords {
 		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseVisualSpec distinguishes a P1 VisualSpec block from the legacy Chart
+// block by the presence of the top-level "level" field. A block with a level
+// but invalid payload still returns true, so the caller does not accidentally
+// fall back to the legacy parser.
+func parseVisualSpec(raw string) (VisualSpec, bool) {
+	var probe struct {
+		Level string `json:"level"`
+	}
+	if json.Unmarshal([]byte(raw), &probe) != nil || strings.TrimSpace(probe.Level) == "" {
+		return VisualSpec{}, false
+	}
+	var spec VisualSpec
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return VisualSpec{}, true
+	}
+	return spec, true
+}
+
+// ContainsVisualSpec reports whether markdown already has an identical VisualSpec
+// block. Compare the normalized JSON, not the raw whitespace, so a revision that
+// pretty-prints a block does not cause a duplicate insertion.
+func ContainsVisualSpec(markdown string, spec VisualSpec) bool {
+	want, err := json.Marshal(spec)
+	if err != nil {
+		return false
+	}
+	for _, match := range chartBlock.FindAllStringSubmatch(markdown, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		var existing VisualSpec
+		if json.Unmarshal([]byte(match[1]), &existing) != nil || existing.Level == "" {
+			continue
+		}
+		got, err := json.Marshal(existing)
+		if err == nil && string(got) == string(want) {
 			return true
 		}
 	}

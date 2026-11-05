@@ -1,6 +1,7 @@
 package reporttemplate
 
 import (
+	"encoding/json"
 	"errors"
 	"html"
 	"math"
@@ -258,6 +259,48 @@ func assertVisualTextWithinViewBox(t *testing.T, out string, width float64) {
 		}
 		if left < -0.5 || right > width+0.5 {
 			t.Errorf("text %q spans %.1f..%.1f outside viewBox 0..%.0f", text, left, right, width)
+		}
+	}
+}
+
+func TestFilterChartsPreservesValidVisualSpec(t *testing.T) {
+	spec := visualTestSpec("L1")
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := "```zeus-chart\n" + string(raw) + "\n```\n"
+	got := FilterCharts(block, "2024 100 2025 200 [1]", 1)
+	if !strings.Contains(got, "zeus-chart") {
+		t.Fatal("valid visual spec must survive the legacy filter")
+	}
+	invalid := visualTestSpec("L2")
+	invalid.Formula = ""
+	raw, _ = json.Marshal(invalid)
+	badBlock := "```zeus-chart\n" + string(raw) + "\n```\n"
+	if got := FilterCharts(badBlock, "2024 100 2025 200 [1]", 1); strings.Contains(got, "zeus-chart") {
+		t.Fatal("invalid visual spec must not survive the filter")
+	}
+}
+
+func TestRenderDispatchesVisualSpecAndLegacyChart(t *testing.T) {
+	spec := visualTestSpec("L2")
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visualBlock := "```zeus-chart\n" + string(raw) + "\n```\n"
+	out, err := Render(Data{
+		Markdown: "正文\n\n" + visualBlock + "\n" + validChart,
+		Sources:  []Source{{Index: 1, Title: "source", URL: "https://example.com"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+	for _, want := range []string{`class="report-visual"`, `class="report-chart"`, "L2 · 据 [1][3] 计算"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q", want)
 		}
 	}
 }
