@@ -220,12 +220,14 @@ const (
 
 func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, d reportDraft, r reportReview) (reportDraft, error) {
 	merged, sources := mergeNotes(findings)
-	payload, _ := json.Marshal(map[string]any{"topic": p.Topic, "evidence": merged, "draft": d, "review": r})
+	cleanDraft := d
+	cleanDraft.Markdown = reporttemplate.WithoutCharts(d.Markdown)
+	payload, _ := json.Marshal(map[string]any{"topic": p.Topic, "evidence": merged, "draft": cleanDraft, "review": r})
 	req := llm.Request{
 		Purpose:   "report.revise",
 		Tier:      llm.TierStrong,
 		MaxTokens: reviseBaseTokens,
-		System:    "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。",
+		System:    "根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。返回 JSON：{\"summary\":\"...\",\"markdown\":\"...\"}。",
 		Messages:  []llm.Message{{Role: "user", Content: string(payload)}},
 		UserID:    &p.UserID,
 		TaskID:    &p.TaskID,

@@ -164,10 +164,13 @@ type visualInsertion struct {
 // It never appends to the end: a missing anchor drops that chart. Duplicate
 // insertion is prevented by comparing normalized JSON, not raw whitespace.
 func insertVisuals(taskID uuid.UUID, markdown string, specs []reporttemplate.VisualSpec) (string, int, int) {
+	// Clear first: whatever an earlier draft/revision left behind is replaced.
+	// This makes the final block count equal to the inserted valid specs, and
+	// prevents stale blocks with rewritten titles from surviving the revision.
+	markdown = reporttemplate.WithoutCharts(markdown)
 	inserted, missing := 0, 0
 	groups := map[string][]visualInsertion{}
 	var order []string
-	seen := map[string]bool{}
 	for i, spec := range specs {
 		if err := reporttemplate.ValidateVisualSpec(spec); err != nil {
 			slog.Info("report visual dropped", "task_id", taskID, "index", i+1, "reason", "invalid_schema")
@@ -183,10 +186,6 @@ func insertVisuals(taskID uuid.UUID, markdown string, specs []reporttemplate.Vis
 			continue
 		}
 		key := string(raw)
-		if seen[key] || reporttemplate.ContainsVisualSpec(markdown, spec) {
-			continue
-		}
-		seen[key] = true
 		anchor := strings.TrimSpace(strings.TrimLeft(spec.Anchor, "#"))
 		if _, ok := groups[anchor]; !ok {
 			order = append(order, anchor)
@@ -207,6 +206,12 @@ func insertVisuals(taskID uuid.UUID, markdown string, specs []reporttemplate.Vis
 		position := heading + 1
 		for position < len(lines) && strings.TrimSpace(lines[position]) == "" {
 			position++
+		}
+		// Collapse blank lines left by a previous chart block, so clear-then-
+		// insert does not grow a blank line on every revision.
+		for position-2 > heading && strings.TrimSpace(lines[position-1]) == "" && strings.TrimSpace(lines[position-2]) == "" {
+			lines = append(lines[:position-1], lines[position:]...)
+			position--
 		}
 		insertion := make([]string, 0, len(groups[anchor])*4+1)
 		if position == heading+1 {
