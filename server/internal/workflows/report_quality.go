@@ -162,35 +162,30 @@ func (a *Activities) PrepareReportVisuals(ctx context.Context, p ReportPlan, fin
 	}
 	visual, err := a.planReportVisuals(ctx, p, findings, d.Markdown)
 	if err != nil {
+		if errors.Is(err, errVisualNoCandidates) || errors.Is(err, errVisualBodyMismatch) {
+			return appendVisualDegrade(p, d, findings, len(sources), visualDegradeInsufficient, visualPlanErrorCandidates(err), 2)
+		}
 		return reportDraft{}, fmt.Errorf("visual planning: %w", err)
 	}
 	// A chart must agree with both the research evidence and the report being
 	// reviewed. Do not insert a chart about facts absent from the final prose.
 	if visual != "" {
+		candidates := strings.Count(visual, "```zeus-chart")
 		checked, reasons := reporttemplate.FilterChartsWithReasons(visual, d.Markdown, len(sources))
-		slog.Info("report visual body validation", "task_id", p.TaskID, "candidates", strings.Count(visual, "```zeus-chart"), "accepted", strings.Count(checked, "```zeus-chart"), "rejections", reasons)
+		slog.Info("report visual body validation", "task_id", p.TaskID, "candidates", candidates, "accepted", strings.Count(checked, "```zeus-chart"), "rejections", reasons)
 		visual = strings.TrimSpace(checked)
 		if visual == "" {
-			return reportDraft{}, fmt.Errorf("chart candidates do not match report body")
+			return appendVisualDegrade(p, d, findings, len(sources), visualDegradeInsufficient, candidates, 2)
 		}
 	}
 	if visual != "" {
 		d.Markdown += "\n\n" + visual
 		return d, nil
 	}
-	structure := reporttemplate.StructureFromReport(d.Markdown, len(sources))
-	if structure != "" {
-		d.Markdown += "\n\n" + structure
-	}
 	if len(sources) == 0 {
-		d.Markdown += p.Lang.Pick("\n\n视觉说明：没有可核验的来源，本次未生成图表。", "\n\nVisual note: no verifiable sources were available, so no chart was generated.")
-	} else {
-		d.Markdown += p.Lang.Pick("\n\n视觉说明：未找到同时可核对来源和正文的可比较原始数值，本次未生成数据图表。", "\n\nVisual note: no comparable original values could be verified against both sources and report, so no data chart was generated.")
+		return appendVisualDegrade(p, d, findings, len(sources), visualDegradeNoSources, 0, 0)
 	}
-	if structure != "" {
-		d.Markdown += p.Lang.Pick("上方来源要点摘自正文，属于文字摘要。", " The cited highlights above are excerpts from the report, not a chart.")
-	}
-	return d, nil
+	return appendVisualDegrade(p, d, findings, len(sources), visualDegradeInsufficient, 0, 2)
 }
 
 // PrepareRevisedReportVisuals gives the visual planner one bounded opportunity
@@ -218,6 +213,10 @@ func (a *Activities) PrepareRevisedReportVisuals(ctx context.Context, p ReportPl
 	existingCharts := uniqueChartBlocks(revisedCharts, oldCharts)
 	planned, err := a.planReportVisualsWithReview(ctx, p, findings, body, &review, existingCharts)
 	if err != nil {
+		if errors.Is(err, errVisualNoCandidates) || errors.Is(err, errVisualBodyMismatch) {
+			d.Markdown = body
+			return appendVisualDegrade(p, d, findings, len(sources), visualDegradeInsufficient, visualPlanErrorCandidates(err), 2)
+		}
 		return reportDraft{}, fmt.Errorf("visual replanning: %w", err)
 	}
 	charts := uniqueChartBlocks(planned, revisedCharts, oldCharts)
@@ -226,19 +225,10 @@ func (a *Activities) PrepareRevisedReportVisuals(ctx context.Context, p ReportPl
 		d.Markdown += "\n\n" + charts
 		return d, nil
 	}
-	structure := reporttemplate.StructureFromReport(body, len(sources))
-	if structure != "" {
-		d.Markdown += "\n\n" + structure
-	}
 	if len(sources) == 0 {
-		d.Markdown += p.Lang.Pick("\n\n视觉说明：没有可核验的来源，本次未生成图表。", "\n\nVisual note: no verifiable sources were available, so no chart was generated.")
-	} else {
-		d.Markdown += p.Lang.Pick("\n\n视觉说明：未找到同时可核对来源和正文的可比较原始数值，本次未生成数据图表。", "\n\nVisual note: no comparable original values could be verified against both sources and report, so no data chart was generated.")
+		return appendVisualDegrade(p, d, findings, len(sources), visualDegradeNoSources, 0, 0)
 	}
-	if structure != "" {
-		d.Markdown += p.Lang.Pick("上方来源要点摘自正文，属于文字摘要。", " The cited highlights above are excerpts from the report, not a chart.")
-	}
-	return d, nil
+	return appendVisualDegrade(p, d, findings, len(sources), visualDegradeInsufficient, 0, 2)
 }
 
 func uniqueChartBlocks(groups ...string) string {
@@ -340,7 +330,8 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 	}
 	// A malformed response and an evidence correction share a single retry
 	// budget. Neither kind of failure can lead to a third provider call.
-	failedCandidateStage := ""
+	var failedKind error
+	failedCandidates := 0
 	validatedCharts := ""
 	for attempt := 1; attempt <= 2; attempt++ {
 		out.Charts = nil
@@ -377,8 +368,8 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 			}
 			// A correction cannot silently convert rejected candidates into an
 			// unsupported claim that no comparable data exists.
-			if failedCandidateStage != "" {
-				return "", fmt.Errorf("%s", failedCandidateStage)
+			if failedKind != nil {
+				return "", &visualPlanError{err: failedKind, candidates: failedCandidates}
 			}
 			if draft != "" && attempt == 1 && (out.NoChartReason != "insufficient_comparable_data" || strings.TrimSpace(chartEvidence) != "") {
 				if err := waitVisualRetry(ctx); err != nil {
@@ -438,9 +429,9 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 			result := uniqueChartBlocks(filtered, validatedCharts)
 			if result == "" {
 				if len(rejected) > 0 && rejected[0].Stage == "body" {
-					return "", fmt.Errorf("chart candidates do not match report body")
+					return "", &visualPlanError{err: errVisualBodyMismatch, candidates: len(rejected)}
 				}
-				return "", fmt.Errorf("no visual candidates passed evidence validation")
+				return "", &visualPlanError{err: errVisualNoCandidates, candidates: len(rejected)}
 			}
 			return result, nil
 		}
@@ -448,9 +439,10 @@ candidate_hints 是逐条独立的待核查数据，包含对应原文摘录和�
 			return strings.TrimSpace(filtered), nil
 		}
 		validatedCharts = uniqueChartBlocks(filtered)
-		failedCandidateStage = "no visual candidates passed evidence validation"
+		failedKind = errVisualNoCandidates
+		failedCandidates = len(rejected)
 		if len(accepted) == 0 && len(rejected) > 0 && rejected[0].Stage == "body" {
-			failedCandidateStage = "chart candidates do not match report body"
+			failedKind = errVisualBodyMismatch
 		}
 		if err := waitVisualRetry(ctx); err != nil {
 			return "", err
@@ -602,6 +594,8 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 	req.System += "\n只指出当前正文里仍存在、会影响结论的问题；对已经删除的无依据辅助数据或已充分说明的不确定性，不要求修订者证明来源全网不存在，也不要反复要求无法取得的全局信息。正文不应暴露来源读取状态等内部字段或原始时间戳表，应以自然语言说明可核验性。判断不同年份是否可比要指出具体指标、单位和统计范围差异，名称不同本身不能证明口径不同；保留来源确凿的可比子集及缺项说明。"
 	req.System += "\n用户要求年度图时，若部分年份缺失或口径未核，允许展示有原文及正文依据的至少两点同口径子集并说明缺项，不强制补入不可比年份，也不要求单点图。审查年度方向判断时区分：明确归属于各自来源的年度值或同比方向，并充分保留口径待核等限制，不应仅因跨年范围未完全核实而判为重要错误；若无依据却断言统一口径的跨年增速、累计或复合增长率，或数字、统计对象、单位倍率有误，仍须指出并按实际影响确定严重程度。"
 	req.System += reportEvidenceRules + "\n审核对象是当前 summary、markdown 和实际渲染图表；题目、关注点和范围只是用户需求，不是正文声明。只根据当前报告判断未解决的不确定性，不把规划上下文当作报告自相矛盾。判断图表单位时结合标题或范围中的统计对象与 unit 的原始数值单位：例如标题或范围已写人次、unit 为亿时，共同表达亿人次；仍须核对原文，禁止混淆倍率、币种、人数与人次或修改原始数值单位。仅有不影响结论的 low 建议时返回 status=pass，可以保留这些 low 意见；high 或 medium 问题仍须 revise。"
+	req.System += "\n若 rendered_visuals.charts 为零且正文已用自然语言说明本主题在所给材料中没有可比较的同口径多期数据，先核对证据：只有在证据中确实找不到同一来源、同一指标、同一单位、至少两个不同期间的原始数值时，才不得要求出图，也不得因缺图判 revise；若你能指出这样的具体序列（来源、年份、数值、单位），仍须按 high 或 medium 判 revise 并列明。仅有空泛的“数据不足”说明不构成降级理由。"
+	usedFallback := false
 	resp, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
 	mode := decideReviewRetry(resp, err, req.MaxTokens)
 	logReviewAttempt(p.TaskID, 1, req, resp, err, reviewRetryNone, mode)
@@ -618,6 +612,7 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 		// again. Both calls stay metered and bounded; a second failure is an
 		// error, never a pass.
 		if mode == reviewRetryNoThinking {
+			usedFallback = true
 			req.DisableThinking = true
 			req.ReasoningEffort = ""
 			req.MaxTokens = reviewFallbackMaxTokens
@@ -658,6 +653,18 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 		sort.SliceStable(out.Issues, func(i, j int) bool { return priority[out.Issues[i].Severity] < priority[out.Issues[j].Severity] })
 		out.Issues = out.Issues[:5]
 	}
+	severityHigh, severityMedium, severityLow := 0, 0, 0
+	for _, issue := range out.Issues {
+		switch issue.Severity {
+		case "high":
+			severityHigh++
+		case "medium":
+			severityMedium++
+		case "low":
+			severityLow++
+		}
+	}
+	slog.Info("report review verdict", "task_id", p.TaskID, "status", out.Status, "issue_count", len(out.Issues), "severity_high", severityHigh, "severity_medium", severityMedium, "severity_low", severityLow, "used_fallback", usedFallback)
 	return out, nil
 }
 

@@ -117,7 +117,7 @@ func TestRevisedVisualsRejectUnsupportedCandidates(t *testing.T) {
 	provider := &sequenceProvider{responses: []llm.Response{{Content: response}, {Content: response}}}
 	a := Activities{LLM: provider}
 	_, err := a.PrepareRevisedReportVisuals(context.Background(), ReportPlan{}, findings, reportDraft{Markdown: body}, body+"\n\n"+revisionOldChart, reportReview{Status: "revise"})
-	require.ErrorContains(t, err, "visual replanning")
+	require.ErrorIs(t, err, errVisualDataPresent)
 	require.Len(t, provider.requests, 2)
 }
 
