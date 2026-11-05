@@ -410,6 +410,24 @@ func TestReviewPayloadKeepsCharts(t *testing.T) {
 	require.Contains(t, provider.requests[0].Messages[0].Content, "zeus-chart")
 }
 
+func TestReviewVerdictLogsCountsWithoutIssueText(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(old)
+	provider := &sequenceProvider{responses: []llm.Response{{Content: `{"status":"revise","issues":[{"severity":"high","evidence":"SECRET_EVIDENCE","suggestion":"SECRET_SUGGESTION"},{"severity":"low","evidence":"low-evidence","suggestion":"low-suggestion"}]}`}}}
+	a := Activities{LLM: provider}
+	out, err := a.ReviewReport(context.Background(), ReportPlan{}, nil, reportDraft{Markdown: "## 一、规模\n\n正文"})
+	require.NoError(t, err)
+	require.Equal(t, "revise", out.Status)
+	got := logs.String()
+	for _, want := range []string{"report review verdict", "attempt=1", "status=revise", "issue_count=2", "severity_high=1", "severity_medium=0", "severity_low=1"} {
+		require.Contains(t, got, want)
+	}
+	require.NotContains(t, got, "SECRET_EVIDENCE")
+	require.NotContains(t, got, "SECRET_SUGGESTION")
+}
+
 func TestReportVisualAgentReviseStaleChartsCleared(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()

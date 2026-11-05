@@ -74,6 +74,7 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 	var review reportReview
 	if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &review); err != nil {
 		review = reportReview{Status: "unavailable"}
+		logReviewVerdict(plan.TaskID, 1, "unavailable", nil)
 	}
 	if review.Status == "revise" {
 		var revised reportDraft
@@ -87,6 +88,7 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 			var recheck reportReview
 			if err := workflow.ExecuteActivity(optional, a.ReviewReport, plan, findings, draft).Get(optional, &recheck); err != nil {
 				review.Status = "unavailable"
+				logReviewVerdict(plan.TaskID, 1, "unavailable", nil)
 			} else {
 				review = recheck
 			}
@@ -153,6 +155,7 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 	req := llm.Request{Purpose: "report.review", Tier: llm.TierStrong, MaxTokens: 2400, DisableThinking: true, System: "你是独立报告审查者，只根据提供的证据判断。检查问题覆盖、引用、图表与正文数值单位时间、事实与推断和不确定性。不要假称核验原始网页。按严重程度只列最重要的 5 项问题，每项证据与建议各不超过 100 字；不要遗漏会影响结论的重要问题。输出 JSON：{\"status\":\"pass 或 revise\",\"issues\":[{\"severity\":\"high 或 medium 或 low\",\"evidence\":\"具体证据或缺失\",\"suggestion\":\"修订建议\"}]}。重要问题时 status=revise。", Messages: []llm.Message{{Role: "user", Content: string(payload)}}, UserID: &p.UserID, TaskID: &p.TaskID}
 	resp, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
 	logReviewAttempt(p.TaskID, 1, req, resp, err)
+	attempt := 1
 	// Some compatible providers omit finish_reason. An incomplete JSON response
 	// at the exact requested output limit is also strong evidence of truncation.
 	var syntax *json.SyntaxError
@@ -174,6 +177,7 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 			req.MaxTokens = 4800
 		}
 		out = reportReview{}
+		attempt = 2
 		resp, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
 		logReviewAttempt(p.TaskID, 2, req, resp, err)
 	}
@@ -200,7 +204,24 @@ func (a *Activities) ReviewReport(ctx context.Context, p ReportPlan, findings []
 			out.Status = "revise"
 		}
 	}
+	logReviewVerdict(p.TaskID, attempt, out.Status, out.Issues)
 	return out, nil
+}
+
+func logReviewVerdict(taskID uuid.UUID, attempt int, status string, issues []reviewIssue) {
+	high, medium, low := 0, 0, 0
+	for _, issue := range issues {
+		switch issue.Severity {
+		case "high":
+			high++
+		case "medium":
+			medium++
+		case "low":
+			low++
+		}
+	}
+	slog.Info("report review verdict", "task_id", taskID, "attempt", attempt, "status", status,
+		"issue_count", len(issues), "severity_high", high, "severity_medium", medium, "severity_low", low)
 }
 
 func logReviewAttempt(taskID uuid.UUID, attempt int, req llm.Request, resp llm.Response, err error) {
