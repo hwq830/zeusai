@@ -9,6 +9,7 @@ on:
       - 'server/**'
       - 'sandbox/**'
       - 'prompts/**'
+      - 'web/report-template/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/server.yml'
