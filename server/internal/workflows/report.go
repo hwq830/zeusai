@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -358,7 +359,7 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 		}
 		out.Notes = res.Notes
 	}
-	step.Detail = fmt.Sprintf(plan.UILang.Pick("读了 %d 个来源", "Read %d sources"), len(sources))
+	step.Detail = researchStepDetail(plan.UILang, len(sources), a.readSources.note(plan.TaskID, sources))
 	return out, a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step})
 }
 
@@ -398,6 +399,10 @@ func (a *Activities) WriteReport(ctx context.Context, plan ReportPlan, results [
 		return err
 	}
 	merged, sources := mergeNotes(results)
+	// Research is over: keep one log line about how much the steps overlapped, then free the task.
+	if unique := a.readSources.take(plan.TaskID); unique > 0 {
+		slog.Info("report research sources", "task_id", plan.TaskID.String(), "questions", len(results), "unique_sources", unique)
+	}
 	sys, err := render(plan.Lang, "write.md", map[string]any{
 		"Title": plan.Title, "Topic": plan.Topic, "Focuses": plan.Focuses, "Notes": notes, "LengthHint": reportLengthHint(plan.Lang, plan.Depth), "Scope": plan.Scope, "Uncertainties": plan.Uncertainties,
 	})
@@ -455,6 +460,7 @@ func (a *Activities) streamText(ctx context.Context, userID, taskID uuid.UUID, t
 }
 
 func (a *Activities) AbortReport(ctx context.Context, run orch.ReportRun, kind string) error {
+	a.readSources.take(run.TaskID)
 	status := "failed"
 	if kind == "cancelled" {
 		status = "cancelled"

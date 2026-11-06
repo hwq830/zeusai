@@ -60,6 +60,9 @@ type Activities struct {
 	// Quota sends token usage reminders; nil sends none.
 	Quota *quota.Service
 	Now   func() time.Time
+	// readSources tracks the URLs a report task already turned into sources, so every
+	// research step can say how many of its sources are new. Per task, mutex-guarded.
+	readSources sourceLedger
 }
 
 // Tools is the read-only connector toolbox (connector.Toolbox in production).
