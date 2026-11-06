@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -27,19 +28,67 @@ const visualPlanningSystem = `你是报告插图规划器。只规划 1–6 个�
 
 字段要求：series 至少 1 条、每条至少 2 个点；L2/L3 必须有 formula 和 inputs；L3 必须有至少 2 条 assumptions 和 metric_definition；L1 不强制 formula。证据不足返回 {"visuals":[]}。`
 
+// maxVisualAttempts bounds visual planning retries. One retry absorbs a
+// truncated or malformed model response without turning a report into a
+// no-chart report on a single bad sample.
+const maxVisualAttempts = 2
+
+// firstVisualMaxTokens and retryVisualMaxTokens: a truncated response is the
+// most common parse failure, so the retry gets more room.
+const (
+	firstVisualMaxTokens = 8000
+	retryVisualMaxTokens = 12000
+)
+
+// visualPlanError labels a failed planning attempt for the degraded log.
+type visualPlanError struct {
+	stage string // model_or_parse, batch_schema or spec_validation
+	kind  string // model, truncated, parse, schema or invalid_spec
+	err   error
+}
+
+func (e *visualPlanError) Error() string { return e.stage + ": " + e.err.Error() }
+func (e *visualPlanError) Unwrap() error { return e.err }
+
+// visualModelErrorKind separates provider failures from unparseable output so
+// the degraded log can be counted by cause.
+func visualModelErrorKind(err error) string {
+	var syntax *json.SyntaxError
+	switch {
+	case errors.Is(err, llm.ErrOutputTruncated):
+		return "truncated"
+	case errors.As(err, &syntax):
+		return "parse"
+	default:
+		return "model"
+	}
+}
+
+func visualFailure(err error) (stage, kind string) {
+	var failure *visualPlanError
+	if errors.As(err, &failure) {
+		return failure.stage, failure.kind
+	}
+	return "model_or_parse", "unknown"
+}
+
 // PlanVisuals is the P1 visual-agent entry point. It only plans; it does not
-// insert or render. Any model/parse error is returned to the workflow, which
-// treats it as "no charts" rather than a report failure.
+// insert or render. A model/parse failure is retried once, then logged as
+// "report visual degraded" and returned to the workflow, which publishes the
+// report without charts. It deliberately does not fall back to the legacy
+// PlanReportVisuals planner: that one appends charts after the last section
+// instead of anchoring them, and validates less, so a silent quality drop is
+// worse than a report with no charts and a degraded marker.
 func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []QuestionNotes, headings []string) ([]reporttemplate.VisualSpec, error) {
 	if len(headings) == 0 {
 		// The planner cannot invent an anchor that will match the draft. Skip
 		// the model call entirely rather than paying for guaranteed drops.
-		logVisualsPlanned(p.TaskID, 0, 0, nil)
+		logVisualsPlanned(p.TaskID, 0, 0, nil, 0)
 		return nil, nil
 	}
 	merged, sources := mergeNotes(findings)
 	if len(sources) == 0 || strings.TrimSpace(merged) == "" {
-		logVisualsPlanned(p.TaskID, 0, 0, nil)
+		logVisualsPlanned(p.TaskID, 0, 0, nil, 0)
 		return nil, nil
 	}
 
@@ -59,6 +108,36 @@ func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []Q
 		"headings":      headings,
 		"notes":         merged,
 	})
+
+	maxTokens := firstVisualMaxTokens
+	var lastErr error
+	for attempt := 1; attempt <= maxVisualAttempts; attempt++ {
+		valid, candidates, levels, err := a.planVisualsAttempt(ctx, p, payload, maxTokens)
+		if err == nil && (candidates == 0 || len(valid) > 0) {
+			logVisualsPlanned(p.TaskID, candidates, len(valid), levels, attempt)
+			return valid, nil
+		}
+		if err == nil {
+			// The model answered, but nothing it produced passed validation.
+			err = &visualPlanError{stage: "spec_validation", kind: "invalid_spec",
+				err: fmt.Errorf("all %d visual specs failed validation", candidates)}
+		}
+		lastErr = err
+		stage, kind := visualFailure(err)
+		if attempt < maxVisualAttempts {
+			slog.Warn("report visual planning failed; retrying",
+				"task_id", p.TaskID, "stage", stage, "attempt", attempt, "error_type", kind)
+			maxTokens = retryVisualMaxTokens
+			continue
+		}
+		slog.Warn("report visual degraded",
+			"task_id", p.TaskID, "stage", stage, "attempt", attempt, "error_type", kind, "error", err)
+	}
+	return nil, lastErr
+}
+
+// planVisualsAttempt runs one model call and validates what came back.
+func (a *Activities) planVisualsAttempt(ctx context.Context, p ReportPlan, payload []byte, maxTokens int) ([]reporttemplate.VisualSpec, int, map[string]int, error) {
 	var out struct {
 		Visuals []reporttemplate.VisualSpec `json:"visuals"`
 		Charts  []reporttemplate.VisualSpec `json:"charts"` // tolerant fallback for models that copy the old key
@@ -66,16 +145,14 @@ func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []Q
 	_, err := llm.CompleteJSON(ctx, a.LLM, llm.Request{
 		Purpose:   "report.visual",
 		Tier:      llm.TierStrong,
-		MaxTokens: 8000,
+		MaxTokens: maxTokens,
 		System:    visualPlanningSystem,
 		Messages:  []llm.Message{{Role: "user", Content: string(payload)}},
 		UserID:    &p.UserID,
 		TaskID:    &p.TaskID,
 	}, &out)
 	if err != nil {
-		slog.Warn("report visual planning failed", "task_id", p.TaskID, "stage", "model_or_parse")
-		logVisualsPlanned(p.TaskID, 0, 0, nil)
-		return nil, err
+		return nil, 0, nil, &visualPlanError{stage: "model_or_parse", kind: visualModelErrorKind(err), err: err}
 	}
 
 	raw := out.Visuals
@@ -101,16 +178,10 @@ func (a *Activities) PlanVisuals(ctx context.Context, p ReportPlan, findings []Q
 	}
 	if len(valid) > 0 {
 		if err := reporttemplate.ValidateVisualSpecs(valid); err != nil {
-			slog.Warn("report visual planning failed", "task_id", p.TaskID, "stage", "batch_schema")
-			logVisualsPlanned(p.TaskID, candidates, 0, nil)
-			return nil, err
+			return nil, candidates, levels, &visualPlanError{stage: "batch_schema", kind: "schema", err: err}
 		}
 	}
-	logVisualsPlanned(p.TaskID, candidates, len(valid), levels)
-	if len(valid) == 0 {
-		return nil, nil
-	}
-	return valid, nil
+	return valid, candidates, levels, nil
 }
 
 // reportHeadings extracts only H2/H3 titles from the draft, outside fenced
@@ -150,9 +221,12 @@ func reportHeadings(markdown string) []string {
 	return headings
 }
 
-func logVisualsPlanned(taskID uuid.UUID, candidates, valid int, levels map[string]int) {
+// logVisualsPlanned is the success/skip terminal event. attempts is how many
+// model calls the plan took (0 when the planner was skipped), so the degraded
+// rate is count(report visual degraded) / (degraded + planned with attempts>0).
+func logVisualsPlanned(taskID uuid.UUID, candidates, valid int, levels map[string]int, attempts int) {
 	slog.Info("report visuals planned", "task_id", taskID, "candidates", candidates, "valid", valid,
-		"levels", fmt.Sprintf("L1:%d,L2:%d,L3:%d", levels["L1"], levels["L2"], levels["L3"]))
+		"levels", fmt.Sprintf("L1:%d,L2:%d,L3:%d", levels["L1"], levels["L2"], levels["L3"]), "attempts", attempts)
 }
 
 type visualInsertion struct {

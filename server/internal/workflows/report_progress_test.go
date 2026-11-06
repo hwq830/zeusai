@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -285,4 +286,31 @@ func TestReportWorkflowAbortsWhenResearchFails(t *testing.T) {
 	require.True(t, env.IsWorkflowCompleted())
 	require.Error(t, env.GetWorkflowError())
 	env.AssertExpectations(t)
+}
+
+func TestReportWorkflowPublishesWhenVisualPlanningFails(t *testing.T) {
+	plan := progressPlan(t, Question{Question: "市场规模"})
+	env, a, captured, all := newProgressEnv(t)
+	first := QuestionNotes{Question: "市场规模", Sources: []search.Result{{URL: "https://a"}}}
+	draft := reportDraft{Summary: "s", Markdown: "## 一、市场\n\n正文"}
+
+	env.OnActivity(a.PlanReport, mock.Anything, mock.Anything).Return(plan, nil).Once()
+	env.OnActivity(a.ResearchQuestion, mock.Anything, plan, 0, mock.Anything).Return(first, nil).Once()
+	env.OnActivity(a.DraftReport, mock.Anything, plan, []QuestionNotes{first}, mock.Anything).Return(draft, nil).Once()
+	// Visual planning exhausted its retry: the workflow must carry on without charts.
+	env.OnActivity(a.PlanVisuals, mock.Anything, plan, mock.Anything, mock.Anything).
+		Return([]reporttemplate.VisualSpec(nil), errors.New("visual planning failed")).Once()
+	env.OnActivity(a.ReviewReport, mock.Anything, plan, mock.Anything, mock.Anything).
+		Return(reportReview{Status: "pass"}, nil).Once()
+	env.OnActivity(a.PublishReviewedReport, mock.Anything, plan, mock.Anything, mock.Anything, mock.Anything, reportReviewResolved).
+		Return(nil).Once()
+	runReportWorkflow(t, env, plan)
+
+	require.Equal(t, "未发现适合配图的段落", stepDetail(t, *captured, 4))
+	for i := 4; i <= len(plan.Questions)+7; i++ {
+		requireStartedAndDone(t, *captured, i)
+	}
+	last := (*all)[len(*all)-1]
+	require.Equal(t, events.TypeCompleted, last.Type)
+	require.Equal(t, plan.ReportID.String(), last.ReportID)
 }
