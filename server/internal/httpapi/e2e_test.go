@@ -569,7 +569,9 @@ func TestReportEndToEnd(t *testing.T) {
 	if last := evs[len(evs)-1]; last.Type != events.TypeCompleted || last.ReportID != tk.ReportID {
 		t.Fatalf("last: %+v", last)
 	}
-	if len(plan) != 4 || plan[3].Title != "撰写报告" || summary.Len() == 0 {
+	// A quick report plans 3 questions: 制定调研计划 + 3 调研 + 撰写/图表/审查/修订/复审/发布.
+	if len(plan) != 10 || plan[0].Title != "制定调研计划" || plan[3].Title != "撰写报告" ||
+		plan[9].Title != "发布" || summary.Len() == 0 {
 		t.Fatalf("plan %+v summary %q", plan, summary.String())
 	}
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {

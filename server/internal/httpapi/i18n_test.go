@@ -83,7 +83,7 @@ func TestEnglishUser(t *testing.T) {
 		t.Fatalf("subtitle %q", tk.Subtitle)
 	}
 	for _, ev := range h.streamEvents(tk.ID, 0) {
-		if ev.Type == events.TypePlan && ev.Steps[len(ev.Steps)-1].Title != "Writing the report" {
+		if ev.Type == events.TypePlan && (ev.Steps[0].Title != "Research plan" || ev.Steps[len(ev.Steps)-1].Title != "Publish") {
 			t.Fatalf("plan steps: %+v", ev.Steps)
 		}
 	}
