@@ -546,7 +546,7 @@ func Render(d Data) ([]byte, error) {
 		for _, s := range d.Sources {
 			fmt.Fprintf(&refs, `<li id="ref-%d"><span id="src-%d"></span>`, s.Index, s.Index)
 			if isWebURL(s.URL) {
-				fmt.Fprintf(&refs, `<a class="t" href="%s" target="_blank" rel="noopener nofollow" data-source-url="%s" data-source-title="%s" data-source-site="%s" data-source-meta="%s">%s</a>`, template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.Title), template.HTMLEscapeString(s.SiteName), template.HTMLEscapeString(s.SiteName), template.HTMLEscapeString(s.Title))
+				fmt.Fprintf(&refs, `<a class="t" href="%s" target="_blank" rel="noopener nofollow">%s</a>`, template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.Title))
 			} else {
 				fmt.Fprintf(&refs, `<span class="t">%s</span>`, template.HTMLEscapeString(s.Title))
 			}

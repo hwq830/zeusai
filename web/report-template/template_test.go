@@ -224,7 +224,7 @@ func TestRenderKeyFiguresCover(t *testing.T) {
 	if strings.Count(html, `class="cover-stats"`) != 1 {
 		t.Fatal("cover stats block missing")
 	}
-	for _, want := range []string{"4.99", "294.16", "85.4", "2024年AI原生App月活", `href="#ref-2"`, `data-source-url="https://example.com/source/2"`, `data-source-site="example.com"`, "5 个来源", "9 分钟"} {
+	for _, want := range []string{"4.99", "294.16", "85.4", "2024年AI原生App月活", `href="#ref-2"`, `data-source-url="https://example.com/source/2"`, `data-source-title="来源二"`, `data-source-site="example.com"`, `data-source-meta="example.com"`, "5 个来源", "9 分钟"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -348,5 +348,40 @@ func TestRenderedHeadingAndTOCDropNumberPrefix(t *testing.T) {
 	}
 	if strings.Contains(html, `<h2>一、`) || strings.Contains(html, `<h2>（二）`) {
 		t.Error("section heading still has a duplicate number prefix")
+	}
+}
+
+func TestPanelSourceDataOnlyOnInteractiveCitations(t *testing.T) {
+	out, err := Render(Data{
+		Title: "Data attrs", Markdown: "正文 [1] 和 [2]。",
+		Sources: []Source{
+			{Index: 1, URL: "https://example.com/1", Title: "来源一", SiteName: "example.com"},
+			{Index: 2, URL: "https://example.com/2", Title: "来源二", SiteName: "news.example.com"},
+		},
+		KeyFigures: []KeyFigure{{Label: "规模", Value: "47.9", Unit: "亿元", Cite: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	refs := regexp.MustCompile(`(?s)<ol class="refs">.*?</ol>`).FindString(html)
+	if refs == "" {
+		t.Fatal("refs block missing")
+	}
+	for _, attr := range []string{"data-source-url", "data-source-title", "data-source-site", "data-source-meta"} {
+		if strings.Contains(refs, attr) {
+			t.Errorf("refs must not carry %s: %s", attr, refs)
+		}
+	}
+	sups := regexp.MustCompile(`<sup class="cite"><a [^>]*>`).FindAllString(html, -1)
+	if len(sups) != 2 {
+		t.Fatalf("sup.cite count=%d, want 2", len(sups))
+	}
+	for _, link := range sups {
+		for _, attr := range []string{"data-source-url=", "data-source-title=", "data-source-site=", "data-source-meta="} {
+			if !strings.Contains(link, attr) {
+				t.Errorf("sup.cite missing %s: %s", attr, link)
+			}
+		}
 	}
 }
