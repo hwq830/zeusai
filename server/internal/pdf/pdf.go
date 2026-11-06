@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	stdhtml "html"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -44,6 +46,7 @@ func (c Chromium) Render(ctx context.Context, html []byte) ([]byte, error) {
 		"--headless", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
 		"--disable-extensions", "--disable-background-networking",
 		"--user-data-dir=" + filepath.Join(dir, "profile"), "--no-pdf-header-footer",
+		"--virtual-time-budget=5000",
 		"--print-to-pdf=" + out,
 	}
 	if c.NoSandbox {
@@ -72,9 +75,39 @@ func tail(b []byte, n int) []byte {
 
 const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">`
 
-// lockDown puts the CSP first in <head>. (--blink-settings=scriptEnabled=false would be
-// simpler but stops --print-to-pdf from writing anything.)
+// lockDown keeps a page-declared CSP when it already allows our hashed chart
+// script; otherwise it injects the full deny policy (fail closed).
 func lockDown(html []byte) []byte {
+	if content, ok := declaredCSP(html); ok {
+		// The template emits entities such as &#39; in the attribute; decode
+		// before checking so the real CSP value is recognized.
+		decoded := strings.ToLower(stdhtml.UnescapeString(string(content)))
+		if strings.Contains(decoded, "script-src 'sha256-") {
+			return html
+		}
+	}
+	return injectCSP(html)
+}
+
+func declaredCSP(html []byte) ([]byte, bool) {
+	lower := bytes.ToLower(html)
+	i := bytes.Index(lower, []byte("content-security-policy"))
+	if i < 0 {
+		return nil, false
+	}
+	start := bytes.Index(lower[i:], []byte(`content="`))
+	if start < 0 {
+		return nil, true
+	}
+	start += i + len(`content="`)
+	end := bytes.IndexByte(html[start:], '"')
+	if end < 0 {
+		return nil, true
+	}
+	return html[start : start+end], true
+}
+
+func injectCSP(html []byte) []byte {
 	if i := bytes.Index(bytes.ToLower(html), []byte("<head>")); i >= 0 {
 		i += len("<head>")
 		return append(append(append([]byte{}, html[:i]...), csp...), html[i:]...)

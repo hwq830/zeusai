@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -26,5 +27,29 @@ func TestLockDown(t *testing.T) {
 	got := string(lockDown([]byte("<!doctype html><HTML><HEAD><title>x</title>")))
 	if got != "<!doctype html><HTML><HEAD>"+csp+"<title>x</title>" {
 		t.Fatal(got)
+	}
+}
+
+func TestLockDownKeepsPageCSPWithScriptHash(t *testing.T) {
+	in := []byte(`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-abc='"></head><body></body></html>`)
+	got := string(lockDown(in))
+	if got != string(in) {
+		t.Fatalf("page CSP with script hash must be kept:\n%s", got)
+	}
+}
+
+func TestLockDownFailsClosedOnPageCSPWithoutHash(t *testing.T) {
+	in := []byte(`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'"></head><body></body></html>`)
+	got := string(lockDown(in))
+	if !strings.Contains(got, csp) {
+		t.Fatalf("CSP without script hash must get the full deny policy: %s", got)
+	}
+}
+
+func TestLockDownKeepsEscapedTemplateCSP(t *testing.T) {
+	in := []byte(`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; script-src &#39;sha256-XZw06nvewRPGMxDh58qy6HuFTLU7AaQ&#43;ylwlzB2E0Cs=&#39;"></head><body></body></html>`)
+	got := string(lockDown(in))
+	if got != string(in) {
+		t.Fatalf("escaped template CSP must be kept:\n%s", got)
 	}
 }
