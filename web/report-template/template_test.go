@@ -248,3 +248,27 @@ func TestCSPCoversAllInlineScripts(t *testing.T) {
 		t.Fatalf("expected chart + source + toc scripts, got %d", count)
 	}
 }
+
+func TestRenderOmitsEmptyKPIStrip(t *testing.T) {
+	out, err := Render(Data{Title: "KPI", Markdown: "正文"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), `<div class="kpi-strip"`) {
+		t.Fatal("empty KPI strip must be hidden")
+	}
+}
+
+func TestRenderKeepsReviewHeadingForTOC(t *testing.T) {
+	out, err := Render(Data{Title: "TOC", Markdown: "## 审查说明\n\n内容"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if !strings.Contains(html, "<h2>审查说明</h2>") {
+		t.Fatal("review heading must stay in body")
+	}
+	if !strings.Contains(html, "querySelectorAll('#report-body h2, #report-body h3, .sources h2')") {
+		t.Fatal("TOC selector must include all report h2 headings")
+	}
+}

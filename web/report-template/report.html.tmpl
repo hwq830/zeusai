@@ -88,7 +88,6 @@ figure.report-visual{margin:26px 0;padding:18px 18px 14px;background:var(--card)
   </div>
   <h1>{{.Title}}</h1>
   {{- if .Summary}}<div class="summary">{{.Summary}}</div>{{end}}
-  <div class="kpi-strip" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
   <div class="meta">
     {{- if .DepthLabel}}<span>{{.DepthLabel}}</span>{{end}}
     <span>{{printf .L.SourceCount .SourceCount}}</span>
