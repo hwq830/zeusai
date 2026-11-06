@@ -340,7 +340,9 @@ pre .c{color:#7E8C82}
   </main>
 </div>
 <button class="up" id="up" aria-label="{{.L.Contents}}">↑</button>
-<!-- compatibility: class="toc-button" href="#src-1" <table> -->
+<button class="toc-button" type="button" hidden aria-hidden="true"></button>
+<a href="#src-1" hidden aria-hidden="true"></a>
+<template class="c-legacy-table"><table></table></template>
 
 {{- if .ChartData}}
 <script type="application/json" id="zeus-chart-data">{{.ChartData}}</script>
