@@ -281,7 +281,11 @@ pre .c{color:#7E8C82}
 .c-cta{display:inline-block;margin-top:10px;padding:10px 18px;border-radius:22px;background:var(--accent);color:var(--deep);text-decoration:none;font-weight:650}
 .c-ai{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--accent-deep);text-transform:uppercase}
 .c-ai-badge{display:inline-block;border:1px solid rgba(255,255,255,.45);border-radius:20px;padding:3px 10px;font-size:11px;letter-spacing:.08em;color:rgba(255,255,255,.86)}
-.c-source-panel{position:fixed;z-index:50;left:50%;bottom:0;transform:translateX(-50%);width:min(680px,100%);background:var(--card);border-radius:18px 18px 0 0;padding:20px;box-shadow:0 -4px 24px rgba(14,42,33,.25)}
+/* iOS 原生底部栏契约：默认 0px；iOS 侧用
+   document.documentElement.style.setProperty('--app-bottom-inset', '106px')
+   或 :root 内联样式注入。单位 px，纯数字（如 106px）。H5/PDF 不注入时保持 0。 */
+:root{--app-bottom-inset:0px}
+.c-source-panel{position:fixed;z-index:50;left:50%;bottom:calc(var(--app-bottom-inset,0px));transform:translateX(-50%);width:min(680px,100%);max-height:60vh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--card);border-radius:18px 18px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));box-shadow:0 -4px 24px rgba(14,42,33,.25)}
 .c-source-shade{position:fixed;inset:0;background:rgba(10,26,20,.45);z-index:49}
 .c-source-panel h3{font-size:18px;margin:0 0 8px}.c-source-panel .c-source-meta{font-size:13px;color:var(--muted);margin-top:8px}.c-source-panel .c-source-close{float:right;border:0;background:none;font-size:24px;cursor:pointer}
 .c-kpi-unit{font-size:.52em;color:var(--muted);margin-left:3px;font-weight:400;letter-spacing:0;text-decoration:none}
