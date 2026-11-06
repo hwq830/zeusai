@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -829,7 +830,14 @@ func (fakePDF) Render(_ context.Context, html []byte) ([]byte, error) {
 	return append([]byte("%PDF-fake\n"), html...), nil
 }
 
+// pdfPrintMu serializes Chromium prints inside this test binary. These tests do not call
+// t.Parallel today; the lock keeps it that way for any new PDF test, where two headless
+// browsers at once would overrun the CI runner.
+var pdfPrintMu sync.Mutex
+
 func TestReportPDF(t *testing.T) {
+	pdfPrintMu.Lock()
+	defer pdfPrintMu.Unlock()
 	h := setup(t)
 	h.login(randomPhone())
 	var tk struct{ ID, ReportID string }

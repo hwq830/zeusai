@@ -45,6 +45,9 @@ func (c Chromium) Render(ctx context.Context, html []byte) ([]byte, error) {
 	args := []string{
 		"--headless", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
 		"--disable-extensions", "--disable-background-networking",
+		// Chromium keeps its shared-memory files in /dev/shm, which containers and CI
+		// sandboxes often cap at 64 MB; a killed print job was the first symptom there.
+		"--disable-dev-shm-usage",
 		"--user-data-dir=" + filepath.Join(dir, "profile"), "--no-pdf-header-footer",
 		"--virtual-time-budget=5000",
 		"--print-to-pdf=" + out,
