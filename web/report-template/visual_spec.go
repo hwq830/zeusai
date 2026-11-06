@@ -46,6 +46,12 @@ type VisualSpec struct {
 	// zero. The renderer must draw a visible break marker; a bare boolean in
 	// the JSON is not enough for a reader.
 	AxisTruncated bool `json:"axis_truncated,omitempty"`
+	// HighlightIndex optionally names one category bar to emphasize. Time axes
+	// ignore it and always emphasize the latest point.
+	HighlightIndex *int `json:"highlight_index,omitempty"`
+	// Order is an optional rendering hint; only "as-is" is recognized and
+	// suppresses the default category-axis descending sort.
+	Order string `json:"order,omitempty"`
 }
 
 var visualReferencePattern = regexp.MustCompile(`\[[0-9]+(?:\s*,\s*[0-9]+)*\]`)

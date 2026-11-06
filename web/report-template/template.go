@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -124,7 +125,75 @@ func wrapTables(markup string) string {
 	})
 }
 
-func figureHTML(spec VisualSpec, index int, noJS string) (fig, extra string) {
+var timeLabelRe = regexp.MustCompile(`^(?:\d{4}E?|\d{4}年(?:\d{1,2}月)?|\d{1,2}月)$`)
+
+func isTimeAxis(points []Point) bool {
+	if len(points) == 0 {
+		return false
+	}
+	for _, p := range points {
+		if !timeLabelRe.MatchString(strings.TrimSpace(p.Label)) {
+			return false
+		}
+	}
+	return true
+}
+
+func isOrderedCategory(points []Point) bool {
+	hits := 0
+	for _, p := range points {
+		label := p.Label
+		for _, token := range []string{"线", "级", "档", "期", "阶段"} {
+			if strings.Contains(label, token) {
+				hits++
+				break
+			}
+		}
+	}
+	return hits >= 2
+}
+
+func categoryOrder(points []Point, order string) []int {
+	idx := make([]int, len(points))
+	for i := range idx {
+		idx[i] = i
+	}
+	if isTimeAxis(points) || strings.EqualFold(strings.TrimSpace(order), "as-is") || isOrderedCategory(points) {
+		return idx
+	}
+	sort.SliceStable(idx, func(i, j int) bool {
+		a, b := points[idx[i]], points[idx[j]]
+		if a.Value == b.Value {
+			return a.Label < b.Label
+		}
+		return a.Value > b.Value
+	})
+	return idx
+}
+
+func orderedPoints(points []Point, order []int) []Point {
+	out := make([]Point, 0, len(order))
+	for _, i := range order {
+		out = append(out, points[i])
+	}
+	return out
+}
+
+func highlightFor(spec VisualSpec, points []Point) (int, bool) {
+	if isTimeAxis(points) {
+		return len(points) - 1, true
+	}
+	if spec.HighlightIndex != nil && *spec.HighlightIndex >= 0 && *spec.HighlightIndex < len(points) {
+		return *spec.HighlightIndex, true
+	}
+	return 0, false
+}
+
+func isPredictionLabel(label string) bool {
+	return strings.Contains(label, "E") || strings.Contains(label, "预计") || strings.Contains(label, "预测") || strings.Contains(label, "外推")
+}
+
+func figureHTML(spec VisualSpec, index int, noJS, highlight string) (fig, extra string) {
 	title := strings.TrimSpace(spec.Title)
 	unit := strings.TrimSpace(spec.Unit)
 	caption := strings.TrimSpace(spec.Caption)
@@ -135,6 +204,9 @@ func figureHTML(spec VisualSpec, index int, noJS string) (fig, extra string) {
 	if meta != "" {
 		caption += "；口径：" + meta
 	}
+	if highlight != "" && isPredictionLabel(highlight) {
+		caption += "；" + highlight + " 为预测值"
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, `<figure><div class="fig-t">%s</div><div class="fig-s">单位：%s · %s</div>`, template.HTMLEscapeString(title), template.HTMLEscapeString(unit), template.HTMLEscapeString(spec.Level))
 	fmt.Fprintf(&b, `<div class="c-chart-wrap" id="c%dwrap"><div id="c%d"></div><noscript>%s</noscript></div>`, index, index, template.HTMLEscapeString(noJS))
@@ -142,81 +214,118 @@ func figureHTML(spec VisualSpec, index int, noJS string) (fig, extra string) {
 	return b.String(), extra
 }
 
-func chartConfig(spec VisualSpec) (renderType string, config map[string]any, downgrade string, table string, ok bool) {
+type preparedChart struct {
+	renderType, downgrade, table, highlight string
+	config                                  map[string]any
+	ok                                      bool
+}
+
+func chartConfig(spec VisualSpec) preparedChart {
 	if len(spec.Series) == 0 {
-		return "", nil, "", "", false
+		return preparedChart{}
 	}
-	points := func(series Series) []map[string]any {
-		out := make([]map[string]any, 0, len(series.Points))
-		for _, p := range series.Points {
+	colors := []string{"var(--deep2)", "var(--deep3)", "var(--accent)"}
+	pointMaps := func(points []Point) []map[string]any {
+		out := make([]map[string]any, 0, len(points))
+		for _, p := range points {
 			out = append(out, map[string]any{"label": p.Label, "value": p.Value})
 		}
 		return out
 	}
-	colors := []string{"var(--deep2)", "var(--deep3)", "var(--accent)"}
+	barHighlight := func(original []Point, order []int) (map[string]any, string) {
+		points := orderedPoints(original, order)
+		cfg := map[string]any{"data": pointMaps(points), "unit": spec.Unit, "height": 320}
+		hi, ok := highlightFor(spec, original)
+		if !ok {
+			return cfg, ""
+		}
+		sorted := 0
+		for pos, oi := range order {
+			if oi == hi {
+				sorted = pos
+				break
+			}
+		}
+		cfg["highlight"] = sorted
+		return cfg, original[hi].Label
+	}
 	switch spec.Type {
 	case "bar":
-		return "bar", map[string]any{"data": points(spec.Series[0]), "unit": spec.Unit, "height": 320, "highlight": "last"}, "", "", true
+		order := categoryOrder(spec.Series[0].Points, spec.Order)
+		cfg, hi := barHighlight(spec.Series[0].Points, order)
+		return preparedChart{renderType: "bar", config: cfg, highlight: hi, ok: true}
 	case "line":
+		order := categoryOrder(spec.Series[0].Points, spec.Order)
 		if len(spec.Series) == 1 {
-			return "line", map[string]any{"data": points(spec.Series[0]), "unit": spec.Unit, "height": 330}, "", "", true
+			points := orderedPoints(spec.Series[0].Points, order)
+			hi, has := highlightFor(spec, points)
+			label := ""
+			if has {
+				label = points[hi].Label
+			}
+			return preparedChart{renderType: "line", config: map[string]any{"data": pointMaps(points), "unit": spec.Unit, "height": 330}, highlight: label, ok: true}
 		}
-		labels := make([]string, 0, len(spec.Series[0].Points))
-		for _, p := range spec.Series[0].Points {
+		points := orderedPoints(spec.Series[0].Points, order)
+		labels := make([]string, 0, len(points))
+		for _, p := range points {
 			labels = append(labels, p.Label)
 		}
 		series := make([]map[string]any, 0, len(spec.Series))
 		for i, one := range spec.Series {
-			values := make([]float64, 0, len(one.Points))
-			for _, p := range one.Points {
+			ordered := orderedPoints(one.Points, order)
+			values := make([]float64, 0, len(ordered))
+			for _, p := range ordered {
 				values = append(values, p.Value)
 			}
 			series = append(series, map[string]any{"name": one.Name, "values": values, "color": colors[i%len(colors)]})
 		}
-		return "line", map[string]any{"labels": labels, "series": series, "unit": spec.Unit, "height": 330}, "", "", true
+		hi, has := highlightFor(spec, points)
+		label := ""
+		if has {
+			label = points[hi].Label
+		}
+		return preparedChart{renderType: "line", config: map[string]any{"labels": labels, "series": series, "unit": spec.Unit, "height": 330}, highlight: label, ok: true}
 	case "barGrouped":
-		if len(spec.Series) <= 3 && timeLabels(spec.Series[0].Points) {
-			labels := make([]string, 0, len(spec.Series[0].Points))
-			for _, p := range spec.Series[0].Points {
+		first := spec.Series[0].Points
+		order := categoryOrder(first, spec.Order)
+		time := isTimeAxis(first)
+		if len(spec.Series) <= 3 && time {
+			labels := make([]string, 0, len(first))
+			for _, p := range orderedPoints(first, order) {
 				labels = append(labels, p.Label)
 			}
 			series := make([]map[string]any, 0, len(spec.Series))
 			for i, one := range spec.Series {
-				values := make([]float64, 0, len(one.Points))
-				for _, p := range one.Points {
+				ordered := orderedPoints(one.Points, order)
+				values := make([]float64, 0, len(ordered))
+				for _, p := range ordered {
 					values = append(values, p.Value)
 				}
 				series = append(series, map[string]any{"name": one.Name, "values": values, "color": colors[i%len(colors)]})
 			}
-			return "line", map[string]any{"labels": labels, "series": series, "unit": spec.Unit, "height": 330}, "line", "", true
+			label := first[len(first)-1].Label
+			return preparedChart{renderType: "line", config: map[string]any{"labels": labels, "series": series, "unit": spec.Unit, "height": 330}, downgrade: "line", highlight: label, ok: true}
 		}
-		table = groupedTable(spec)
-		return "bar", map[string]any{"data": points(spec.Series[0]), "unit": spec.Unit, "height": 320, "highlight": "last"}, "bar", table, true
+		cfg, hi := barHighlight(first, order)
+		table := groupedTable(spec, order)
+		return preparedChart{renderType: "bar", config: cfg, downgrade: "bar", table: table, highlight: hi, ok: true}
 	}
-	return "", nil, "", "", false
+	return preparedChart{}
 }
 
-func timeLabels(points []Point) bool {
-	for _, p := range points {
-		if chartDate(p.Label).IsZero() {
-			return false
-		}
-	}
-	return true
-}
-
-func groupedTable(spec VisualSpec) string {
+func groupedTable(spec VisualSpec, order []int) string {
 	var b strings.Builder
 	b.WriteString(`<div class="tw"><table class="keep"><thead><tr><th>类别</th>`)
 	for _, s := range spec.Series {
 		fmt.Fprintf(&b, `<th class="num">%s</th>`, template.HTMLEscapeString(s.Name))
 	}
 	b.WriteString(`</tr></thead><tbody>`)
-	for i, p := range spec.Series[0].Points {
+	for _, oi := range order {
+		p := spec.Series[0].Points[oi]
 		fmt.Fprintf(&b, `<tr><td>%s</td>`, template.HTMLEscapeString(p.Label))
 		for _, s := range spec.Series {
-			if i < len(s.Points) {
-				fmt.Fprintf(&b, `<td class="num">%s</td>`, template.HTMLEscapeString(formatNumber(s.Points[i].Value)))
+			if oi < len(s.Points) {
+				fmt.Fprintf(&b, `<td class="num">%s</td>`, template.HTMLEscapeString(formatNumber(s.Points[oi].Value)))
 			} else {
 				b.WriteString(`<td class="num">—</td>`)
 			}
@@ -279,19 +388,19 @@ func Render(d Data) ([]byte, error) {
 	var chartJSON []chartItem
 	downgraded := false
 	for i, spec := range specs {
-		rt, cfg, mode, extra, ok := chartConfig(spec)
-		if !ok {
+		prepared := chartConfig(spec)
+		if !prepared.ok {
 			continue
 		}
 		if spec.Type == "barGrouped" && !downgraded {
-			slog.Info("report chart downgraded", "type", "barGrouped", "mode", mode)
+			slog.Info("report chart downgraded", "type", "barGrouped", "mode", prepared.downgrade)
 			downgraded = true
 		}
 		chartIndex := len(chartJSON)
-		chartJSON = append(chartJSON, chartItem{RenderType: rt, Config: cfg})
-		fig, _ := figureHTML(spec, chartIndex, l.ChartNoJS)
-		htmlBody = strings.ReplaceAll(htmlBody, "<p>@@CHART"+strconv.Itoa(i)+"@@</p>", fig+extra)
-		htmlBody = strings.ReplaceAll(htmlBody, "@@CHART"+strconv.Itoa(i)+"@@", fig+extra)
+		chartJSON = append(chartJSON, chartItem{RenderType: prepared.renderType, Config: prepared.config})
+		fig, _ := figureHTML(spec, chartIndex, l.ChartNoJS, prepared.highlight)
+		htmlBody = strings.ReplaceAll(htmlBody, "<p>@@CHART"+strconv.Itoa(i)+"@@</p>", fig+prepared.table)
+		htmlBody = strings.ReplaceAll(htmlBody, "@@CHART"+strconv.Itoa(i)+"@@", fig+prepared.table)
 	}
 
 	// Split H2 sections. The preamble is kept as section 0 if it has content.
