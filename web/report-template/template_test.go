@@ -19,7 +19,7 @@ func TestRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(out)
-	for _, want := range []string{"<h1>标题 &lt;x&gt;</h1>", `<a href="https://a.example/1" target="_blank" rel="noopener nofollow">[1]</a>`, "[9]", `id="src-1"`} {
+	for _, want := range []string{"<h1>标题 &lt;x&gt;</h1>", `<a href="#ref-1" data-source-url="https://a.example/1"`, "[9]", `id="src-1"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -86,7 +86,7 @@ func TestRenderShareKeepsCTAAndCitationAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(out)
-	for _, want := range []string{`class="c-cta"`, `href="https://app.example/report"`, `id="src-1"`, `href="https://a.example/1"`, `class="c-ai"`, "Shared by Alice"} {
+	for _, want := range []string{`class="c-cta"`, `href="https://app.example/report"`, `id="src-1"`, `href="#ref-1"`, `class="c-ai"`, "Shared by Alice"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -216,7 +216,7 @@ func TestRenderKeyFiguresCover(t *testing.T) {
 		{Label: "市场规模", Value: "294.16", Unit: "亿元"},
 		{Label: "增速", Value: "85.4", Unit: "%"},
 	}
-	out, err := Render(Data{Title: "KPI", Markdown: "## 一、市场\n\n正文", SourceCount: 5, ReadMinutes: 9, KeyFigures: figures})
+	out, err := Render(Data{Title: "KPI", Markdown: "## 一、市场\n\n正文", SourceCount: 5, ReadMinutes: 9, KeyFigures: figures, Sources: []Source{{Index: 2, URL: "https://example.com/source/2", Title: "来源二", SiteName: "example.com"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestRenderKeyFiguresCover(t *testing.T) {
 	if strings.Count(html, `class="cover-stats"`) != 1 {
 		t.Fatal("cover stats block missing")
 	}
-	for _, want := range []string{"4.99", "294.16", "85.4", "2024年AI原生App月活", `href="#ref-2"`, "5 个来源", "9 分钟"} {
+	for _, want := range []string{"4.99", "294.16", "85.4", "2024年AI原生App月活", `href="#ref-2"`, `data-source-url="https://example.com/source/2"`, `data-source-site="example.com"`, "5 个来源", "9 分钟"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -283,8 +283,8 @@ func TestSourceLinksUseRealURLsAndPageAnchors(t *testing.T) {
 	if !strings.Contains(html, `href="https://example.com/report" target="_blank" rel="noopener nofollow"`) {
 		t.Fatal("refs must link to the real source URL")
 	}
-	if !strings.Contains(html, `<sup class="cite"><a href="https://example.com/report" target="_blank" rel="noopener nofollow">[1]</a></sup>`) {
-		t.Fatal("citation sup must open the real source URL")
+	if !strings.Contains(html, `<sup class="cite"><a href="#ref-1" data-source-url="https://example.com/report"`) {
+		t.Fatal("citation sup must keep the page anchor and carry panel source data")
 	}
 	if !strings.Contains(html, `class="c-source-original" target="_blank" rel="noopener nofollow" hidden`) {
 		t.Fatal("source panel original link must not start as href=#")
@@ -301,7 +301,7 @@ func TestSourcePanelInsetContractAndChartOnlyTrigger(t *testing.T) {
 		"--app-bottom-inset:0px",
 		"bottom:calc(var(--app-bottom-inset,0px))",
 		"max-height:60vh",
-		".report-chart a[href^='#src-']",
+		".cite a[data-source-url], .cover-stats a[data-source-url], .report-chart a[data-source-url]",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing panel contract %q", want)
@@ -312,5 +312,41 @@ func TestSourcePanelInsetContractAndChartOnlyTrigger(t *testing.T) {
 	}
 	if !strings.Contains(src, "iOS 原生底部栏契约") {
 		t.Error("template must document the iOS inset contract")
+	}
+}
+
+func TestStripSectionNumber(t *testing.T) {
+	cases := map[string]string{
+		"一、市场规模":     "市场规模",
+		"（一）市场规模":    "市场规模",
+		"1. 市场规模":    "市场规模",
+		"1、市场规模":     "市场规模",
+		"第一章 市场规模":   "市场规模",
+		"第 1 节 市场规模": "市场规模",
+		"一、1. 市场规模":  "1. 市场规模",
+		"1.5 万亿":     "1.5 万亿",
+		"一、":         "一、",
+		"市场规模与出货量":   "市场规模与出货量",
+	}
+	for in, want := range cases {
+		if got := stripSectionNumber(in); got != want {
+			t.Errorf("stripSectionNumber(%q)=%q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRenderedHeadingAndTOCDropNumberPrefix(t *testing.T) {
+	out, err := Render(Data{Title: "报告", Markdown: "## 一、市场规模与出货量\n\n正文。\n\n## （二）竞争格局\n\n正文。"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	for _, want := range []string{`<h2>市场规模与出货量</h2>`, `<h2>竞争格局</h2>`, `<a href="#s0"><i>00</i>市场规模与出货量</a>`, `<a href="#s1"><i>01</i>竞争格局</a>`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(html, `<h2>一、`) || strings.Contains(html, `<h2>（二）`) {
+		t.Error("section heading still has a duplicate number prefix")
 	}
 }

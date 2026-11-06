@@ -45,19 +45,20 @@ type KeyFigure struct {
 }
 
 type Data struct {
-	Title       string
-	Summary     string
-	Markdown    string
-	DepthLabel  string
-	SourceCount int
-	ReadMinutes int
-	CompletedAt string
-	Sources     []Source
-	KeyFigures  []KeyFigure
-	Share       bool
-	SharedBy    string
-	AppURL      string
-	Lang        string
+	Title          string
+	Summary        string
+	Markdown       string
+	DepthLabel     string
+	SourceCount    int
+	ReadMinutes    int
+	CompletedAt    string
+	Sources        []Source
+	SourcesByIndex map[int]Source
+	KeyFigures     []KeyFigure
+	Share          bool
+	SharedBy       string
+	AppURL         string
+	Lang           string
 }
 
 type Labels struct {
@@ -381,6 +382,57 @@ func formatNumber(v float64) string {
 	return strconv.FormatFloat(v, 'f', 2, 64)
 }
 
+var (
+	cnSectionNumber = regexp.MustCompile(`^[一二三四五六七八九十百零〇两]+、\s*`)
+	cnParenNumber   = regexp.MustCompile(`^（[一二三四五六七八九十百零〇两]+）\s*`)
+	digitSection    = regexp.MustCompile(`^\d+[.、]\s*`)
+	chapterNumber   = regexp.MustCompile(`^第[一二三四五六七八九十百零〇两\d]+章\s*`)
+	sectionNumber   = regexp.MustCompile(`^第\s*\d+\s*节\s*`)
+)
+
+// stripSectionNumber removes one leading numbering layer from an H2. The
+// template already renders its own .sechead number, so keeping the model's
+// prefix would show two numbering systems. If stripping would empty the title,
+// the original text is kept.
+func stripSectionNumber(title string) string {
+	s := strings.TrimSpace(title)
+	original := s
+	if loc := cnSectionNumber.FindStringIndex(s); loc != nil {
+		if rest := strings.TrimSpace(s[loc[1]:]); rest != "" {
+			return rest
+		}
+		return original
+	}
+	if loc := cnParenNumber.FindStringIndex(s); loc != nil {
+		if rest := strings.TrimSpace(s[loc[1]:]); rest != "" {
+			return rest
+		}
+		return original
+	}
+	if loc := digitSection.FindStringIndex(s); loc != nil {
+		if loc[1] < len(s) && s[loc[1]] >= '0' && s[loc[1]] <= '9' {
+			return original
+		}
+		if rest := strings.TrimSpace(s[loc[1]:]); rest != "" {
+			return rest
+		}
+		return original
+	}
+	if loc := chapterNumber.FindStringIndex(s); loc != nil {
+		if rest := strings.TrimSpace(s[loc[1]:]); rest != "" {
+			return rest
+		}
+		return original
+	}
+	if loc := sectionNumber.FindStringIndex(s); loc != nil {
+		if rest := strings.TrimSpace(s[loc[1]:]); rest != "" {
+			return rest
+		}
+		return original
+	}
+	return original
+}
+
 func Render(d Data) ([]byte, error) {
 	cleaned, storedFigures := extractKeyFigures(d.Markdown)
 	d.Markdown = cleaned
@@ -391,6 +443,10 @@ func Render(d Data) ([]byte, error) {
 		d.KeyFigures = d.KeyFigures[:4]
 	}
 	d.Markdown = TrimLeadingTitle(d.Markdown, d.Title)
+	d.SourcesByIndex = make(map[int]Source, len(d.Sources))
+	for _, source := range d.Sources {
+		d.SourcesByIndex[source.Index] = source
+	}
 	valid := map[int]bool{}
 	for _, s := range d.Sources {
 		valid[s.Index] = true
@@ -418,24 +474,19 @@ func Render(d Data) ([]byte, error) {
 		return nil, err
 	}
 	htmlBody := body.String()
-	sourceURL := make(map[int]string, len(d.Sources))
-	for _, s := range d.Sources {
-		if isWebURL(s.URL) {
-			sourceURL[s.Index] = s.URL
-		}
-	}
 	htmlBody = citeRe.ReplaceAllStringFunc(htmlBody, func(m string) string {
 		n, _ := strconv.Atoi(m[1 : len(m)-1])
 		if !valid[n] {
 			return m
 		}
-		href := "#ref-" + strconv.Itoa(n)
 		attrs := ""
-		if u := sourceURL[n]; u != "" {
-			href = u
-			attrs = ` target="_blank" rel="noopener nofollow"`
+		if source, ok := d.SourcesByIndex[n]; ok && isWebURL(source.URL) {
+			attrs = ` data-source-url="` + template.HTMLEscapeString(source.URL) + `"` +
+				` data-source-title="` + template.HTMLEscapeString(source.Title) + `"` +
+				` data-source-site="` + template.HTMLEscapeString(source.SiteName) + `"` +
+				` data-source-meta="` + template.HTMLEscapeString(source.SiteName) + `"`
 		}
-		return `<sup class="cite"><a href="` + template.HTMLEscapeString(href) + `"` + attrs + `>[` + strconv.Itoa(n) + `]</a></sup>`
+		return `<sup class="cite"><a href="#ref-` + strconv.Itoa(n) + `"` + attrs + `>[` + strconv.Itoa(n) + `]</a></sup>`
 	})
 	htmlBody = conclusionLabel.ReplaceAllString(htmlBody, `<strong class="conclusion-label">$1</strong>`)
 	htmlBody = strings.ReplaceAll(htmlBody, "<ul>", `<ul class="clean">`)
@@ -476,7 +527,7 @@ func Render(d Data) ([]byte, error) {
 			if i+1 < len(matches) {
 				end = matches[i+1][0]
 			}
-			title := stdhtml.UnescapeString(tagRe.ReplaceAllString(htmlBody[m[2]:m[3]], ""))
+			title := stripSectionNumber(stdhtml.UnescapeString(tagRe.ReplaceAllString(htmlBody[m[2]:m[3]], "")))
 			sec := Section{
 				ID:    fmt.Sprintf("s%d", len(sections)),
 				Num:   fmt.Sprintf("%02d", len(sections)),
@@ -495,7 +546,7 @@ func Render(d Data) ([]byte, error) {
 		for _, s := range d.Sources {
 			fmt.Fprintf(&refs, `<li id="ref-%d"><span id="src-%d"></span>`, s.Index, s.Index)
 			if isWebURL(s.URL) {
-				fmt.Fprintf(&refs, `<a class="t" href="%s" target="_blank" rel="noopener nofollow" data-source-url="%s" data-source-title="%s" data-source-meta="%s">%s</a>`, template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.Title), template.HTMLEscapeString(s.SiteName), template.HTMLEscapeString(s.Title))
+				fmt.Fprintf(&refs, `<a class="t" href="%s" target="_blank" rel="noopener nofollow" data-source-url="%s" data-source-title="%s" data-source-site="%s" data-source-meta="%s">%s</a>`, template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.Title), template.HTMLEscapeString(s.SiteName), template.HTMLEscapeString(s.SiteName), template.HTMLEscapeString(s.Title))
 			} else {
 				fmt.Fprintf(&refs, `<span class="t">%s</span>`, template.HTMLEscapeString(s.Title))
 			}
