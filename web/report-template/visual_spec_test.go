@@ -4,14 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"math"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func visualTestSpec(level string) VisualSpec {
@@ -124,148 +119,6 @@ func TestVisualTrendAnchorKeywords(t *testing.T) {
 	}
 }
 
-func TestRenderVisualSpecBarL1(t *testing.T) {
-	out, err := RenderVisualSpec(visualTestSpec("L1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`class="report-visual"`, `data-level="L1"`, `viewBox="0 0 360 240"`, "测试图：三情景", "单位：万人", "<rect"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-	if strings.Contains(out, "L2 ·") || strings.Contains(out, "L3 ·") {
-		t.Fatal("L1 must not have an L2/L3 badge")
-	}
-	if strings.Contains(out, `class="axis-truncated"`) {
-		t.Fatal("untruncated axis must not have a marker")
-	}
-}
-
-func TestRenderVisualSpecBarGroupedL2(t *testing.T) {
-	spec := visualTestSpec("L2")
-	spec.Type = "barGrouped"
-	spec.Series = []Series{
-		{Name: "基准", Points: []Point{{Label: "2024", Value: 100}, {Label: "2025", Value: 200}}},
-		{Name: "乐观", Points: []Point{{Label: "2024", Value: 120}, {Label: "2025", Value: 240}}},
-	}
-	out, err := RenderVisualSpec(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`viewBox="0 0 360 240"`, "L2 · 据 [1][3] 计算", "基准", "乐观", "<rect"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-}
-
-func TestRenderVisualSpecLineL3AndTruncatedAxis(t *testing.T) {
-	spec := visualTestSpec("L3")
-	spec.Type = "line"
-	spec.AxisTruncated = true
-	spec.Series = []Series{
-		{Name: "基准", Points: []Point{{Label: "2024", Value: 800}, {Label: "2025", Value: 1000}, {Label: "2026", Value: 1200}}},
-		{Name: "乐观", Points: []Point{{Label: "2024", Value: 800}, {Label: "2025", Value: 1100}, {Label: "2026", Value: 1400}}},
-	}
-	out, err := RenderVisualSpec(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`viewBox="0 0 360 300"`, "L3 · 分析性判断，非官方数据", "<polyline", `class="axis-truncated"`, "轴不从 0 起"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-	if strings.Count(out, "轴不从 0 起") != 1 {
-		t.Fatalf("axis marker must be rendered once, got %d", strings.Count(out, "轴不从 0 起"))
-	}
-}
-
-func TestRenderVisualSpecRejectsInvalid(t *testing.T) {
-	spec := visualTestSpec("L2")
-	spec.Inputs = nil
-	if _, err := RenderVisualSpec(spec); !errors.Is(err, ErrInvalidVisualSpec) {
-		t.Fatalf("expected validation error, got %v", err)
-	}
-}
-
-func TestRenderVisualSpecEscapesCaptionAndTitle(t *testing.T) {
-	spec := visualTestSpec("L1")
-	spec.Title = `<script>alert(1)</script>`
-	spec.Caption = `<img src=x onerror=alert(1)>`
-	out, err := RenderVisualSpec(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(out, "<script>") || strings.Contains(out, "<img src=x") {
-		t.Fatal("untrusted text leaked into rendered figure")
-	}
-	for _, want := range []string{"&lt;script&gt;", "&lt;img src=x"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing escaped %q", want)
-		}
-	}
-}
-
-var visualTextTag = regexp.MustCompile(`(?s)<text([^>]*)>(.*?)</text>`)
-var visualAttribute = regexp.MustCompile(`([a-zA-Z0-9-]+)="([^"]*)"`)
-var visualInnerTag = regexp.MustCompile(`<[^>]+>`)
-
-func TestRenderVisualSpecNoHorizontalOverflow(t *testing.T) {
-	line := visualTestSpec("L3")
-	line.Type = "line"
-	line.AxisTruncated = true
-	line.Title = "三情景常态化参与人口：基准 / 乐观 / 悲观（2026–2030）"
-	line.Series = []Series{
-		{Name: "基准", Points: []Point{{Label: "2026", Value: 800}, {Label: "2027", Value: 1010}, {Label: "2028", Value: 1260}, {Label: "2029", Value: 1590}, {Label: "2030", Value: 2000}}},
-		{Name: "乐观", Points: []Point{{Label: "2026", Value: 800}, {Label: "2027", Value: 1110}, {Label: "2028", Value: 1550}, {Label: "2029", Value: 2160}, {Label: "2030", Value: 3000}}},
-		{Name: "悲观", Points: []Point{{Label: "2026", Value: 800}, {Label: "2027", Value: 870}, {Label: "2028", Value: 940}, {Label: "2029", Value: 1020}, {Label: "2030", Value: 1100}}},
-	}
-	grouped := visualTestSpec("L2")
-	grouped.Type = "barGrouped"
-	grouped.Series = []Series{
-		{Name: "基准", Points: []Point{{Label: "2024", Value: 100}, {Label: "2025", Value: 200}}},
-		{Name: "乐观", Points: []Point{{Label: "2024", Value: 120}, {Label: "2025", Value: 240}}},
-	}
-	for name, spec := range map[string]VisualSpec{"bar": visualTestSpec("L1"), "grouped": grouped, "line": line} {
-		t.Run(name, func(t *testing.T) {
-			out, err := RenderVisualSpec(spec)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertVisualTextWithinViewBox(t, out, 360)
-		})
-	}
-}
-
-func assertVisualTextWithinViewBox(t *testing.T, out string, width float64) {
-	t.Helper()
-	for _, match := range visualTextTag.FindAllStringSubmatch(out, -1) {
-		attrs := map[string]string{}
-		for _, attr := range visualAttribute.FindAllStringSubmatch(match[1], -1) {
-			attrs[attr[1]] = attr[2]
-		}
-		x, _ := strconv.ParseFloat(attrs["x"], 64)
-		fontSize, _ := strconv.ParseFloat(attrs["font-size"], 64)
-		if fontSize == 0 {
-			fontSize = visualFont
-		}
-		text := html.UnescapeString(strings.TrimSpace(visualInnerTag.ReplaceAllString(match[2], "")))
-		estimated := estimateVisualTextWidth(text, fontSize)
-		left, right := x, x+estimated
-		switch attrs["text-anchor"] {
-		case "middle":
-			left, right = x-estimated/2, x+estimated/2
-		case "end":
-			left, right = x-estimated, x
-		}
-		if left < -0.5 || right > width+0.5 {
-			t.Errorf("text %q spans %.1f..%.1f outside viewBox 0..%.0f", text, left, right, width)
-		}
-	}
-}
-
 func TestFilterChartsPreservesValidVisualSpec(t *testing.T) {
 	spec := visualTestSpec("L1")
 	raw, err := json.Marshal(spec)
@@ -286,28 +139,6 @@ func TestFilterChartsPreservesValidVisualSpec(t *testing.T) {
 	}
 }
 
-func TestRenderDispatchesVisualSpecAndLegacyChart(t *testing.T) {
-	spec := visualTestSpec("L2")
-	raw, err := json.Marshal(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	visualBlock := "```zeus-chart\n" + string(raw) + "\n```\n"
-	out, err := Render(Data{
-		Markdown: "正文\n\n" + visualBlock + "\n" + validChart,
-		Sources:  []Source{{Index: 1, Title: "source", URL: "https://example.com"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(out)
-	for _, want := range []string{`class="report-visual"`, `class="report-chart"`, "L2 · 据 [1][3] 计算"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-}
-
 func extremeVisualSpec(typ string, values ...float64) VisualSpec {
 	points := make([]Point, 0, len(values))
 	for i, value := range values {
@@ -322,59 +153,4 @@ func extremeVisualSpec(typ string, values ...float64) VisualSpec {
 		Series:           []Series{{Name: "数值", Points: points}},
 		MetricDefinition: "极端数值测试",
 	}
-}
-
-func TestVisualYAxisGutterFitsWidestLabel(t *testing.T) {
-	spec := extremeVisualSpec("bar", 1000, 1400000)
-	svg, metrics := renderVisualSVG(spec)
-	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
-	require.Greater(t, metrics.WidestYAxisLabel, 50.0, "1,400,000 needs a wide label")
-	assertVisualTextWithinViewBox(t, svg, 360)
-}
-
-func TestVisualYAxisGutterDecimalsStaysCompact(t *testing.T) {
-	spec := extremeVisualSpec("bar", 0.5, 0.25)
-	svg, metrics := renderVisualSVG(spec)
-	require.LessOrEqual(t, metrics.PlotLeft, 40.0, "decimal labels must not widen the gutter excessively")
-	assertVisualTextWithinViewBox(t, svg, 360)
-}
-
-func TestVisualNegativeAxisKeepsSign(t *testing.T) {
-	spec := extremeVisualSpec("line", -1400000, -1000)
-	svg, metrics := renderVisualSVG(spec)
-	require.Contains(t, svg, "-1,500,000")
-	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
-	assertVisualTextWithinViewBox(t, svg, 360)
-}
-
-func TestVisualBarTopLabelsStayInsideViewBox(t *testing.T) {
-	spec := extremeVisualSpec("bar", 1000, 1400000)
-	svg, _ := renderVisualSVG(spec)
-	require.Contains(t, svg, "1,000")
-	require.Contains(t, svg, "1,400,000")
-	assertVisualTextWithinViewBox(t, svg, 360)
-}
-
-func TestVisualGroupedBarLabelsStayInsideViewBox(t *testing.T) {
-	spec := extremeVisualSpec("barGrouped", 1000, 1400000)
-	spec.Series = append(spec.Series, Series{Name: "另一组", Points: []Point{{Label: "P1", Value: 1400000}, {Label: "P2", Value: 1000}}})
-	svg, metrics := renderVisualSVG(spec)
-	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
-	assertVisualTextWithinViewBox(t, svg, 360)
-}
-
-func TestRenderVisualSpecPaletteChangesColors(t *testing.T) {
-	spec := extremeVisualSpec("bar", 1000, 1400000)
-	green, err := RenderVisualSpec(spec, VisualPalette{Accent: "#B8D94B", Deep: "#0E2A21", Ink: "#14181B", Line: "#DFD9CB", Muted: "#7A8188"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	blue, err := RenderVisualSpec(spec, VisualPalette{Accent: "#2952CC", Deep: "#101828", Ink: "#1B2332", Line: "#E2E7EF", Muted: "#5B6577"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	require.NotEqual(t, green, blue)
-	require.Contains(t, green, "#B8D94B")
-	require.NotContains(t, green, "#2952CC")
-	require.Contains(t, blue, "#2952CC")
 }

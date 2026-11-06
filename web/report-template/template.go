@@ -1,5 +1,5 @@
 // Package reporttemplate is the single HTML template for reports: the App's WebView, the H5
-// share page and (later) the PDF export all render through Render.
+// share page and the PDF export all render through Render.
 package reporttemplate
 
 import (
@@ -7,8 +7,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"html/template"
+	"log/slog"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,43 +22,12 @@ import (
 //go:embed report.html.tmpl
 var src string
 
-// Connector results (mcp://…) are listed as sources but cannot be opened.
 var page = template.Must(template.New("report").Funcs(template.FuncMap{
 	"isWeb":  func(u string) bool { return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") },
 	"printf": fmt.Sprintf,
 }).Parse(src))
 
 var md = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
-
-// reportVisualPalette is the page shell's chart palette. The renderer owns the
-// colors; the template layer only supplies tokens, never post-render string
-// replacement.
-var reportVisualPalette = VisualPalette{
-	Accent: "#B8D94B",
-	Deep:   "#0E2A21",
-	Ink:    "#14181B",
-	Line:   "#DFD9CB",
-	Muted:  "#7A8188",
-	Series: []string{"#0E2A21", "#2C5F49", "#9A6A1E"},
-}
-
-// useJSCharts switches between the template's fixed JS SVG renderer and the
-// server-side RenderVisualSpec fallback. Flip this one line to roll back.
-var useJSCharts = true
-
-func renderJSVisualFigure(index int, spec VisualSpec, noJS string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<figure class="report-visual" data-js-chart="true" data-level="%s" data-axis-truncated="%t">`, template.HTMLEscapeString(spec.Level), spec.AxisTruncated)
-	if badge := visualBadge(spec); badge != "" {
-		fmt.Fprintf(&b, `<div class="js-chart-badge">%s</div>`, template.HTMLEscapeString(badge))
-	}
-	fmt.Fprintf(&b, `<div class="chart-canvas" id="zeus-chart-%d"><noscript>%s</noscript></div>`, index, template.HTMLEscapeString(noJS))
-	if strings.TrimSpace(spec.Caption) != "" {
-		fmt.Fprintf(&b, `<figcaption class="visual-caption">%s</figcaption>`, template.HTMLEscapeString(spec.Caption))
-	}
-	b.WriteString(`</figure>`)
-	return b.String()
-}
 
 type Source struct {
 	Index    int
@@ -67,52 +39,44 @@ type Source struct {
 type Data struct {
 	Title       string
 	Summary     string
-	Markdown    string // empty for summary-only shares
+	Markdown    string
 	DepthLabel  string
 	SourceCount int
 	ReadMinutes int
 	CompletedAt string
 	Sources     []Source
-	// Share marks the public H5 page: it gets the AI label, the sharer line and the CTA.
-	Share    bool
-	SharedBy string // nickname, only when the sharer opted in
-	AppURL   string // the CTA's link
-	// Lang is the report's language, zh, zh-Hant or en; it picks the page's own labels.
-	Lang string
+	Share       bool
+	SharedBy    string
+	AppURL      string
+	Lang        string
 }
 
-// Labels are the page's fixed texts in the report's language.
 type Labels struct {
-	SourceDetails, SourcePeriod, SourceUnit, SourceScope, SourceQualifier, SourceOriginal, SourceClose string
-	ReadTime                                                                                           string
-	ChartNoJS                                                                                          string
-	HTMLLang, Sources, SourceCount, Disclaimer, CTA, AILabel, SharedBy                                 string
-	Contents, Close, CurrentSection, MoveContents                                                      string
+	ReadTime, ChartNoJS                                                                                 string
+	HTMLLang, Sources, SourceCount, Disclaimer, CTA, AILabel, SharedBy, Contents, Close, CurrentSection string
 }
 
 var labels = map[string]Labels{
-	"zh":      {HTMLLang: "zh-CN", ReadTime: "约 %d 分钟", SourceDetails: "数据来源", SourcePeriod: "统计时间", SourceUnit: "单位", SourceScope: "范围", SourceQualifier: "数据性质", SourceOriginal: "查看原始资料", SourceClose: "关闭来源", Contents: "目录", MoveContents: "将目录按钮移到另一侧", Close: "关闭目录", CurrentSection: "当前阅读", Sources: "来源", SourceCount: "%d 个来源", Disclaimer: "本报告由 AI 生成，内容仅供参考，请以原始来源为准。", CTA: "用 Zeus 生成你自己的报告", AILabel: "内容由 AI 生成", SharedBy: "来自 %s 的分享", ChartNoJS: "该图表需要 JavaScript 才能显示。"},
-	"zh-Hant": {HTMLLang: "zh-Hant", ReadTime: "約 %d 分鐘", SourceDetails: "資料來源", SourcePeriod: "統計時間", SourceUnit: "單位", SourceScope: "範圍", SourceQualifier: "資料性質", SourceOriginal: "查看原始資料", SourceClose: "關閉來源", Contents: "目錄", MoveContents: "將目錄按鈕移到另一側", Close: "關閉目錄", CurrentSection: "目前閱讀", Sources: "來源", SourceCount: "%d 個來源", Disclaimer: "本報告由 AI 生成，內容僅供參考，請以原始來源為準。", CTA: "用 Zeus 生成你自己的報告", AILabel: "內容由 AI 生成", SharedBy: "來自 %s 的分享", ChartNoJS: "此圖表需要 JavaScript 才能顯示。"},
-	"en":      {HTMLLang: "en", ReadTime: "%d min read", SourceDetails: "Data source", SourcePeriod: "Period", SourceUnit: "Unit", SourceScope: "Scope", SourceQualifier: "Data status", SourceOriginal: "View original source", SourceClose: "Close source", Contents: "Table of contents", MoveContents: "Move contents button to other side", Close: "Close contents", CurrentSection: "Reading", Sources: "Sources", SourceCount: "%d sources", Disclaimer: "This report was generated by AI and is for reference only. Please check the original sources.", CTA: "Create your own report with Zeus", AILabel: "AI-generated", SharedBy: "Shared by %s", ChartNoJS: "This chart requires JavaScript."},
+	"zh":      {HTMLLang: "zh-CN", ReadTime: "%d 分钟", ChartNoJS: "该图表需要 JavaScript 才能显示。", Contents: "目录", Close: "关闭目录", CurrentSection: "当前阅读", Sources: "来源", SourceCount: "%d 个来源", Disclaimer: "本报告由 AI 生成，内容仅供参考，请以原始来源为准。", CTA: "用 Zeus 生成你自己的报告", AILabel: "内容由 AI 生成", SharedBy: "来自 %s 的分享"},
+	"zh-Hant": {HTMLLang: "zh-Hant", ReadTime: "%d 分鐘", ChartNoJS: "此圖表需要 JavaScript 才能顯示。", Contents: "目錄", Close: "關閉目錄", CurrentSection: "目前閱讀", Sources: "來源", SourceCount: "%d 個來源", Disclaimer: "本報告由 AI 生成，內容僅供參考，請以原始來源為準。", CTA: "用 Zeus 生成你自己的報告", AILabel: "內容由 AI 生成", SharedBy: "來自 %s 的分享"},
+	"en":      {HTMLLang: "en", ReadTime: "%d min read", ChartNoJS: "This chart requires JavaScript.", Contents: "Contents", Close: "Close contents", CurrentSection: "Reading", Sources: "Sources", SourceCount: "%d sources", Disclaimer: "This report was generated by AI and is for reference only. Please check the original sources.", CTA: "Create your own report with Zeus", AILabel: "AI-generated", SharedBy: "Shared by %s"},
 }
 
-// citeRe matches [n] citations; goldmark leaves unmatched [n] as literal text.
 var citeRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 var conclusionLabel = regexp.MustCompile(`(?i)<strong>(事实|判断|建议|事實|判斷|建議|fact|analysis|recommendation)</strong>`)
+var h2Re = regexp.MustCompile(`(?s)<h2>(.*?)</h2>`)
+var tableRe = regexp.MustCompile(`(?s)<table>.*?</table>`)
+var numRe = regexp.MustCompile(`<td>([0-9][0-9,.]*(?:亿元|%)(?:[^<]*)?|[0-9][0-9,.]*)</td>`)
+var tagRe = regexp.MustCompile(`<[^>]+>`)
 
-var (
-	reportTableRe = regexp.MustCompile(`(?s)<table>.*?</table>`)
-	reportNumRe   = regexp.MustCompile(`<td>([0-9][0-9,.]*(?:亿元|%)(?:[^<]*)?|[0-9][0-9,.]*)</td>`)
-)
+type Section struct {
+	ID, Num, Title, EN string
+	Body               template.HTML
+}
 
-// wrapReportTables gives every Markdown table the horizontal-scroll container
-// and marks numeric cells for tabular alignment, without changing table text.
-func wrapReportTables(markup string) string {
-	return reportTableRe.ReplaceAllStringFunc(markup, func(table string) string {
-		table = strings.ReplaceAll(table, `<th>数值</th>`, `<th class="num">数值</th>`)
-		table = reportNumRe.ReplaceAllString(table, `<td class="num">$1</td>`)
-		return `<div class="tw">` + table + `</div>`
-	})
+type chartItem struct {
+	RenderType string         `json:"renderType"`
+	Config     map[string]any `json:"config"`
 }
 
 // TrimLeadingTitle removes a leading H1 only when its text is the same as the
@@ -145,72 +109,370 @@ func TrimLeadingTitle(markdown, title string) string {
 	return strings.Join(lines[next:], "\n")
 }
 
-// Render produces the full HTML document. Raw HTML in the Markdown is not rendered
-// (goldmark's default), so model output cannot inject markup.
+func addLead(body string) string {
+	loc := regexp.MustCompile(`<p>`).FindStringIndex(body)
+	if loc == nil {
+		return body
+	}
+	return body[:loc[0]] + `<p class="lead">` + body[loc[1]:]
+}
+
+func wrapTables(markup string) string {
+	return tableRe.ReplaceAllStringFunc(markup, func(table string) string {
+		table = strings.ReplaceAll(table, `<th>数值</th>`, `<th class="num">数值</th>`)
+		table = numRe.ReplaceAllString(table, `<td class="num">$1</td>`)
+		return `<div class="tw"><table class="keep">` + strings.TrimPrefix(strings.TrimSuffix(table, "</table>"), "<table>") + `</table></div>`
+	})
+}
+
+var timeLabelRe = regexp.MustCompile(`^(?:\d{4}E?|\d{4}年(?:\d{1,2}月)?|\d{1,2}月)$`)
+
+func isTimeAxis(points []Point) bool {
+	if len(points) == 0 {
+		return false
+	}
+	for _, p := range points {
+		if !timeLabelRe.MatchString(strings.TrimSpace(p.Label)) {
+			return false
+		}
+	}
+	return true
+}
+
+func isOrderedCategory(points []Point) bool {
+	hits := 0
+	for _, p := range points {
+		label := p.Label
+		for _, token := range []string{"线", "级", "档", "期", "阶段"} {
+			if strings.Contains(label, token) {
+				hits++
+				break
+			}
+		}
+	}
+	return hits >= 2
+}
+
+func categoryOrder(points []Point, order string) []int {
+	idx := make([]int, len(points))
+	for i := range idx {
+		idx[i] = i
+	}
+	if isTimeAxis(points) || strings.EqualFold(strings.TrimSpace(order), "as-is") || isOrderedCategory(points) {
+		return idx
+	}
+	sort.SliceStable(idx, func(i, j int) bool {
+		a, b := points[idx[i]], points[idx[j]]
+		if a.Value == b.Value {
+			return a.Label < b.Label
+		}
+		return a.Value > b.Value
+	})
+	return idx
+}
+
+func orderedPoints(points []Point, order []int) []Point {
+	out := make([]Point, 0, len(order))
+	for _, i := range order {
+		out = append(out, points[i])
+	}
+	return out
+}
+
+func highlightFor(spec VisualSpec, points []Point) (int, bool) {
+	if isTimeAxis(points) {
+		return len(points) - 1, true
+	}
+	if spec.HighlightIndex != nil && *spec.HighlightIndex >= 0 && *spec.HighlightIndex < len(points) {
+		return *spec.HighlightIndex, true
+	}
+	return 0, false
+}
+
+func isPredictionLabel(label string) bool {
+	return strings.Contains(label, "E") || strings.Contains(label, "预计") || strings.Contains(label, "预测") || strings.Contains(label, "外推")
+}
+
+func figureHTML(spec VisualSpec, index int, noJS, highlight string) (fig, extra string) {
+	title := strings.TrimSpace(spec.Title)
+	unit := strings.TrimSpace(spec.Unit)
+	caption := strings.TrimSpace(spec.Caption)
+	meta := strings.TrimSpace(spec.MetricDefinition)
+	if caption == "" {
+		caption = "来源 / 口径 / 时间未提供"
+	}
+	if meta != "" {
+		caption += "；口径：" + meta
+	}
+	if highlight != "" && isPredictionLabel(highlight) {
+		caption += "；" + highlight + " 为预测值"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, `<figure><div class="fig-t">%s</div><div class="fig-s">单位：%s · %s</div>`, template.HTMLEscapeString(title), template.HTMLEscapeString(unit), template.HTMLEscapeString(spec.Level))
+	fmt.Fprintf(&b, `<div class="c-chart-wrap" id="c%dwrap"><div id="c%d"></div><noscript>%s</noscript></div>`, index, index, template.HTMLEscapeString(noJS))
+	fmt.Fprintf(&b, `<figcaption>%s</figcaption></figure>`, template.HTMLEscapeString(caption))
+	return b.String(), extra
+}
+
+type preparedChart struct {
+	renderType, downgrade, table, highlight string
+	config                                  map[string]any
+	ok                                      bool
+}
+
+func chartConfig(spec VisualSpec) preparedChart {
+	if len(spec.Series) == 0 {
+		return preparedChart{}
+	}
+	colors := []string{"var(--deep2)", "var(--deep3)", "var(--accent)"}
+	pointMaps := func(points []Point) []map[string]any {
+		out := make([]map[string]any, 0, len(points))
+		for _, p := range points {
+			out = append(out, map[string]any{"label": p.Label, "value": p.Value})
+		}
+		return out
+	}
+	barHighlight := func(original []Point, order []int) (map[string]any, string) {
+		points := orderedPoints(original, order)
+		cfg := map[string]any{"data": pointMaps(points), "unit": spec.Unit, "height": 320}
+		hi, ok := highlightFor(spec, original)
+		if !ok {
+			return cfg, ""
+		}
+		sorted := 0
+		for pos, oi := range order {
+			if oi == hi {
+				sorted = pos
+				break
+			}
+		}
+		cfg["highlight"] = sorted
+		return cfg, original[hi].Label
+	}
+	switch spec.Type {
+	case "bar":
+		order := categoryOrder(spec.Series[0].Points, spec.Order)
+		cfg, hi := barHighlight(spec.Series[0].Points, order)
+		return preparedChart{renderType: "bar", config: cfg, highlight: hi, ok: true}
+	case "line":
+		order := categoryOrder(spec.Series[0].Points, spec.Order)
+		if len(spec.Series) == 1 {
+			points := orderedPoints(spec.Series[0].Points, order)
+			hi, has := highlightFor(spec, points)
+			label := ""
+			if has {
+				label = points[hi].Label
+			}
+			return preparedChart{renderType: "line", config: map[string]any{"data": pointMaps(points), "unit": spec.Unit, "height": 330}, highlight: label, ok: true}
+		}
+		points := orderedPoints(spec.Series[0].Points, order)
+		labels := make([]string, 0, len(points))
+		for _, p := range points {
+			labels = append(labels, p.Label)
+		}
+		series := make([]map[string]any, 0, len(spec.Series))
+		for i, one := range spec.Series {
+			ordered := orderedPoints(one.Points, order)
+			values := make([]float64, 0, len(ordered))
+			for _, p := range ordered {
+				values = append(values, p.Value)
+			}
+			series = append(series, map[string]any{"name": one.Name, "values": values, "color": colors[i%len(colors)]})
+		}
+		hi, has := highlightFor(spec, points)
+		label := ""
+		if has {
+			label = points[hi].Label
+		}
+		return preparedChart{renderType: "line", config: map[string]any{"labels": labels, "series": series, "unit": spec.Unit, "height": 330}, highlight: label, ok: true}
+	case "barGrouped":
+		first := spec.Series[0].Points
+		order := categoryOrder(first, spec.Order)
+		time := isTimeAxis(first)
+		if len(spec.Series) <= 3 && time {
+			labels := make([]string, 0, len(first))
+			for _, p := range orderedPoints(first, order) {
+				labels = append(labels, p.Label)
+			}
+			series := make([]map[string]any, 0, len(spec.Series))
+			for i, one := range spec.Series {
+				ordered := orderedPoints(one.Points, order)
+				values := make([]float64, 0, len(ordered))
+				for _, p := range ordered {
+					values = append(values, p.Value)
+				}
+				series = append(series, map[string]any{"name": one.Name, "values": values, "color": colors[i%len(colors)]})
+			}
+			label := first[len(first)-1].Label
+			return preparedChart{renderType: "line", config: map[string]any{"labels": labels, "series": series, "unit": spec.Unit, "height": 330}, downgrade: "line", highlight: label, ok: true}
+		}
+		cfg, hi := barHighlight(first, order)
+		table := groupedTable(spec, order)
+		return preparedChart{renderType: "bar", config: cfg, downgrade: "bar", table: table, highlight: hi, ok: true}
+	}
+	return preparedChart{}
+}
+
+func groupedTable(spec VisualSpec, order []int) string {
+	var b strings.Builder
+	b.WriteString(`<div class="tw"><table class="keep"><thead><tr><th>类别</th>`)
+	for _, s := range spec.Series {
+		fmt.Fprintf(&b, `<th class="num">%s</th>`, template.HTMLEscapeString(s.Name))
+	}
+	b.WriteString(`</tr></thead><tbody>`)
+	for _, oi := range order {
+		p := spec.Series[0].Points[oi]
+		fmt.Fprintf(&b, `<tr><td>%s</td>`, template.HTMLEscapeString(p.Label))
+		for _, s := range spec.Series {
+			if oi < len(s.Points) {
+				fmt.Fprintf(&b, `<td class="num">%s</td>`, template.HTMLEscapeString(formatNumber(s.Points[oi].Value)))
+			} else {
+				b.WriteString(`<td class="num">—</td>`)
+			}
+		}
+		b.WriteString(`</tr>`)
+	}
+	b.WriteString(`</tbody></table></div>`)
+	return b.String()
+}
+
+func formatNumber(v float64) string {
+	if v == float64(int64(v)) {
+		return strconv.FormatInt(int64(v), 10)
+	}
+	return strconv.FormatFloat(v, 'f', 2, 64)
+}
+
 func Render(d Data) ([]byte, error) {
-	// Defensive: older or externally rendered reports may still start with the
-	// same H1 as the hero title. The workflow cleaners are primary; this is the
-	// render-side fallback.
 	d.Markdown = TrimLeadingTitle(d.Markdown, d.Title)
 	valid := map[int]bool{}
-	for _, source := range d.Sources {
-		valid[source.Index] = true
-	}
-	var body bytes.Buffer
-	writeMarkdown := func(markdown string) error {
-		var fragment bytes.Buffer
-		if err := md.Convert([]byte(markdown), &fragment); err != nil {
-			return err
-		}
-		linked := citeRe.ReplaceAllFunc(fragment.Bytes(), func(m []byte) []byte {
-			n, _ := strconv.Atoi(string(m[1 : len(m)-1]))
-			if !valid[n] {
-				return m
-			}
-			return []byte(`<sup class="cite"><a href="#src-` + strconv.Itoa(n) + `">` + strconv.Itoa(n) + `</a></sup>`)
-		})
-		linked = conclusionLabel.ReplaceAll(linked, []byte(`<strong class="conclusion-label">$1</strong>`))
-		_, err := body.Write(linked)
-		return err
+	for _, s := range d.Sources {
+		valid[s.Index] = true
 	}
 	l, ok := labels[d.Lang]
 	if !ok {
 		l = labels["zh"]
 	}
-	var chartSpecs []VisualSpec
-	position := 0
-	for _, match := range chartBlock.FindAllStringSubmatchIndex(d.Markdown, -1) {
-		if err := writeMarkdown(d.Markdown[position:match[0]]); err != nil {
-			return nil, err
+	var specs []VisualSpec
+	markdown := chartBlock.ReplaceAllStringFunc(d.Markdown, func(block string) string {
+		parts := chartBlock.FindStringSubmatch(block)
+		if len(parts) != 2 {
+			return ""
 		}
-		raw := d.Markdown[match[2]:match[3]]
-		if spec, ok := parseVisualSpec(raw); ok {
-			if useJSCharts {
-				body.WriteString(renderJSVisualFigure(len(chartSpecs), spec, l.ChartNoJS))
-				chartSpecs = append(chartSpecs, spec)
-			} else if rendered, err := RenderVisualSpec(spec, reportVisualPalette); err == nil {
-				body.WriteString(rendered)
-			}
-		} else if chart, ok := parseChart(raw, valid); ok {
-			body.WriteString(renderChart(chart, d.Lang))
+		spec, ok := parseVisualSpec(parts[1])
+		if !ok || ValidateVisualSpec(spec) != nil {
+			return ""
 		}
-		position = match[1]
-	}
-	if err := writeMarkdown(d.Markdown[position:]); err != nil {
+		idx := len(specs)
+		specs = append(specs, spec)
+		return "\n\n@@CHART" + strconv.Itoa(idx) + "@@\n\n"
+	})
+	var body bytes.Buffer
+	if err := md.Convert([]byte(markdown), &body); err != nil {
 		return nil, err
 	}
+	htmlBody := body.String()
+	htmlBody = citeRe.ReplaceAllStringFunc(htmlBody, func(m string) string {
+		n, _ := strconv.Atoi(m[1 : len(m)-1])
+		if !valid[n] {
+			return m
+		}
+		return `<sup class="cite"><a href="#ref-` + strconv.Itoa(n) + `">[` + strconv.Itoa(n) + `]</a></sup>`
+	})
+	htmlBody = conclusionLabel.ReplaceAllString(htmlBody, `<strong class="conclusion-label">$1</strong>`)
+	htmlBody = strings.ReplaceAll(htmlBody, "<ul>", `<ul class="clean">`)
+	htmlBody = strings.ReplaceAll(htmlBody, "<ol>", `<ol class="steps">`)
+	htmlBody = strings.ReplaceAll(htmlBody, "<blockquote>", `<blockquote class="quote">`)
+	htmlBody = wrapTables(htmlBody)
+
+	var chartJSON []chartItem
+	downgraded := false
+	for i, spec := range specs {
+		prepared := chartConfig(spec)
+		if !prepared.ok {
+			continue
+		}
+		if spec.Type == "barGrouped" && !downgraded {
+			slog.Info("report chart downgraded", "type", "barGrouped", "mode", prepared.downgrade)
+			downgraded = true
+		}
+		chartIndex := len(chartJSON)
+		chartJSON = append(chartJSON, chartItem{RenderType: prepared.renderType, Config: prepared.config})
+		fig, _ := figureHTML(spec, chartIndex, l.ChartNoJS, prepared.highlight)
+		htmlBody = strings.ReplaceAll(htmlBody, "<p>@@CHART"+strconv.Itoa(i)+"@@</p>", fig+prepared.table)
+		htmlBody = strings.ReplaceAll(htmlBody, "@@CHART"+strconv.Itoa(i)+"@@", fig+prepared.table)
+	}
+
+	// Split H2 sections. The preamble is kept as section 0 if it has content.
+	matches := h2Re.FindAllStringSubmatchIndex(htmlBody, -1)
+	var sections []Section
+	if len(matches) == 0 {
+		sections = append(sections, Section{ID: "s0", Num: "00", Title: d.Title, EN: "SECTION", Body: template.HTML(addLead(htmlBody))})
+	} else {
+		preamble := strings.TrimSpace(tagRe.ReplaceAllString(htmlBody[:matches[0][0]], ""))
+		if preamble != "" {
+			sections = append(sections, Section{ID: "s0", Num: "00", Title: "开篇", EN: "SECTION", Body: template.HTML(addLead(htmlBody[:matches[0][0]]))})
+		}
+		for i, m := range matches {
+			start, end := m[0], len(htmlBody)
+			if i+1 < len(matches) {
+				end = matches[i+1][0]
+			}
+			title := stdhtml.UnescapeString(tagRe.ReplaceAllString(htmlBody[m[2]:m[3]], ""))
+			sec := Section{
+				ID:    fmt.Sprintf("s%d", len(sections)),
+				Num:   fmt.Sprintf("%02d", len(sections)),
+				Title: title,
+				EN:    "SECTION",
+				Body:  template.HTML(addLead(htmlBody[m[1]:end])),
+			}
+			sections = append(sections, sec)
+			_ = start
+		}
+	}
+
+	if len(d.Sources) > 0 {
+		var refs strings.Builder
+		refs.WriteString(`<ol class="refs">`)
+		for _, s := range d.Sources {
+			fmt.Fprintf(&refs, `<li id="ref-%d"><span id="src-%d"></span>`, s.Index, s.Index)
+			if isWebURL(s.URL) {
+				fmt.Fprintf(&refs, `<a class="t" href="%s" target="_blank" rel="noopener nofollow" data-source-url="%s" data-source-title="%s" data-source-meta="%s">%s</a>`, template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.URL), template.HTMLEscapeString(s.Title), template.HTMLEscapeString(s.SiteName), template.HTMLEscapeString(s.Title))
+			} else {
+				fmt.Fprintf(&refs, `<span class="t">%s</span>`, template.HTMLEscapeString(s.Title))
+			}
+			if s.SiteName != "" {
+				fmt.Fprintf(&refs, `<span class="m">%s</span>`, template.HTMLEscapeString(s.SiteName))
+			}
+			refs.WriteString(`</li>`)
+		}
+		refs.WriteString(`</ol>`)
+		sections = append(sections, Section{
+			ID: fmt.Sprintf("s%d", len(sections)), Num: fmt.Sprintf("%02d", len(sections)),
+			Title: l.Sources, EN: "REFERENCES", Body: template.HTML(refs.String()),
+		})
+	}
+
 	var chartData []byte
-	if len(chartSpecs) > 0 {
-		chartData, _ = json.Marshal(chartSpecs)
+	if len(chartJSON) > 0 {
+		chartData, _ = json.Marshal(chartJSON)
 	}
 	var out bytes.Buffer
 	err := page.Execute(&out, struct {
 		Data
-		L           Labels
-		Body        template.HTML
-		ChartScript template.JS
-		ChartData   template.JS
-		CSP         string
-	}{d, l, template.HTML(wrapReportTables(body.String())), template.JS(visualChartScript), template.JS(chartData), visualCSP}) // #nosec G203 -- goldmark output with raw HTML disabled
+		L            Labels
+		Sections     []Section
+		ChartData    template.JS
+		ChartScript  template.JS
+		ShellScript  template.JS
+		CSP          string
+		Kicker       string
+		ChartCount   int
+		SectionCount int
+	}{d, l, sections, template.JS(chartData), template.JS(visualChartScript), template.JS(visualShellScript), visualCSP, "ZEUS / RESEARCH", len(chartJSON), len(sections)})
 	return out.Bytes(), err
+}
+
+func isWebURL(u string) bool {
+	return strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")
 }
