@@ -19,7 +19,7 @@ func TestRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(out)
-	for _, want := range []string{"<h1>标题 &lt;x&gt;</h1>", `<a href="#ref-1">[1]</a>`, "[9]", `id="src-1"`} {
+	for _, want := range []string{"<h1>标题 &lt;x&gt;</h1>", `<a href="https://a.example/1" target="_blank" rel="noopener nofollow">[1]</a>`, "[9]", `id="src-1"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -86,7 +86,7 @@ func TestRenderShareKeepsCTAAndCitationAnchors(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(out)
-	for _, want := range []string{`class="c-cta"`, `href="https://app.example/report"`, `id="src-1"`, `href="#ref-1"`, `class="c-ai"`, "Shared by Alice"} {
+	for _, want := range []string{`class="c-cta"`, `href="https://app.example/report"`, `id="src-1"`, `href="https://a.example/1"`, `class="c-ai"`, "Shared by Alice"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -283,13 +283,34 @@ func TestSourceLinksUseRealURLsAndPageAnchors(t *testing.T) {
 	if !strings.Contains(html, `href="https://example.com/report" target="_blank" rel="noopener nofollow"`) {
 		t.Fatal("refs must link to the real source URL")
 	}
-	if !strings.Contains(html, `<sup class="cite"><a href="#ref-1">[1]</a></sup>`) {
-		t.Fatal("citation sup must remain an in-page anchor")
-	}
-	if strings.Contains(html, `<sup class="cite"><a href="#ref-1" target="_blank"`) {
-		t.Fatal("citation sup must not open a new tab")
+	if !strings.Contains(html, `<sup class="cite"><a href="https://example.com/report" target="_blank" rel="noopener nofollow">[1]</a></sup>`) {
+		t.Fatal("citation sup must open the real source URL")
 	}
 	if !strings.Contains(html, `class="c-source-original" target="_blank" rel="noopener nofollow" hidden`) {
 		t.Fatal("source panel original link must not start as href=#")
+	}
+}
+
+func TestSourcePanelInsetContractAndChartOnlyTrigger(t *testing.T) {
+	out, err := Render(Data{Title: "Panel", Markdown: "## 一、市场\n\n正文 [1]。", Sources: []Source{{Index: 1, Title: "来源一", URL: "https://example.com/a", SiteName: "example.com"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	for _, want := range []string{
+		"--app-bottom-inset:0px",
+		"bottom:calc(var(--app-bottom-inset,0px))",
+		"max-height:60vh",
+		".report-chart a[href^='#src-']",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing panel contract %q", want)
+		}
+	}
+	if strings.Contains(html, `.refs a.t[data-source-url]`) {
+		t.Error("refs links must not be intercepted by the source panel")
+	}
+	if !strings.Contains(src, "iOS 原生底部栏契约") {
+		t.Error("template must document the iOS inset contract")
 	}
 }

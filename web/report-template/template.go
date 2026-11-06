@@ -418,12 +418,24 @@ func Render(d Data) ([]byte, error) {
 		return nil, err
 	}
 	htmlBody := body.String()
+	sourceURL := make(map[int]string, len(d.Sources))
+	for _, s := range d.Sources {
+		if isWebURL(s.URL) {
+			sourceURL[s.Index] = s.URL
+		}
+	}
 	htmlBody = citeRe.ReplaceAllStringFunc(htmlBody, func(m string) string {
 		n, _ := strconv.Atoi(m[1 : len(m)-1])
 		if !valid[n] {
 			return m
 		}
-		return `<sup class="cite"><a href="#ref-` + strconv.Itoa(n) + `">[` + strconv.Itoa(n) + `]</a></sup>`
+		href := "#ref-" + strconv.Itoa(n)
+		attrs := ""
+		if u := sourceURL[n]; u != "" {
+			href = u
+			attrs = ` target="_blank" rel="noopener nofollow"`
+		}
+		return `<sup class="cite"><a href="` + template.HTMLEscapeString(href) + `"` + attrs + `>[` + strconv.Itoa(n) + `]</a></sup>`
 	})
 	htmlBody = conclusionLabel.ReplaceAllString(htmlBody, `<strong class="conclusion-label">$1</strong>`)
 	htmlBody = strings.ReplaceAll(htmlBody, "<ul>", `<ul class="clean">`)
