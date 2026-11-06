@@ -2,6 +2,7 @@
 <html lang="{{.L.HTMLLang}}">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="{{.CSP}}">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{.Title}}</title>
 <meta name="ai-generated" content="true">
@@ -71,7 +72,9 @@ figure.report-visual{margin:26px 0;padding:18px 18px 14px;background:var(--card)
   .shell{display:block;max-width:none;padding:0 14mm}main{max-width:none}.report-content{max-width:36em}
   .sources{break-before:auto}.sources,.footer{break-inside:avoid}
   table{min-width:0}.tw{overflow:visible;box-shadow:none}thead{display:table-header-group}tr{break-inside:avoid}
-  figure,.report-chart,figure.report-visual,.callout,.confidence{break-inside:avoid;page-break-inside:avoid;box-shadow:none}
+  #report-body h2:has(+ figure.report-visual){break-before:page;page-break-before:always;break-after:avoid;page-break-after:avoid}
+  figure.report-visual,.report-chart{break-before:auto;page-break-before:auto;break-inside:avoid;page-break-inside:avoid}
+  figure,.callout,.confidence{break-inside:avoid;page-break-inside:avoid;box-shadow:none}
   .report-chart{-webkit-print-color-adjust:exact;print-color-adjust:exact}figure.report-visual{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .report-chart details{display:none}.chart-print-table{display:block!important}a{color:inherit;text-decoration:none}
 }
@@ -113,6 +116,10 @@ figure.report-visual{margin:26px 0;padding:18px 18px 14px;background:var(--card)
 <aside class="toc-panel" id="report-toc" role="dialog" aria-modal="true" aria-label="{{.L.Contents}}" hidden><div class="toc-head"><span>{{.L.Contents}}</span><button class="toc-close" type="button" aria-label="{{.L.Close}}">×</button></div><ol class="toc-list" id="toc-mobile"></ol></aside>
 <div class="source-shade" hidden></div>
 <section class="source-panel" role="dialog" aria-modal="true" aria-label="{{.L.SourceDetails}}" hidden><div class="source-heading"><span>{{.L.SourceDetails}}</span><button class="source-close" type="button" aria-label="{{.L.SourceClose}}">×</button></div><div class="source-card"><strong class="source-name"></strong><div class="source-meta">{{.L.SourcePeriod}}: <span class="source-period"></span></div><div class="source-meta">{{.L.SourceUnit}}: <span class="source-unit"></span></div><div class="source-meta">{{.L.SourceScope}}: <span class="source-scope"></span></div><div class="source-meta source-qualifier-row" hidden>{{.L.SourceQualifier}}: <span class="source-qualifier"></span></div><a class="source-original" target="_blank" rel="noopener nofollow" hidden>{{.L.SourceOriginal}} ↗</a></div></section>
+{{- if .ChartData}}
+<script type="application/json" id="zeus-chart-data">{{.ChartData}}</script>
+<script>{{.ChartScript}}</script>
+{{- end}}
 <script>
 (function(){'use strict';const panel=document.querySelector('.source-panel'),shade=document.querySelector('.source-shade'),close=document.querySelector('.source-close'),original=document.querySelector('.source-original');let trigger=null;function hide(){panel.hidden=true;shade.hidden=true;if(trigger)trigger.focus({preventScroll:true})}document.addEventListener('click',e=>{const link=e.target.closest('.report-chart a[href^="#src-"]');if(!link)return;const source=document.getElementById(link.getAttribute('href').slice(1)),chart=link.closest('.report-chart');if(!source||!chart)return;e.preventDefault();trigger=link;document.querySelector('.source-name').textContent=source.textContent.trim();document.querySelector('.source-period').textContent=chart.dataset.period;document.querySelector('.source-unit').textContent=chart.dataset.unit;document.querySelector('.source-scope').textContent=chart.dataset.scope;document.querySelector('.source-qualifier').textContent=chart.dataset.qualifier;document.querySelector('.source-qualifier-row').hidden=!chart.dataset.qualifier;const dest=source.querySelector('a[href]');original.hidden=!dest;if(dest)original.href=dest.href;panel.hidden=false;shade.hidden=false;close.focus()});close.addEventListener('click',hide);shade.addEventListener('click',hide);document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden)hide()})})();
 </script>
