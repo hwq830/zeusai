@@ -282,6 +282,9 @@ pre .c{color:#7E8C82}
 .c-source-panel{position:fixed;z-index:50;left:50%;bottom:0;transform:translateX(-50%);width:min(680px,100%);background:var(--card);border-radius:18px 18px 0 0;padding:20px;box-shadow:0 -4px 24px rgba(14,42,33,.25)}
 .c-source-shade{position:fixed;inset:0;background:rgba(10,26,20,.45);z-index:49}
 .c-source-panel h3{font-size:18px;margin:0 0 8px}.c-source-panel .c-source-meta{font-size:13px;color:var(--muted);margin-top:8px}.c-source-panel .c-source-close{float:right;border:0;background:none;font-size:24px;cursor:pointer}
+.c-kpi-unit{font-size:.52em;color:var(--muted);margin-left:3px;font-weight:400;letter-spacing:0;text-decoration:none}
+.c-kpi-cite{display:block;margin-top:5px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+.c-kpi-cite a{color:var(--accent);text-decoration:none}
 @media print{thead{display:table-header-group}tr{break-inside:avoid}.c-source-panel,.c-source-shade{display:none!important}}
 </style>
 </head>
@@ -294,15 +297,19 @@ pre .c{color:#7E8C82}
   </div>
   <h1>{{.Title}}</h1>
   {{- if .Summary}}<p class="sub">{{.Summary}}</p>{{end}}
+  {{- if .KeyFigures}}
   <div class="cover-stats">
-    <div><b>{{.SourceCount}}</b><span>{{.L.Sources}}</span></div>
-    {{- if .ReadMinutes}}<div><b>{{.ReadMinutes}}</b><span>{{printf .L.ReadTime .ReadMinutes}}</span></div>{{end}}
-    <div><b>{{.ChartCount}}</b><span>CHARTS</span></div>
-    <div><b>{{.SectionCount}}</b><span>SECTIONS</span></div>
+    {{- range .KeyFigures}}
+    <div><b>{{.Value}}<u class="c-kpi-unit">{{.Unit}}</u></b><span>{{.Label}}</span>
+      {{- if and .Cite (le .Cite $.SourceCount)}}<span class="c-kpi-cite"><a href="#ref-{{.Cite}}">[{{.Cite}}]</a></span>{{end}}
+    </div>
+    {{- end}}
   </div>
+  {{- end}}
   <div class="meta">
     {{- if .DepthLabel}}<div>类型<span>{{.DepthLabel}}</span></div>{{end}}
     <div>{{.L.Sources}}<span>{{printf .L.SourceCount .SourceCount}}</span></div>
+    {{- if .ReadMinutes}}<div>阅读<span>{{printf .L.ReadTime .ReadMinutes}}</span></div>{{end}}
     {{- if .SharedBy}}<div>分享<span>{{printf .L.SharedBy .SharedBy}}</span></div>{{end}}
     {{- if .Share}}<div><span class="c-ai-badge">{{.L.AILabel}}</span></div>{{end}}
   </div>

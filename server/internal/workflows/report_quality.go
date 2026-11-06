@@ -21,9 +21,17 @@ import (
 // A maximum of one draft, visual plan, revision and two independent reviews.
 // Temporal does not retry optional stages. A review may retry one truncated
 // response; all calls remain subject to provider timeouts and the task budget.
+type keyFigure struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Unit  string `json:"unit"`
+	Cite  int    `json:"cite,omitempty"`
+}
+
 type reportDraft struct {
-	Summary  string `json:"summary"`
-	Markdown string `json:"markdown"`
+	Summary    string      `json:"summary"`
+	Markdown   string      `json:"markdown"`
+	KeyFigures []keyFigure `json:"keyFigures,omitempty"`
 }
 type reviewIssue struct {
 	Severity   string `json:"severity"`
@@ -157,6 +165,10 @@ func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []Q
 	if err == nil && strings.TrimSpace(out.Markdown) == "" {
 		err = fmt.Errorf("empty report draft")
 	}
+	if err == nil {
+		out.KeyFigures = sanitizeKeyFigures(p.TaskID, out.Markdown, out.KeyFigures)
+		out.Markdown = reporttemplate.AttachKeyFigures(out.Markdown, toTemplateKeyFigures(out.KeyFigures))
+	}
 	return out, err
 }
 
@@ -279,7 +291,7 @@ const (
 	reviseRetryTokens = 24576
 )
 
-const reviseSystemPrompt = `根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。summary 是给读者的报告摘要，必须概括报告结论本身，不是本次修改的说明；不得出现“修订”“按审查意见”“保留原有章节”“删除/修改了…”这类描述修改过程的措辞。不得输出审查意见、待核实清单或「审查说明/自检说明」小节；审查意见只用于修改内容本身。返回 JSON：{"summary":"...","markdown":"..."}。`
+const reviseSystemPrompt = `根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。summary 是给读者的报告摘要，必须概括报告结论本身，不是本次修改的说明；不得出现“修订”“按审查意见”“保留原有章节”“删除/修改了…”这类描述修改过程的措辞。不得输出审查意见、待核实清单或「审查说明/自检说明」小节；审查意见只用于修改内容本身。keyFigures 最多 4 条，只放读者最该记住的业务数字（规模、增速、份额、单价等），不要放来源数、字数、章节数；value 为数字字符串，unit 为亿/亿元/%/万/家等；数字必须与正文完全一致（同一精度、同一单位），正文找不到就不要给；没有合适数字给空数组，不要凑。返回 JSON：{"summary":"...","markdown":"...","keyFigures":[{"label":"...","value":"...","unit":"...","cite":1}]}。`
 
 const draftReviewLeakSuffix = `
 只写正文，不输出图表代码块。不得输出审查意见、待核实清单或「审查说明/自检说明」小节；审查意见只用于修改内容本身。`
@@ -384,6 +396,12 @@ func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []
 	if strings.TrimSpace(out.Markdown) == "" {
 		return reportDraft{}, errReviseEmptyOutput
 	}
+	figures := out.KeyFigures
+	if len(figures) == 0 {
+		figures = d.KeyFigures
+	}
+	out.KeyFigures = sanitizeKeyFigures(p.TaskID, out.Markdown, figures)
+	out.Markdown = reporttemplate.AttachKeyFigures(out.Markdown, toTemplateKeyFigures(out.KeyFigures))
 	return out, nil
 }
 

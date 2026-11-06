@@ -36,6 +36,13 @@ type Source struct {
 	SiteName string
 }
 
+type KeyFigure struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Unit  string `json:"unit"`
+	Cite  int    `json:"cite,omitempty"`
+}
+
 type Data struct {
 	Title       string
 	Summary     string
@@ -45,6 +52,7 @@ type Data struct {
 	ReadMinutes int
 	CompletedAt string
 	Sources     []Source
+	KeyFigures  []KeyFigure
 	Share       bool
 	SharedBy    string
 	AppURL      string
@@ -63,6 +71,7 @@ var labels = map[string]Labels{
 }
 
 var citeRe = regexp.MustCompile(`\[(\d{1,3})\]`)
+var keyFigureCommentRe = regexp.MustCompile(`(?s)<!--\s*zeus-key-figures:\s*(\[.*?\])\s*-->\s*`)
 var conclusionLabel = regexp.MustCompile(`(?i)<strong>(事实|判断|建议|事實|判斷|建議|fact|analysis|recommendation)</strong>`)
 var h2Re = regexp.MustCompile(`(?s)<h2>(.*?)</h2>`)
 var tableRe = regexp.MustCompile(`(?s)<table>.*?</table>`)
@@ -77,6 +86,34 @@ type Section struct {
 type chartItem struct {
 	RenderType string         `json:"renderType"`
 	Config     map[string]any `json:"config"`
+}
+
+// AttachKeyFigures stores validated figures in a hidden Markdown comment so
+// they survive the existing report row without a schema migration. Render
+// extracts and removes the comment before converting the body.
+func AttachKeyFigures(markdown string, figures []KeyFigure) string {
+	markdown = keyFigureCommentRe.ReplaceAllString(markdown, "")
+	if len(figures) == 0 {
+		return markdown
+	}
+	raw, err := json.Marshal(figures)
+	if err != nil {
+		return markdown
+	}
+	return "<!--zeus-key-figures:" + string(raw) + "-->\n\n" + markdown
+}
+
+func extractKeyFigures(markdown string) (string, []KeyFigure) {
+	matches := keyFigureCommentRe.FindStringSubmatch(markdown)
+	cleaned := keyFigureCommentRe.ReplaceAllString(markdown, "")
+	if len(matches) != 2 {
+		return cleaned, nil
+	}
+	var figures []KeyFigure
+	if err := json.Unmarshal([]byte(matches[1]), &figures); err != nil {
+		return cleaned, nil
+	}
+	return cleaned, figures
 }
 
 // TrimLeadingTitle removes a leading H1 only when its text is the same as the
@@ -344,6 +381,14 @@ func formatNumber(v float64) string {
 }
 
 func Render(d Data) ([]byte, error) {
+	cleaned, storedFigures := extractKeyFigures(d.Markdown)
+	d.Markdown = cleaned
+	if len(d.KeyFigures) == 0 {
+		d.KeyFigures = storedFigures
+	}
+	if len(d.KeyFigures) > 4 {
+		d.KeyFigures = d.KeyFigures[:4]
+	}
 	d.Markdown = TrimLeadingTitle(d.Markdown, d.Title)
 	valid := map[int]bool{}
 	for _, s := range d.Sources {
