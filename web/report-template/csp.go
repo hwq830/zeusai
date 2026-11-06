@@ -13,8 +13,8 @@ var inlineScriptRe = regexp.MustCompile(`(?s)<script>(.*?)</script>`)
 // scripts that are already in report.html.tmpl. Data never enters a hashed
 // script; it lives in the application/json block.
 var visualCSP = func() string {
-	hashes := []string{"'sha256-" + visualChartScriptHash + "'"}
-	seen := map[string]bool{hashes[0]: true}
+	hashes := []string{"'sha256-" + visualChartScriptHash + "'", "'sha256-" + visualShellScriptHash + "'"}
+	seen := map[string]bool{hashes[0]: true, hashes[1]: true}
 	for _, match := range inlineScriptRe.FindAllStringSubmatch(src, -1) {
 		body := match[1]
 		if strings.Contains(body, "{{") {

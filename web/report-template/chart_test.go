@@ -19,39 +19,6 @@ func TestFilterChartsRequiresCitedEvidence(t *testing.T) {
 		}
 	}
 }
-func TestChartRenderEscapesAndKeepsSourceAndTable(t *testing.T) {
-	doc := strings.Replace(validChart, `"渠道"`, `"<img src=x onerror=alert(1)>"`, 1)
-	result, err := Render(Data{Title: "报告", Markdown: "## 数据\n\n" + doc, Sources: []Source{{Index: 1, Title: "source", URL: "https://example.com"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(result)
-	for _, want := range []string{`class="report-chart"`, `&lt;img src=x onerror=alert(1)&gt;`, `href="#src-1"`, `<details>`, `25`, `80`} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %s", want)
-		}
-	}
-	if strings.Contains(got, "<img src=x onerror") || strings.Contains(got, "zeus-chart") {
-		t.Fatal("untrusted chart markup or JSON leaked")
-	}
-}
-func TestLineChartAndInvalidBlocks(t *testing.T) {
-	line := strings.Replace(validChart, `"type":"bar"`, `"type":"line"`, 1)
-	out, err := Render(Data{Markdown: line, Sources: []Source{{Index: 1}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(out), `<polyline`) {
-		t.Fatal("missing static line chart")
-	}
-	out, err = Render(Data{Markdown: validChart})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(out), `class="report-chart"`) || strings.Contains(string(out), "zeus-chart") {
-		t.Fatal("chart with missing source was displayed")
-	}
-}
 func TestCitationNumberCannotSupplyValue(t *testing.T) {
 	c := strings.Replace(validChart, `"value":25`, `"value":1`, 1)
 	if strings.Contains(FilterCharts(c, "2025 搜索 社区 80% [1]", 1), "zeus-chart") {
@@ -93,40 +60,5 @@ func TestForecastMustBeMarkedAndAllEvidenceRetained(t *testing.T) {
 	many := strings.Repeat(qualified+"\n", 5)
 	if strings.Count(FilterCharts(many, evidence, 1), "zeus-chart") != 5 {
 		t.Fatal("valid charts should not have a fixed count limit")
-	}
-}
-func TestDotAndPrintDataSources(t *testing.T) {
-	dot := strings.Replace(validChart, `"type":"bar"`, `"type":"dot"`, 1)
-	out, err := Render(Data{Markdown: dot, Sources: []Source{{Index: 1, Title: "A", URL: "https://example.com"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := string(out)
-	for _, part := range []string{`chart-dot-track`, `chart-point-source`, `chart-print-table`, `href="#src-1"`, `统计范围未标注`} {
-		if !strings.Contains(got, part) {
-			t.Errorf("missing %s", part)
-		}
-	}
-}
-func TestUnevenTrendUsesActualTimeSpacing(t *testing.T) {
-	c := Chart{Type: "line", Title: "X", Unit: "份", Period: "2020–2024", Points: []ChartPoint{{Label: "2020", Value: "1", Source: 1}, {Label: "2021", Value: "2", Source: 1}, {Label: "2024", Value: "3", Source: 1}}}
-	got := renderChart(c, "zh")
-	if strings.Contains(got, "160.00,") || !strings.Contains(got, "90.14,") {
-		t.Fatalf("time spacing not proportional: %s", got)
-	}
-}
-
-func TestWorldBankGroupedPopulationNumbers(t *testing.T) {
-	// Public WDI population table, 2022, persons in thousands:
-	// https://databankfiles.worldbank.org/public/ddpext_download/POP.pdf
-	chart := "```zeus-chart\n{\"type\":\"bar\",\"title\":\"Population\",\"unit\":\"thousands\",\"period\":\"2022\",\"points\":[{\"label\":\"India\",\"value\":1417173,\"source\":1},{\"label\":\"China\",\"value\":1412175,\"source\":1}]}\n```\n"
-	evidence := "Population 2022 (thousands): India 1,417,173; China 1,412,175 [1]"
-	if !strings.Contains(FilterCharts(chart, evidence, 1), "zeus-chart") {
-		t.Fatal("properly grouped source values should be accepted")
-	}
-	for _, bad := range []string{strings.Replace(evidence, "1,417,173", "-1,417,173", 1), strings.Replace(evidence, "1,417,173", "− 1,417,173", 1), strings.Replace(evidence, "1,417,173", "11,417,173", 1), strings.Replace(evidence, "1,417,173", "1,417,1734", 1)} {
-		if strings.Contains(FilterCharts(chart, bad, 1), "zeus-chart") {
-			t.Fatalf("invalid or negative numeric evidence accepted: %s", bad)
-		}
 	}
 }

@@ -2,8 +2,6 @@ package reporttemplate
 
 import (
 	"encoding/json"
-	"fmt"
-	"html"
 	"math"
 	"regexp"
 	"strconv"
@@ -174,88 +172,4 @@ func FilterCharts(markdown, evidence string, sourceCount int) string {
 		}
 		return block
 	})
-}
-
-func renderChart(c Chart, lang string) string {
-	max := 0.0
-	for _, p := range c.Points {
-		v, _ := strconv.ParseFloat(string(p.Value), 64)
-		if v > max {
-			max = v
-		}
-	}
-	dataLabel, sourceLabel := "查看数据表", "来源"
-	missingScope := "统计范围未标注"
-	if lang == "en" {
-		dataLabel, sourceLabel = "View data table", "Sources"
-		missingScope = "Scope not specified"
-	} else if lang == "zh-Hant" {
-		dataLabel, sourceLabel = "查看資料表", "來源"
-		missingScope = "統計範圍未標註"
-	}
-	var b strings.Builder
-	scope := c.Scope
-	if scope == "" {
-		scope = missingScope
-	}
-	fmt.Fprintf(&b, `<figure class="report-chart" data-period="%s" data-unit="%s" data-scope="%s" data-qualifier="%s"><figcaption><strong>%s</strong><span>%s · %s</span></figcaption>`, html.EscapeString(c.Period), html.EscapeString(c.Unit), html.EscapeString(scope), html.EscapeString(c.Qualifier), html.EscapeString(c.Title), html.EscapeString(c.Period), html.EscapeString(c.Unit))
-	fmt.Fprintf(&b, `<div class="chart-context">%s %s</div>`, html.EscapeString(scope), html.EscapeString(c.Qualifier))
-	if c.Type == "line" {
-		b.WriteString(`<svg class="chart-line" viewBox="0 0 320 120" role="img" aria-label="` + html.EscapeString(c.Title) + `">`)
-		var coords strings.Builder
-		for i, p := range c.Points {
-			value, _ := strconv.ParseFloat(string(p.Value), 64)
-			x := 20.0 + 280.0*float64(i)/float64(len(c.Points)-1)
-			if chronological(c.Points) {
-				start, end, at := chartDate(c.Points[0].Label), chartDate(c.Points[len(c.Points)-1].Label), chartDate(p.Label)
-				x = 20.0 + 280.0*float64(at.Unix()-start.Unix())/float64(end.Unix()-start.Unix())
-			}
-			y := 100.0
-			if max > 0 {
-				y = 100.0 - 80.0*value/max
-			}
-			fmt.Fprintf(&coords, "%.2f,%.2f ", x, y)
-		}
-		fmt.Fprintf(&b, `<polyline fill="none" stroke="currentColor" stroke-width="3" points="%s"/></svg>`, coords.String())
-	}
-	b.WriteString(`<div class="chart-rows">`)
-	seen := map[int]bool{}
-	for _, p := range c.Points {
-		v, _ := strconv.ParseFloat(string(p.Value), 64)
-		width := 0.0
-		if max > 0 {
-			width = 100 * v / max
-		}
-		label := fmt.Sprintf(`%s <a class="chart-point-source" href="#src-%d">[%d]</a>`, html.EscapeString(p.Label), p.Source, p.Source)
-		if c.Type == "dot" {
-			fmt.Fprintf(&b, `<div class="chart-row"><span class="chart-label">%s</span><span class="chart-track chart-dot-track"><span class="chart-dot" style="left:%.3f%%"></span></span><span class="chart-value">%s</span></div>`, label, width, html.EscapeString(string(p.Value)))
-		} else if c.Type == "line" {
-			fmt.Fprintf(&b, `<div class="chart-line-value"><span>%s</span><strong>%s</strong></div>`, label, html.EscapeString(string(p.Value)))
-		} else {
-			fmt.Fprintf(&b, `<div class="chart-row"><span class="chart-label">%s</span><span class="chart-track"><span class="chart-bar" style="width:%.3f%%"></span></span><span class="chart-value">%s</span></div>`, label, width, html.EscapeString(string(p.Value)))
-		}
-		seen[p.Source] = true
-	}
-	b.WriteString(`</div><div class="chart-source">` + sourceLabel + `: `)
-	first := true
-	for _, p := range c.Points {
-		if !seen[p.Source] {
-			continue
-		}
-		if !first {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(&b, `<a href="#src-%d">[%d]</a>`, p.Source, p.Source)
-		first = false
-		delete(seen, p.Source)
-	}
-	b.WriteString(`</div><details><summary>` + dataLabel + `</summary>`)
-	var table strings.Builder
-	table.WriteString(`<table><tbody>`)
-	for _, p := range c.Points {
-		fmt.Fprintf(&table, `<tr><th scope="row">%s</th><td>%s %s</td><td><a href="#src-%d">[%d]</a></td></tr>`, html.EscapeString(p.Label), html.EscapeString(string(p.Value)), html.EscapeString(c.Unit), p.Source, p.Source)
-	}
-	table.WriteString(`</tbody></table>`)
-	b.WriteString(table.String() + `</details><div class="chart-print-table">` + table.String() + `</div></figure>`)
-	return b.String()
 }
