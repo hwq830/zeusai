@@ -209,3 +209,64 @@ func TestBarGroupedDowngrade(t *testing.T) {
 		t.Fatal("barGrouped fallback must use chartBar and keep the data table")
 	}
 }
+
+func TestRenderKeyFiguresCover(t *testing.T) {
+	figures := []KeyFigure{
+		{Label: "2024年AI原生App月活", Value: "4.99", Unit: "亿", Cite: 2},
+		{Label: "市场规模", Value: "294.16", Unit: "亿元"},
+		{Label: "增速", Value: "85.4", Unit: "%"},
+	}
+	out, err := Render(Data{Title: "KPI", Markdown: "## 一、市场\n\n正文", SourceCount: 5, ReadMinutes: 9, KeyFigures: figures})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if strings.Count(html, `class="cover-stats"`) != 1 {
+		t.Fatal("cover stats block missing")
+	}
+	for _, want := range []string{"4.99", "294.16", "85.4", "2024年AI原生App月活", `href="#ref-2"`, "5 个来源", "9 分钟"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(html, "CHARTS") || strings.Contains(html, "SECTIONS") {
+		t.Fatal("chart/section self-metadata must not be in cover stats")
+	}
+}
+
+func TestRenderNoKeyFiguresOmitsCover(t *testing.T) {
+	out, err := Render(Data{Title: "KPI", Markdown: "## 一、市场\n\n正文", SourceCount: 5, ReadMinutes: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if strings.Contains(html, `class="cover-stats"`) {
+		t.Fatal("empty key figures must omit the cover stats block")
+	}
+	if !strings.Contains(html, "5 个来源") || !strings.Contains(html, "9 分钟") {
+		t.Fatal("meta info must remain")
+	}
+}
+
+func TestKeyFiguresCommentRoundTrip(t *testing.T) {
+	figures := []KeyFigure{{Label: "规模", Value: "294.16", Unit: "亿元"}}
+	md := AttachKeyFigures("## 一、市场\n\n市场规模 294.16 亿元。", figures)
+	out, err := Render(Data{Title: "KPI", Markdown: md})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if !strings.Contains(html, `class="cover-stats"`) || strings.Contains(html, "zeus-key-figures") {
+		t.Fatal("comment metadata must become cover stats and be removed from body")
+	}
+}
+
+func TestOldReportWithoutKeyFiguresHasNoCover(t *testing.T) {
+	out, err := Render(Data{Title: "Old", Markdown: "## 一、市场\n\n正文"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), `class="cover-stats"`) {
+		t.Fatal("old report must not gain an empty KPI block")
+	}
+}
