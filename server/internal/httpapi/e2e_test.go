@@ -570,7 +570,7 @@ func TestReportEndToEnd(t *testing.T) {
 		t.Fatalf("last: %+v", last)
 	}
 	// A quick report plans 3 questions: 制定调研计划 + 3 调研 + 撰写/图表/审查/修订/复审/发布.
-	if len(plan) != 10 || plan[0].Title != "制定调研计划" || plan[3].Title != "撰写报告" ||
+	if len(plan) != 10 || plan[0].Title != "制定调研计划" || plan[4].Title != "撰写报告" ||
 		plan[9].Title != "发布" || summary.Len() == 0 {
 		t.Fatalf("plan %+v summary %q", plan, summary.String())
 	}

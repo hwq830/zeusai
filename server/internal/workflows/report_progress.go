@@ -386,5 +386,11 @@ func reportStagedPipeline(ctx workflow.Context, plan ReportPlan, findings []Ques
 		return err
 	}
 	publish.Detail = publishDetail(plan.UILang)
-	return emitStep(ctx, a, plan.UserID, plan.TaskID, events.TypeStepDone, publish)
+	if err := emitStep(ctx, a, plan.UserID, plan.TaskID, events.TypeStepDone, publish); err != nil {
+		return err
+	}
+	// Completed comes last: saveProgress treats step events as "running", so a step emitted
+	// after this would undo the task's done status.
+	return workflow.ExecuteActivity(ctx, a.EmitEvent, plan.UserID, plan.TaskID,
+		events.Event{Type: events.TypeCompleted, ReportID: plan.ReportID.String()}).Get(ctx, nil)
 }

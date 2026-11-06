@@ -60,22 +60,24 @@ type capturedStep struct {
 	step events.Step
 }
 
-func newProgressEnv(t *testing.T) (*testsuite.TestWorkflowEnvironment, *Activities, *[]capturedStep) {
+func newProgressEnv(t *testing.T) (*testsuite.TestWorkflowEnvironment, *Activities, *[]capturedStep, *[]events.Event) {
 	t.Helper()
 	var suite testsuite.WorkflowTestSuite
 	env := suite.NewTestWorkflowEnvironment()
 	a := &Activities{}
 	env.RegisterActivity(a)
 	captured := &[]capturedStep{}
+	all := &[]events.Event{}
 	env.OnActivity(a.EmitEvent, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		ev := args.Get(3).(events.Event)
+		*all = append(*all, ev)
 		if ev.Step != nil {
 			*captured = append(*captured, capturedStep{typ: ev.Type, step: *ev.Step})
 		}
 	}).Return(nil)
 	env.OnActivity(a.NotifyReport, mock.Anything, mock.Anything).Return(nil).Maybe()
 	env.OnActivity(a.NotifyQuota, mock.Anything, mock.Anything).Return(nil).Maybe()
-	return env, a, captured
+	return env, a, captured, all
 }
 
 func runReportWorkflow(t *testing.T, env *testsuite.TestWorkflowEnvironment, plan ReportPlan) {
@@ -122,7 +124,7 @@ func stepDetail(t *testing.T, events []capturedStep, index int) string {
 
 func TestReportWorkflowEmitsAllStagesWhenReviewPasses(t *testing.T) {
 	plan := progressPlan(t, Question{Question: "市场规模"}, Question{Question: "竞争格局"})
-	env, a, captured := newProgressEnv(t)
+	env, a, captured, all := newProgressEnv(t)
 	first := QuestionNotes{Question: "市场规模", Sources: []search.Result{{URL: "https://a"}, {URL: "https://b"}}}
 	second := QuestionNotes{Question: "竞争格局", Sources: []search.Result{{URL: "https://b"}, {URL: "https://c"}}}
 	findings := []QuestionNotes{first, second}
@@ -154,11 +156,15 @@ func TestReportWorkflowEmitsAllStagesWhenReviewPasses(t *testing.T) {
 	require.Equal(t, "审查通过，无需修订", stepDetail(t, *captured, 7))
 	require.Equal(t, "复审通过", stepDetail(t, *captured, 8))
 	require.Equal(t, "已发布", stepDetail(t, *captured, 9))
+	// Completion is emitted after the last step so the task never flips back to running.
+	last := (*all)[len(*all)-1]
+	require.Equal(t, events.TypeCompleted, last.Type)
+	require.Equal(t, plan.ReportID.String(), last.ReportID)
 }
 
 func TestReportWorkflowEmitsRevisionStagesWhenReviewFails(t *testing.T) {
 	plan := progressPlan(t, Question{Question: "市场规模"})
-	env, a, captured := newProgressEnv(t)
+	env, a, captured, _ := newProgressEnv(t)
 	first := QuestionNotes{Question: "市场规模", Sources: []search.Result{{URL: "https://a"}}}
 	draft := reportDraft{Summary: "s", Markdown: "## 一、市场\n\n初稿"}
 	revised := reportDraft{Summary: "s", Markdown: "## 一、市场\n\n修订稿"}
@@ -190,7 +196,7 @@ func TestReportWorkflowEmitsRevisionStagesWhenReviewFails(t *testing.T) {
 
 func TestReportWorkflowReportsFailedRecheck(t *testing.T) {
 	plan := progressPlan(t, Question{Question: "市场规模"})
-	env, a, captured := newProgressEnv(t)
+	env, a, captured, _ := newProgressEnv(t)
 	first := QuestionNotes{Question: "市场规模", Sources: []search.Result{{URL: "https://a"}}}
 	draft := reportDraft{Summary: "s", Markdown: "## 一、市场\n\n初稿"}
 	review := reportReview{Status: "revise", Issues: []reviewIssue{{Severity: "high", Evidence: "e", Suggestion: "s"}}}
@@ -211,7 +217,7 @@ func TestReportWorkflowReportsFailedRecheck(t *testing.T) {
 
 func TestReportWorkflowParallelResearchNeverCompletesAhead(t *testing.T) {
 	plan := progressPlan(t, Question{Question: "Q1"}, Question{Question: "Q2"}, Question{Question: "Q3"})
-	env, a, captured := newProgressEnv(t)
+	env, a, captured, _ := newProgressEnv(t)
 	// Two sources each; the third question only repeats URLs the earlier steps already read.
 	sources := func(urls ...string) []search.Result {
 		out := make([]search.Result, len(urls))
@@ -268,7 +274,7 @@ func TestReportWorkflowParallelResearchNeverCompletesAhead(t *testing.T) {
 
 func TestReportWorkflowAbortsWhenResearchFails(t *testing.T) {
 	plan := progressPlan(t, Question{Question: "Q1"})
-	env, a, _ := newProgressEnv(t)
+	env, a, _, _ := newProgressEnv(t)
 	env.OnActivity(a.PlanReport, mock.Anything, mock.Anything).Return(plan, nil).Once()
 	env.OnActivity(a.ResearchQuestion, mock.Anything, plan, 0, mock.Anything).
 		Return(QuestionNotes{}, temporal.NewNonRetryableApplicationError("research failed", "test", nil)).Once()

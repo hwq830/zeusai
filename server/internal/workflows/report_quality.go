@@ -450,11 +450,14 @@ func (a *Activities) PublishReviewedReport(ctx context.Context, p ReportPlan, fi
 	if _, err := a.Q.CompleteReport(ctx, db.CompleteReportParams{ID: p.ReportID, UserID: p.UserID, Title: p.Title, Summary: d.Summary, Markdown: d.Markdown, Sources: src, SourceCount: int32(len(sources)), WordCount: int32(wordCount(p.Lang, reporttemplate.WithoutCharts(d.Markdown))), ReviewState: &state}); err != nil {
 		return err
 	}
-	if !p.ProgressStages {
-		step := writeStep(p.UILang, len(p.Questions)+1)
-		if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepDone, Step: &step}); err != nil {
-			return err
-		}
+	if p.ProgressStages {
+		// The workflow completes the publish step, then emits the completion event last so
+		// no later step event can flip the task back to running.
+		return nil
+	}
+	step := writeStep(p.UILang, len(p.Questions)+1)
+	if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepDone, Step: &step}); err != nil {
+		return err
 	}
 	return a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeCompleted, ReportID: p.ReportID.String()})
 }
