@@ -112,8 +112,10 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 
 func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, notes []string) (reportDraft, error) {
 	step := writeStep(p.UILang, len(p.Questions)+1)
-	if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
-		return reportDraft{}, err
+	if a.Q != nil {
+		if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
+			return reportDraft{}, err
+		}
 	}
 	merged, _ := mergeNotes(findings)
 	sys, err := render(p.Lang, "write.md", map[string]any{"Title": p.Title, "Topic": p.Topic, "Focuses": p.Focuses, "Notes": notes, "LengthHint": reportLengthHint(p.Lang, p.Depth), "Scope": p.Scope, "Uncertainties": p.Uncertainties})
@@ -121,7 +123,34 @@ func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []Q
 		return reportDraft{}, err
 	}
 	var out reportDraft
-	_, err = llm.CompleteJSON(ctx, a.LLM, llm.Request{Purpose: "report.write", Tier: llm.TierStrong, System: sys + "\n只写正文，不输出图表代码块。", Messages: []llm.Message{{Role: "user", Content: "<notes>\n" + merged + "</notes>"}}, UserID: &p.UserID, TaskID: &p.TaskID}, &out)
+	baseSystem := sys + draftReviewLeakSuffix
+	req := llm.Request{Purpose: "report.write", Tier: llm.TierStrong, System: baseSystem, Messages: []llm.Message{{Role: "user", Content: "<notes>\n" + merged + "</notes>"}}, UserID: &p.UserID, TaskID: &p.TaskID}
+	for attempt := 1; attempt <= 2; attempt++ {
+		out = reportDraft{}
+		_, err = llm.CompleteJSON(ctx, a.LLM, req, &out)
+		if err != nil {
+			return out, err
+		}
+		if strings.TrimSpace(out.Markdown) == "" {
+			return out, fmt.Errorf("empty report draft")
+		}
+		reason, leak := reviewLeakPresent(out.Markdown)
+		if !leak {
+			break
+		}
+		if attempt == 1 {
+			req.System = baseSystem + `
+上一次输出包含了内部审查意见、待核实清单或「审查说明/自检说明」小节；这次不得输出这些内容，审查意见只用于修改内容本身。`
+			continue
+		}
+		cleaned, chars, strippedReason := stripReviewLeaks(out.Markdown)
+		out.Markdown = cleaned
+		if strippedReason == "" {
+			strippedReason = reason
+		}
+		slog.Info("report review leak stripped", "task_id", p.TaskID, "chars", chars, "reason", strippedReason)
+		break
+	}
 	out.Summary = p.Lang.Model(out.Summary)
 	out.Markdown = reporttemplate.WithoutCharts(p.Lang.Model(out.Markdown))
 	out.Markdown = reporttemplate.TrimLeadingTitle(out.Markdown, p.Title)
@@ -250,7 +279,10 @@ const (
 	reviseRetryTokens = 24576
 )
 
-const reviseSystemPrompt = `根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。summary 是给读者的报告摘要，必须概括报告结论本身，不是本次修改的说明；不得出现“修订”“按审查意见”“保留原有章节”“删除/修改了…”这类描述修改过程的措辞。返回 JSON：{"summary":"...","markdown":"..."}。`
+const reviseSystemPrompt = `根据审查意见修订报告，只使用所给证据，保留来源编号。不确定的信息要明确说明。保留所有 ## / ### 章节标题原文不变；不得新增或删除章节标题。图表会由系统在修订后自动回填；不要输出图表块、不要提及图表标题或图注。summary 是给读者的报告摘要，必须概括报告结论本身，不是本次修改的说明；不得出现“修订”“按审查意见”“保留原有章节”“删除/修改了…”这类描述修改过程的措辞。不得输出审查意见、待核实清单或「审查说明/自检说明」小节；审查意见只用于修改内容本身。返回 JSON：{"summary":"...","markdown":"..."}。`
+
+const draftReviewLeakSuffix = `
+只写正文，不输出图表代码块。不得输出审查意见、待核实清单或「审查说明/自检说明」小节；审查意见只用于修改内容本身。`
 
 const reviseSummaryRetryPrompt = reviseSystemPrompt + `
 上一次 summary 写成了修改过程说明；这次 summary 必须只写报告结论摘要，不得提修改过程。`
@@ -286,6 +318,8 @@ func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []
 	}
 	var out reportDraft
 	summaryFallback := false
+	leakFallback := false
+	leakReason := ""
 	for attempt := 1; attempt <= 2; attempt++ {
 		out = reportDraft{}
 		_, err := llm.CompleteJSON(ctx, a.LLM, req, &out)
@@ -303,21 +337,46 @@ func (a *Activities) ReviseReport(ctx context.Context, p ReportPlan, findings []
 		if strings.TrimSpace(out.Markdown) == "" {
 			return reportDraft{}, errReviseEmptyOutput
 		}
-		if !reviseSummaryHasChangelog(out.Summary) {
+		summaryBad := reviseSummaryHasChangelog(out.Summary)
+		reason, leak := reviewLeakPresent(out.Markdown)
+		if !summaryBad && !leak {
 			break
 		}
 		if attempt == 1 {
-			req.System = reviseSummaryRetryPrompt
+			prompt := reviseSystemPrompt
+			if summaryBad {
+				prompt += `
+上一次 summary 写成了修改过程说明；这次 summary 必须只写报告结论摘要，不得提修改过程。`
+			}
+			if leak {
+				prompt += `
+上一次输出包含了内部审查意见、待核实清单或「审查说明/自检说明」小节；这次不得输出这些内容，审查意见只用于修改内容本身。`
+			}
+			req.System = prompt
 			continue
 		}
-		// The second attempt also wrote a changelog. Keep the revised body,
-		// but never show the process note as the reader-facing summary.
-		summaryFallback = true
+		// The second attempt still violates a rule. Keep the revised body, but
+		// never show the process note or internal review notes to readers.
+		if summaryBad {
+			summaryFallback = true
+		}
+		if leak {
+			leakFallback = true
+			leakReason = reason
+		}
 		break
 	}
 	if summaryFallback {
 		out.Summary = d.Summary
 		slog.Info("report summary fell back", "task_id", p.TaskID, "reason", "revision_changelog")
+	}
+	if leakFallback {
+		cleaned, chars, reason := stripReviewLeaks(out.Markdown)
+		out.Markdown = cleaned
+		if reason == "" {
+			reason = leakReason
+		}
+		slog.Info("report review leak stripped", "task_id", p.TaskID, "chars", chars, "reason", reason)
 	}
 	out.Summary = p.Lang.Model(out.Summary)
 	out.Markdown = reporttemplate.FilterCharts(p.Lang.Model(out.Markdown), p.Lang.Model(merged), len(sources))
