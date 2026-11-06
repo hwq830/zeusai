@@ -56,9 +56,11 @@ const (
 	visualViewBoxWidth = 360
 	visualBarHeight    = 240
 	visualLineHeight   = 300
-	visualPlotLeft     = 48
 	visualPlotRight    = 328
 	visualMargin       = 16
+	visualYAxisGap     = 6
+	visualLeftPad      = 4
+	visualMinPlotLeft  = 32
 	visualFont         = 12.5
 	visualTitleFont    = 14
 )
@@ -212,6 +214,22 @@ func parseVisualSpec(raw string) (VisualSpec, bool) {
 	return spec, true
 }
 
+// visualTick is one y-axis grid line. The formatted label is kept beside the
+// value so the gutter can be measured before any SVG is written.
+type visualTick struct {
+	value float64
+	label string
+}
+
+// visualRenderMetrics exposes the computed left gutter for tests. Keeping it
+// out of the SVG string makes the "gutter >= widest label + padding" contract
+// assertable without re-estimating markup.
+type visualRenderMetrics struct {
+	PlotLeft         float64
+	PlotRight        float64
+	WidestYAxisLabel float64
+}
+
 // RenderVisualSpec validates and renders one self-contained figure. The visible
 // L2/L3 badge is produced here, not read from the agent-written caption. The SVG
 // is mobile-first: viewBox width 360, bar height 240, line height 300.
@@ -219,7 +237,7 @@ func RenderVisualSpec(spec VisualSpec) (string, error) {
 	if err := ValidateVisualSpec(spec); err != nil {
 		return "", err
 	}
-	svg := renderVisualSVG(spec)
+	svg, _ := renderVisualSVG(spec)
 	var b strings.Builder
 	fmt.Fprintf(&b, `<figure class="report-visual" data-level="%s" data-axis-truncated="%t">`, html.EscapeString(spec.Level), spec.AxisTruncated)
 	b.WriteString(svg)
@@ -232,7 +250,7 @@ func RenderVisualSpec(spec VisualSpec) (string, error) {
 	return b.String(), nil
 }
 
-func renderVisualSVG(spec VisualSpec) string {
+func renderVisualSVG(spec VisualSpec) (string, visualRenderMetrics) {
 	height := float64(visualBarHeight)
 	if spec.Type == "line" {
 		height = float64(visualLineHeight)
@@ -276,6 +294,14 @@ func renderVisualSVG(spec VisualSpec) string {
 
 	allValues := visualValues(spec)
 	axisMin, axisMax, step := visualAxisScale(minVisualValue(allValues), maxVisualValue(allValues), spec.AxisTruncated)
+	ticks := visualAxisTicks(axisMin, axisMax, step)
+	widest := 0.0
+	for _, tick := range ticks {
+		if width := estimateVisualTextWidth(tick.label, visualFont); width > widest {
+			widest = width
+		}
+	}
+	plotLeft := visualPlotLeftFor(widest)
 	yFor := func(value float64) float64 {
 		if axisMax <= axisMin {
 			return plotBottom
@@ -288,24 +314,45 @@ func renderVisualSVG(spec VisualSpec) string {
 		}
 		return plotBottom - (value-axisMin)/(axisMax-axisMin)*(plotBottom-plotTop)
 	}
-	drawVisualAxis(&b, height, plotTop, plotBottom, axisMin, axisMax, step, yFor, spec.AxisTruncated)
+	drawVisualAxis(&b, plotLeft, plotTop, plotBottom, ticks, yFor)
 
 	switch spec.Type {
 	case "line":
-		drawVisualLines(&b, spec, plotTop, plotBottom, yFor)
+		drawVisualLines(&b, spec, plotLeft, plotTop, plotBottom, yFor)
 	case "barGrouped":
-		drawVisualBars(&b, spec, plotTop, plotBottom, yFor, true)
+		drawVisualBars(&b, spec, plotLeft, plotTop, plotBottom, yFor, true)
 	default:
-		drawVisualBars(&b, spec, plotTop, plotBottom, yFor, false)
+		drawVisualBars(&b, spec, plotLeft, plotTop, plotBottom, yFor, false)
 	}
 
 	// The x-axis labels are drawn after the marks so they stay legible.
-	drawVisualXLabels(&b, spec, height)
+	drawVisualXLabels(&b, spec, plotLeft, height)
 	if spec.AxisTruncated {
-		drawVisualTruncatedMarker(&b, height, plotBottom)
+		drawVisualTruncatedMarker(&b, plotLeft, plotBottom)
 	}
 	b.WriteString(`</svg>`)
-	return b.String()
+	return b.String(), visualRenderMetrics{PlotLeft: plotLeft, PlotRight: visualPlotRight, WidestYAxisLabel: widest}
+}
+
+func visualAxisTicks(axisMin, axisMax, step float64) []visualTick {
+	ticks := make([]visualTick, 0, 8)
+	for value := axisMin; value <= axisMax+step/1000; value += step {
+		ticks = append(ticks, visualTick{value: value, label: visualNumber(value)})
+	}
+	return ticks
+}
+
+func visualPlotLeftFor(widestLabel float64) float64 {
+	left := widestLabel + visualYAxisGap + visualLeftPad
+	if left < visualMinPlotLeft {
+		left = visualMinPlotLeft
+	}
+	// Keep a usable plot even for pathological labels; normal report values
+	// (including 1,400,000 and negatives) are never capped.
+	if max := float64(visualPlotRight - 80); left > max {
+		left = max
+	}
+	return left
 }
 
 func visualBadge(spec VisualSpec) string {
@@ -377,28 +424,28 @@ func drawVisualLegend(b *strings.Builder, spec VisualSpec, y float64) float64 {
 	return lineY
 }
 
-func drawVisualAxis(b *strings.Builder, _ float64, plotTop, plotBottom, axisMin, axisMax, step float64, yFor func(float64) float64, truncated bool) {
-	fmt.Fprintf(b, `<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#c9d2e0" stroke-width="1.5"/>`, visualPlotLeft, plotBottom, visualPlotRight, plotBottom)
-	fmt.Fprintf(b, `<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#c9d2e0" stroke-width="1.5"/>`, visualPlotLeft, plotTop, visualPlotLeft, plotBottom)
-	for value := axisMin; value <= axisMax+step/1000; value += step {
-		y := yFor(value)
-		fmt.Fprintf(b, `<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="#e2e7ef" stroke-width="1"/>`, visualPlotLeft, y, visualPlotRight, y)
-		fmt.Fprintf(b, `<text x="%d" y="%.1f" text-anchor="end" font-size="%s" fill="#5b6577">%s</text>`, visualPlotLeft-6, y+4, numberText(visualFont), html.EscapeString(visualNumber(value)))
+func drawVisualAxis(b *strings.Builder, plotLeft, plotTop, plotBottom float64, ticks []visualTick, yFor func(float64) float64) {
+	fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%d" y2="%.1f" stroke="#c9d2e0" stroke-width="1.5"/>`, plotLeft, plotBottom, visualPlotRight, plotBottom)
+	fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%.2f" y2="%.1f" stroke="#c9d2e0" stroke-width="1.5"/>`, plotLeft, plotTop, plotLeft, plotBottom)
+	for _, tick := range ticks {
+		y := yFor(tick.value)
+		fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%d" y2="%.1f" stroke="#e2e7ef" stroke-width="1"/>`, plotLeft, y, visualPlotRight, y)
+		fmt.Fprintf(b, `<text x="%.2f" y="%.1f" text-anchor="end" font-size="%s" fill="#5b6577">%s</text>`, plotLeft-visualYAxisGap, y+4, numberText(visualFont), html.EscapeString(tick.label))
 	}
 }
 
-func drawVisualTruncatedMarker(b *strings.Builder, _ float64, plotBottom float64) {
-	fmt.Fprintf(b, `<g class="axis-truncated"><path d="M%d,%.1f L%d,%.1f L%d,%.1f L%d,%.1f" fill="none" stroke="#b45309" stroke-width="1.8"/><text x="%d" y="%.1f" text-anchor="end" font-size="%s" fill="#b45309">轴不从 0 起</text></g>`,
-		visualPlotLeft-6, plotBottom+2,
-		visualPlotLeft-1, plotBottom-4,
-		visualPlotLeft+4, plotBottom+2,
-		visualPlotLeft+9, plotBottom-4,
-		visualPlotRight-4, plotBottom-4,
+func drawVisualTruncatedMarker(b *strings.Builder, plotLeft, plotBottom float64) {
+	fmt.Fprintf(b, `<g class="axis-truncated"><path d="M%.1f,%.1f L%.1f,%.1f L%.1f,%.1f L%.1f,%.1f" fill="none" stroke="#b45309" stroke-width="1.8"/><text x="%.1f" y="%.1f" text-anchor="end" font-size="%s" fill="#b45309">轴不从 0 起</text></g>`,
+		plotLeft-6, plotBottom+2,
+		plotLeft-1, plotBottom-4,
+		plotLeft+4, plotBottom+2,
+		plotLeft+9, plotBottom-4,
+		float64(visualPlotRight)-4, plotBottom-4,
 		numberText(visualFont),
 	)
 }
 
-func drawVisualBars(b *strings.Builder, spec VisualSpec, plotTop, plotBottom float64, yFor func(float64) float64, grouped bool) {
+func drawVisualBars(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plotBottom float64, yFor func(float64) float64, grouped bool) {
 	series := spec.Series
 	if !grouped {
 		series = series[:1]
@@ -411,21 +458,24 @@ func drawVisualBars(b *strings.Builder, spec VisualSpec, plotTop, plotBottom flo
 	if n == 0 {
 		return
 	}
-	groupWidth := (visualPlotRight - visualPlotLeft) / float64(n)
+	groupWidth := (visualPlotRight - plotLeft) / float64(n)
 	barWidth := groupWidth * 0.56
 	if grouped {
 		barWidth = groupWidth * 0.72 / float64(len(series))
 	}
-	baseline := yFor(0)
+	zero := yFor(0)
 	for i := range labels {
-		groupCenter := visualPlotLeft + groupWidth*(float64(i)+0.5)
+		groupCenter := plotLeft + groupWidth*(float64(i)+0.5)
 		for s, one := range series {
 			if i >= len(one.Points) {
 				continue
 			}
 			value := one.Points[i].Value
 			top := yFor(value)
-			height := baseline - top
+			y, height := top, zero-top
+			if value < 0 {
+				y, height = zero, top-zero
+			}
 			if height < 0 {
 				height = 0
 			}
@@ -435,15 +485,36 @@ func drawVisualBars(b *strings.Builder, spec VisualSpec, plotTop, plotBottom flo
 				x = groupCenter - (barWidth*float64(len(series)))/2 + barWidth*float64(s)
 				labelX = x + barWidth/2
 			}
-			fmt.Fprintf(b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="3" fill="%s"/>`, x, top, barWidth, height, visualSeriesColor(s))
+			fmt.Fprintf(b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="3" fill="%s"/>`, x, y, barWidth, height, visualSeriesColor(s))
 			if n*len(series) <= 8 {
-				fmt.Fprintf(b, `<text x="%.2f" y="%.2f" text-anchor="middle" font-size="%s" fill="#1b2332">%s</text>`, labelX, top-4, numberText(visualFont), html.EscapeString(visualNumber(value)))
+				text := visualNumber(value)
+				labelY := top - 4
+				if value < 0 {
+					labelY = top + 12
+				}
+				labelX = visualCenteredLabelX(labelX, estimateVisualTextWidth(text, visualFont))
+				fmt.Fprintf(b, `<text x="%.2f" y="%.2f" text-anchor="middle" font-size="%s" fill="#1b2332">%s</text>`, labelX, labelY, numberText(visualFont), html.EscapeString(text))
 			}
 		}
 	}
 }
 
-func drawVisualLines(b *strings.Builder, spec VisualSpec, plotTop, plotBottom float64, yFor func(float64) float64) {
+func visualCenteredLabelX(x, width float64) float64 {
+	left := width/2 + 2
+	right := float64(visualViewBoxWidth) - width/2 - 2
+	if left > right {
+		return float64(visualViewBoxWidth) / 2
+	}
+	if x < left {
+		return left
+	}
+	if x > right {
+		return right
+	}
+	return x
+}
+
+func drawVisualLines(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plotBottom float64, yFor func(float64) float64) {
 	if len(spec.Series) == 0 {
 		return
 	}
@@ -457,7 +528,7 @@ func drawVisualLines(b *strings.Builder, spec VisualSpec, plotTop, plotBottom fl
 		}
 		var points strings.Builder
 		for i, point := range series.Points {
-			x := visualPlotLeft + (visualPlotRight-visualPlotLeft)*float64(i)/float64(n-1)
+			x := plotLeft + (visualPlotRight-plotLeft)*float64(i)/float64(n-1)
 			y := yFor(point.Value)
 			fmt.Fprintf(&points, "%.2f,%.2f ", x, y)
 			fmt.Fprintf(b, `<circle cx="%.2f" cy="%.2f" r="3" fill="#ffffff" stroke="%s" stroke-width="2"/>`, x, y, visualSeriesColor(s))
@@ -470,7 +541,7 @@ func drawVisualLines(b *strings.Builder, spec VisualSpec, plotTop, plotBottom fl
 	}
 }
 
-func drawVisualXLabels(b *strings.Builder, spec VisualSpec, height float64) {
+func drawVisualXLabels(b *strings.Builder, spec VisualSpec, plotLeft, height float64) {
 	if len(spec.Series) == 0 {
 		return
 	}
@@ -483,8 +554,9 @@ func drawVisualXLabels(b *strings.Builder, spec VisualSpec, height float64) {
 		if n > 8 && i%2 == 1 {
 			continue
 		}
-		x := visualPlotLeft + (visualPlotRight-visualPlotLeft)*float64(i)/float64(n-1)
+		x := plotLeft + (visualPlotRight-plotLeft)*float64(i)/float64(n-1)
 		label := shortVisualLabel(point.Label, 8)
+		x = visualCenteredLabelX(x, estimateVisualTextWidth(label, visualFont))
 		fmt.Fprintf(b, `<text x="%.2f" y="%.1f" text-anchor="middle" font-size="%s" fill="#1b2332">%s</text>`, x, height-24, numberText(visualFont), html.EscapeString(label))
 	}
 }
@@ -529,17 +601,28 @@ func visualAxisScale(minValue, maxValue float64, truncated bool) (axisMin, axisM
 	if maxValue <= minValue {
 		maxValue = minValue + 1
 	}
-	// The scale starts at 0 unless the caller explicitly asks for a truncated
-	// axis. Compute the step over the visible interval, not over max-min, or a
-	// 100..200 series would get nine labels from 0 to 200.
-	baseMin := 0.0
+	minEdge, maxEdge := minValue, maxValue
 	if truncated {
-		baseMin = minValue * 0.9
-		if baseMin < 0 {
-			baseMin = 0
+		if minEdge > 0 {
+			minEdge *= 0.9
+		} else if minEdge < 0 {
+			minEdge *= 1.1
+		}
+		if maxEdge < 0 {
+			maxEdge = 0
+		}
+	} else {
+		if minEdge > 0 {
+			minEdge = 0
+		}
+		if maxEdge < 0 {
+			maxEdge = 0
 		}
 	}
-	span := maxValue - baseMin
+	span := maxEdge - minEdge
+	if span <= 0 {
+		span = 1
+	}
 	raw := span / 5
 	magnitude := math.Pow(10, math.Floor(math.Log10(raw)))
 	if magnitude <= 0 {
@@ -555,15 +638,8 @@ func visualAxisScale(minValue, maxValue float64, truncated bool) (axisMin, axisM
 	if step <= 0 {
 		step = 1
 	}
-	if truncated {
-		axisMin = math.Floor(baseMin/step) * step
-		if axisMin < 0 {
-			axisMin = 0
-		}
-	} else {
-		axisMin = 0
-	}
-	axisMax = math.Ceil(maxValue/step) * step
+	axisMin = math.Floor(minEdge/step) * step
+	axisMax = math.Ceil(maxEdge/step) * step
 	if axisMax <= axisMin {
 		axisMax = axisMin + step
 	}
