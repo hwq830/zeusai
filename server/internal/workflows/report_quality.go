@@ -119,10 +119,14 @@ func reportQualityPipeline(ctx workflow.Context, plan ReportPlan, findings []Que
 }
 
 func (a *Activities) DraftReport(ctx context.Context, p ReportPlan, findings []QuestionNotes, notes []string) (reportDraft, error) {
-	step := writeStep(p.UILang, len(p.Questions)+1)
-	if a.Q != nil {
-		if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
-			return reportDraft{}, err
+	// Plans that carry the stage list are driven by the workflow, which emits step events
+	// itself; only legacy plans still report from inside the activity.
+	if !p.ProgressStages {
+		step := writeStep(p.UILang, len(p.Questions)+1)
+		if a.Q != nil {
+			if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
+				return reportDraft{}, err
+			}
 		}
 	}
 	merged, _ := mergeNotes(findings)
@@ -445,6 +449,11 @@ func (a *Activities) PublishReviewedReport(ctx context.Context, p ReportPlan, fi
 	state := reviewState
 	if _, err := a.Q.CompleteReport(ctx, db.CompleteReportParams{ID: p.ReportID, UserID: p.UserID, Title: p.Title, Summary: d.Summary, Markdown: d.Markdown, Sources: src, SourceCount: int32(len(sources)), WordCount: int32(wordCount(p.Lang, reporttemplate.WithoutCharts(d.Markdown))), ReviewState: &state}); err != nil {
 		return err
+	}
+	if p.ProgressStages {
+		// The workflow completes the publish step, then emits the completion event last so
+		// no later step event can flip the task back to running.
+		return nil
 	}
 	step := writeStep(p.UILang, len(p.Questions)+1)
 	if err := a.emit(ctx, p.UserID, p.TaskID, events.Event{Type: events.TypeStepDone, Step: &step}); err != nil {

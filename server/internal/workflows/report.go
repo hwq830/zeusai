@@ -61,8 +61,8 @@ func wordCount(l i18n.Lang, s string) int {
 	return utf8.RuneCountInString(s)
 }
 
-func researchStep(l i18n.Lang, i int, q string) events.Step {
-	return events.Step{Index: i + 1, Title: l.Pick("调研：", "Research: ") + clip(q, l.ClipLen(40)), Tool: "search"}
+func researchStep(l i18n.Lang, index int, q string) events.Step {
+	return events.Step{Index: index, Title: l.Pick("调研：", "Research: ") + clip(q, l.ClipLen(40)), Tool: "search"}
 }
 
 func writeStep(l i18n.Lang, n int) events.Step {
@@ -92,6 +92,9 @@ type ReportPlan struct {
 	// Lang is the report's language; UILang the App's (progress steps, push).
 	Lang   i18n.Lang
 	UILang i18n.Lang
+	// ProgressStages is set by PlanReport for plans that carry the full stage list. The
+	// workflow then owns every step event; older plans keep emitting from the activities.
+	ProgressStages bool
 }
 
 // QuestionNotes are one sub-question's findings; [n] in Notes indexes Sources from 1.
@@ -105,7 +108,17 @@ type QuestionNotes struct {
 // Messages sent while it runs ("补充要求") are passed to the research and writing steps that
 // start afterwards. This is the MVP pipeline; the free-form tool-using agent loop arrives with
 // the sandbox.
+//
+// report-progress-stages adds the full stage list to the plan and moves step events into the
+// workflow. Reports that started before the upgrade replay the previous pipeline unchanged.
 func ReportWorkflow(ctx workflow.Context, run orch.ReportRun) error {
+	if workflow.GetVersion(ctx, "report-progress-stages", workflow.DefaultVersion, 1) == workflow.DefaultVersion {
+		return reportWorkflowLegacy(ctx, run)
+	}
+	return reportWorkflowStaged(ctx, run)
+}
+
+func reportWorkflowLegacy(ctx workflow.Context, run orch.ReportRun) error {
 	var a *Activities
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: modelActivityTimeout,
@@ -231,16 +244,15 @@ func (a *Activities) PlanReport(ctx context.Context, run orch.ReportRun) (Report
 		out.Questions[i].Regions = questionRegions(out.Questions[i].Regions, userMarket)
 	}
 	plan := ReportPlan{Market: userMarket, UserID: run.UserID, TaskID: run.TaskID, ReportID: r.ID, Topic: r.Topic, Depth: r.Depth, Focuses: r.Focuses,
-		Title: clip(strings.TrimSpace(lang.Model(out.Title)), lang.ClipLen(30)), Questions: out.Questions, Scope: clip(out.Scope, 1000), Uncertainties: out.Uncertainties, Lang: lang, UILang: ui}
+		Title: clip(strings.TrimSpace(lang.Model(out.Title)), lang.ClipLen(30)), Questions: out.Questions, Scope: clip(out.Scope, 1000), Uncertainties: out.Uncertainties, Lang: lang, UILang: ui,
+		ProgressStages: true}
 	if plan.Title == "" {
 		plan.Title = r.Title
 	}
-	steps := make([]events.Step, 0, len(plan.Questions)+1)
-	for i, q := range plan.Questions {
-		steps = append(steps, researchStep(ui, i, q.Question))
-	}
-	steps = append(steps, writeStep(ui, len(steps)+1))
-	return plan, a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypePlan, Steps: steps})
+	// The whole stage list goes out before research starts, including stages that may end up
+	// doing nothing: the workflow completes those with an explicit detail instead of the list
+	// changing under the client.
+	return plan, a.emit(ctx, run.UserID, run.TaskID, events.Event{Type: events.TypePlan, Steps: reportSteps(ui, plan.Questions)})
 }
 
 func questionRegions(values []string, fallback string) []string {
@@ -265,9 +277,15 @@ func questionRegions(values []string, fallback string) []string {
 func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i int, notes []string) (QuestionNotes, error) {
 	ctx = calllog.WithScope(ctx, calllog.Scope{UserID: &plan.UserID, TaskID: &plan.TaskID, Purpose: "report.research"})
 	q := plan.Questions[i]
-	step := researchStep(plan.UILang, i, q.Question)
-	if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
-		return QuestionNotes{}, err
+	index := i + 2
+	if !plan.ProgressStages {
+		index = i + 1
+	}
+	step := researchStep(plan.UILang, index, q.Question)
+	if !plan.ProgressStages {
+		if err := a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepStarted, Step: &step}); err != nil {
+			return QuestionNotes{}, err
+		}
 	}
 	b := budgets[plan.Depth]
 	seen := map[string]bool{}
@@ -358,6 +376,9 @@ func (a *Activities) ResearchQuestion(ctx context.Context, plan ReportPlan, i in
 			return QuestionNotes{}, err
 		}
 		out.Notes = res.Notes
+	}
+	if plan.ProgressStages {
+		return out, nil
 	}
 	step.Detail = researchStepDetail(plan.UILang, len(sources), a.readSources.note(plan.TaskID, sources))
 	return out, a.emit(ctx, plan.UserID, plan.TaskID, events.Event{Type: events.TypeStepDone, Step: &step})
