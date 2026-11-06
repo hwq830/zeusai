@@ -508,6 +508,18 @@ type ReportFeedback struct {
 	UpdatedAt time.Time
 }
 
+type ReportFollowup struct {
+	ID         uuid.UUID
+	ReportID   uuid.UUID
+	UserID     uuid.UUID
+	TaskID     *uuid.UUID
+	Question   string
+	Answer     string
+	Sources    json.RawMessage
+	AttachedAt *time.Time
+	CreatedAt  time.Time
+}
+
 type RoutingVersion struct {
 	ID        int64
 	Snapshot  json.RawMessage

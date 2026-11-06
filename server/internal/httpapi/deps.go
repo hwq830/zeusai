@@ -98,7 +98,7 @@ func New(d Deps) *Server {
 		Briefings:  &briefing.Service{Q: q, Quota: qs, Templates: tpl, Orch: d.Orch, LLM: d.LLM, Mod: d.Mod, Blob: d.Blob, Config: rc, Now: d.Now},
 		Tasks:      &task.Service{Q: q, Orch: d.Orch},
 		Connectors: &connector.Service{Q: q},
-		Reports:    &report.Service{Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, Config: rc},
+		Reports:    &report.Service{Pool: d.Pool, Q: q, Quota: qs, Orch: d.Orch, Mod: d.Mod, Blob: d.Blob, Config: rc},
 		Shares:     &share.Service{Q: q, Mod: d.Mod, Config: rc, PublicBaseURL: d.Config.PublicBaseURL, Now: d.Now},
 		Feedback:   &feedback.Service{Pool: d.Pool, Q: q, Blob: d.Blob, Mod: d.Mod, Now: d.Now},
 		// The api process only reads the message center; pushes are sent by the orchestrator and admin.

@@ -27,6 +27,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/market"
 	"github.com/hwq830/zeusai/server/internal/orch"
 	"github.com/hwq830/zeusai/server/internal/push"
+	"github.com/hwq830/zeusai/server/internal/report"
 	"github.com/hwq830/zeusai/server/internal/search"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
@@ -498,7 +499,8 @@ func (a *Activities) AbortReport(ctx context.Context, run orch.ReportRun, kind s
 		Error: &events.Error{Code: "internal", Message: msg, Retryable: true}})
 }
 
-// FollowupWorkflow answers a question about a finished report and appends the answer to it.
+// FollowupWorkflow answers a question about a finished report. The answer is stored on its
+// own; the report body changes only when the user attaches the follow-up.
 func FollowupWorkflow(ctx workflow.Context, run orch.FollowupRun) error {
 	var a *Activities
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -558,8 +560,12 @@ func (a *Activities) AnswerFollowup(ctx context.Context, run orch.FollowupRun) e
 	if err := a.streamText(ctx, run.UserID, run.TaskID, out.Answer); err != nil {
 		return err
 	}
-	if err := a.Q.AppendReportMarkdown(ctx, db.AppendReportMarkdownParams{
-		ID: r.ID, UserID: run.UserID, Markdown: "\n\n## " + lang.Pick("追问：", "Follow-up: ") + run.Question + "\n\n" + out.Answer + "\n",
+	var reportSources []events.Source
+	_ = json.Unmarshal(r.Sources, &reportSources)
+	taskID := run.TaskID
+	if _, err := a.Q.CreateReportFollowup(ctx, db.CreateReportFollowupParams{
+		ReportID: r.ID, UserID: run.UserID, TaskID: &taskID, Question: run.Question, Answer: out.Answer,
+		Sources: report.FollowupSourcesJSON(out.Answer, reportSources),
 	}); err != nil {
 		return err
 	}

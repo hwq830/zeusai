@@ -691,10 +691,27 @@ paths:
   /v1/reports/{reportId}/followups:
     parameters:
       - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [reports]
+      operationId: listReportFollowups
+      summary: 报告的追问历史（新到旧），带是否已加入正文。报告已删除或已下架返回 404
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReportFollowup' }
+        default: { $ref: '#/components/responses/Error' }
     post:
       tags: [reports]
       operationId: createReportFollowup
-      summary: 针对报告追问。返回任务，答案以 text_delta 事件流式返回，并追加到报告末尾。本月 token 用完时返回 403 quota_exceeded
+      summary: 针对报告追问。返回任务，答案以 text_delta 事件流式返回；答案单独保存，不自动改动报告正文。本月 token 用完时返回 403 quota_exceeded
       requestBody:
         required: true
         content:
@@ -706,6 +723,24 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Task' }
+        default: { $ref: '#/components/responses/Error' }
+  /v1/reports/{reportId}/followups/{followupId}/attach:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+      - name: followupId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [reports]
+      operationId: attachReportFollowup
+      summary: 把一条追问作为附录加入报告正文（幂等；已加入时返回同样结果，不重复追加）。报告已删除或已下架返回 404
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportFollowup' }
         default: { $ref: '#/components/responses/Error' }
   /v1/reports/{reportId}/shares:
     parameters:
@@ -1946,6 +1981,19 @@ components:
       required: [question]
       properties:
         question: { type: string, maxLength: 1000 }
+    ReportFollowup:
+      type: object
+      required: [id, question, answer, createdAt]
+      properties:
+        id: { type: string }
+        question: { type: string }
+        answer: { type: string }
+        attachedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: 加入正文的时间；null 表示还没加入
+        createdAt: { type: string, format: date-time }
     ShareScope:
       type: string
       description: full=全文；summary=只有标题和导语/摘要（简报还带每条标题）；item=简报的单条

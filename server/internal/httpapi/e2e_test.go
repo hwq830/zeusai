@@ -623,7 +623,9 @@ func TestReportEndToEnd(t *testing.T) {
 		t.Fatalf("list: %+v", list)
 	}
 
-	// Follow-up streams an answer and appends it to the report.
+	// A follow-up is answered and stored on its own; the report body stays untouched until
+	// the user attaches it.
+	bodyBefore := page
 	h.do("POST", "/v1/reports/"+rep.ID+"/followups", map[string]string{"question": "欧洲市场的关税影响多大？"}, 202, &tk)
 	answer := ""
 	for _, ev := range h.streamEvents(tk.ID, 0) {
@@ -632,8 +634,55 @@ func TestReportEndToEnd(t *testing.T) {
 	if answer == "" {
 		t.Fatal("no streamed answer")
 	}
-	if _, page = h.raw(rep.HTMLURL, true); !strings.Contains(page, "追问：欧洲市场的关税影响多大？") {
-		t.Fatal("follow-up not appended")
+	if _, page = h.raw(rep.HTMLURL, true); page != bodyBefore {
+		t.Fatal("follow-up changed the report body without attach")
+	}
+	var fus struct {
+		Items []struct {
+			ID         string     `json:"id"`
+			Question   string     `json:"question"`
+			AttachedAt *time.Time `json:"attachedAt"`
+			CreatedAt  time.Time  `json:"createdAt"`
+		} `json:"items"`
+	}
+	h.do("GET", "/v1/reports/"+rep.ID+"/followups", nil, 200, &fus)
+	if len(fus.Items) != 1 || fus.Items[0].Question != "欧洲市场的关税影响多大？" || fus.Items[0].AttachedAt != nil {
+		t.Fatalf("followups before attach: %+v", fus.Items)
+	}
+	var attached struct {
+		ID         string     `json:"id"`
+		AttachedAt *time.Time `json:"attachedAt"`
+	}
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups/"+fus.Items[0].ID+"/attach", nil, 200, &attached)
+	if attached.ID != fus.Items[0].ID || attached.AttachedAt == nil {
+		t.Fatalf("attach: %+v", attached)
+	}
+	_, page = h.raw(rep.HTMLURL, true)
+	if !strings.Contains(page, "附录 · 追问：欧洲市场的关税影响多大？") || !strings.Contains(page, "追问来源") || !strings.Contains(page, "[追问1]") {
+		t.Fatalf("appendix missing: %.600s", page)
+	}
+	once := page
+	// Idempotent: attaching again returns the same state and appends nothing.
+	var again struct {
+		ID         string     `json:"id"`
+		AttachedAt *time.Time `json:"attachedAt"`
+	}
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups/"+fus.Items[0].ID+"/attach", nil, 200, &again)
+	if again.ID != attached.ID || again.AttachedAt == nil {
+		t.Fatalf("attach again: %+v", again)
+	}
+	if _, page = h.raw(rep.HTMLURL, true); page != once {
+		t.Fatal("attach appended the appendix twice")
+	}
+	// A follow-up id that does not belong to this report is a 404.
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups/"+uuid.NewString()+"/attach", nil, 404, nil)
+
+	// History is newest first, and a fresh answer is not attached.
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups", map[string]string{"question": "第二个问题"}, 202, &tk)
+	h.streamEvents(tk.ID, 0)
+	h.do("GET", "/v1/reports/"+rep.ID+"/followups", nil, 200, &fus)
+	if len(fus.Items) != 2 || fus.Items[0].Question != "第二个问题" || fus.Items[0].AttachedAt != nil {
+		t.Fatalf("followup order: %+v", fus.Items)
 	}
 
 	// Shares: full and summary-only, public, revocable.
@@ -654,6 +703,21 @@ func TestReportEndToEnd(t *testing.T) {
 	if code, _ := h.raw(path(full.URL), false); code != 404 {
 		t.Fatalf("revoked share: %d", code)
 	}
+
+	// Follow-up history follows report visibility: other users and hidden reports are 404.
+	mine := h.token
+	h.login(randomPhone())
+	h.do("GET", "/v1/reports/"+rep.ID+"/followups", nil, 404, nil)
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups/"+fus.Items[1].ID+"/attach", nil, 404, nil)
+	h.token = mine
+	now := time.Now()
+	if _, err := h.q.AdminSetReportHidden(context.Background(), db.AdminSetReportHiddenParams{
+		ID: uuid.MustParse(rep.ID), HiddenAt: &now, Reason: "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.do("GET", "/v1/reports/"+rep.ID+"/followups", nil, 404, nil)
+	h.do("POST", "/v1/reports/"+rep.ID+"/followups/"+fus.Items[0].ID+"/attach", nil, 404, nil)
 
 	h.do("DELETE", "/v1/reports/"+rep.ID, nil, 204, nil)
 	h.do("GET", "/v1/reports/"+rep.ID, nil, 404, nil)
@@ -879,16 +943,27 @@ func TestReportPDF(t *testing.T) {
 		t.Fatalf("tampered link: %d", code)
 	}
 
-	// A follow-up changes the report, so the next request prints a new file.
+	// A follow-up alone does not change the report body, so the PDF stays valid.
 	var fu struct{ ID string }
 	h.do("POST", "/v1/reports/"+tk.ReportID+"/followups", map[string]string{"question": "补充一点？"}, 202, &fu)
 	h.streamEvents(fu.ID, 0)
 	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
+	if link.Status != "ready" {
+		t.Fatalf("follow-up alone invalidated the PDF: %+v", link)
+	}
+	// Attaching it changes the body, so the next request prints a new file.
+	var followups struct{ Items []struct{ ID string } }
+	h.do("GET", "/v1/reports/"+tk.ReportID+"/followups", nil, 200, &followups)
+	if len(followups.Items) != 1 {
+		t.Fatalf("followups: %+v", followups.Items)
+	}
+	h.do("POST", "/v1/reports/"+tk.ReportID+"/followups/"+followups.Items[0].ID+"/attach", nil, 200, nil)
+	h.do("GET", "/v1/reports/"+tk.ReportID+"/pdf", nil, 200, &link)
 	if link.Status != "generating" {
-		t.Fatalf("after follow-up: %+v", link)
+		t.Fatalf("after attach: %+v", link)
 	}
 	if second := waitReady(); second == first {
-		t.Fatal("stale PDF link returned after follow-up")
+		t.Fatal("stale PDF link returned after attach")
 	}
 
 	// Other users cannot reach the report.

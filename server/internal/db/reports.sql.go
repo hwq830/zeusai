@@ -28,6 +28,35 @@ func (q *Queries) AppendReportMarkdown(ctx context.Context, arg AppendReportMark
 	return err
 }
 
+const attachReportFollowup = `-- name: AttachReportFollowup :one
+UPDATE report_followups SET attached_at = now()
+WHERE id = $1 AND report_id = $2 AND user_id = $3 AND attached_at IS NULL
+RETURNING id, report_id, user_id, task_id, question, answer, sources, attached_at, created_at
+`
+
+type AttachReportFollowupParams struct {
+	ID       uuid.UUID
+	ReportID uuid.UUID
+	UserID   uuid.UUID
+}
+
+func (q *Queries) AttachReportFollowup(ctx context.Context, arg AttachReportFollowupParams) (ReportFollowup, error) {
+	row := q.db.QueryRow(ctx, attachReportFollowup, arg.ID, arg.ReportID, arg.UserID)
+	var i ReportFollowup
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.UserID,
+		&i.TaskID,
+		&i.Question,
+		&i.Answer,
+		&i.Sources,
+		&i.AttachedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const completeReport = `-- name: CompleteReport :one
 UPDATE reports SET
     status = 'done', title = $3, summary = $4, markdown = $5, sources = $6, source_count = $7,
@@ -164,6 +193,45 @@ func (q *Queries) CreateReport(ctx context.Context, arg CreateReportParams) (Rep
 	return i, err
 }
 
+const createReportFollowup = `-- name: CreateReportFollowup :one
+INSERT INTO report_followups (report_id, user_id, task_id, question, answer, sources)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, report_id, user_id, task_id, question, answer, sources, attached_at, created_at
+`
+
+type CreateReportFollowupParams struct {
+	ReportID uuid.UUID
+	UserID   uuid.UUID
+	TaskID   *uuid.UUID
+	Question string
+	Answer   string
+	Sources  json.RawMessage
+}
+
+func (q *Queries) CreateReportFollowup(ctx context.Context, arg CreateReportFollowupParams) (ReportFollowup, error) {
+	row := q.db.QueryRow(ctx, createReportFollowup,
+		arg.ReportID,
+		arg.UserID,
+		arg.TaskID,
+		arg.Question,
+		arg.Answer,
+		arg.Sources,
+	)
+	var i ReportFollowup
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.UserID,
+		&i.TaskID,
+		&i.Question,
+		&i.Answer,
+		&i.Sources,
+		&i.AttachedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deleteReport = `-- name: DeleteReport :execrows
 DELETE FROM reports WHERE id = $1 AND user_id = $2
 `
@@ -220,6 +288,74 @@ func (q *Queries) GetReport(ctx context.Context, arg GetReportParams) (Report, e
 		&i.ReviewState,
 	)
 	return i, err
+}
+
+const getReportFollowup = `-- name: GetReportFollowup :one
+SELECT id, report_id, user_id, task_id, question, answer, sources, attached_at, created_at FROM report_followups WHERE id = $1 AND report_id = $2 AND user_id = $3
+`
+
+type GetReportFollowupParams struct {
+	ID       uuid.UUID
+	ReportID uuid.UUID
+	UserID   uuid.UUID
+}
+
+func (q *Queries) GetReportFollowup(ctx context.Context, arg GetReportFollowupParams) (ReportFollowup, error) {
+	row := q.db.QueryRow(ctx, getReportFollowup, arg.ID, arg.ReportID, arg.UserID)
+	var i ReportFollowup
+	err := row.Scan(
+		&i.ID,
+		&i.ReportID,
+		&i.UserID,
+		&i.TaskID,
+		&i.Question,
+		&i.Answer,
+		&i.Sources,
+		&i.AttachedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listReportFollowups = `-- name: ListReportFollowups :many
+SELECT id, report_id, user_id, task_id, question, answer, sources, attached_at, created_at FROM report_followups
+WHERE report_id = $1 AND user_id = $2
+ORDER BY created_at DESC
+`
+
+type ListReportFollowupsParams struct {
+	ReportID uuid.UUID
+	UserID   uuid.UUID
+}
+
+func (q *Queries) ListReportFollowups(ctx context.Context, arg ListReportFollowupsParams) ([]ReportFollowup, error) {
+	rows, err := q.db.Query(ctx, listReportFollowups, arg.ReportID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportFollowup{}
+	for rows.Next() {
+		var i ReportFollowup
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.UserID,
+			&i.TaskID,
+			&i.Question,
+			&i.Answer,
+			&i.Sources,
+			&i.AttachedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listReports = `-- name: ListReports :many
