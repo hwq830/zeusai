@@ -3,12 +3,15 @@ package reporttemplate
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func visualTestSpec(level string) VisualSpec {
@@ -303,4 +306,59 @@ func TestRenderDispatchesVisualSpecAndLegacyChart(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
+}
+
+func extremeVisualSpec(typ string, values ...float64) VisualSpec {
+	points := make([]Point, 0, len(values))
+	for i, value := range values {
+		points = append(points, Point{Label: fmt.Sprintf("P%d", i+1), Value: value})
+	}
+	return VisualSpec{
+		Anchor:           "一、规模",
+		Type:             typ,
+		Title:            "极端数值图",
+		Unit:             "亿次/日",
+		Level:            "L1",
+		Series:           []Series{{Name: "数值", Points: points}},
+		MetricDefinition: "极端数值测试",
+	}
+}
+
+func TestVisualYAxisGutterFitsWidestLabel(t *testing.T) {
+	spec := extremeVisualSpec("bar", 1000, 1400000)
+	svg, metrics := renderVisualSVG(spec)
+	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
+	require.Greater(t, metrics.WidestYAxisLabel, 50.0, "1,400,000 needs a wide label")
+	assertVisualTextWithinViewBox(t, svg, 360)
+}
+
+func TestVisualYAxisGutterDecimalsStaysCompact(t *testing.T) {
+	spec := extremeVisualSpec("bar", 0.5, 0.25)
+	svg, metrics := renderVisualSVG(spec)
+	require.LessOrEqual(t, metrics.PlotLeft, 40.0, "decimal labels must not widen the gutter excessively")
+	assertVisualTextWithinViewBox(t, svg, 360)
+}
+
+func TestVisualNegativeAxisKeepsSign(t *testing.T) {
+	spec := extremeVisualSpec("line", -1400000, -1000)
+	svg, metrics := renderVisualSVG(spec)
+	require.Contains(t, svg, "-1,500,000")
+	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
+	assertVisualTextWithinViewBox(t, svg, 360)
+}
+
+func TestVisualBarTopLabelsStayInsideViewBox(t *testing.T) {
+	spec := extremeVisualSpec("bar", 1000, 1400000)
+	svg, _ := renderVisualSVG(spec)
+	require.Contains(t, svg, "1,000")
+	require.Contains(t, svg, "1,400,000")
+	assertVisualTextWithinViewBox(t, svg, 360)
+}
+
+func TestVisualGroupedBarLabelsStayInsideViewBox(t *testing.T) {
+	spec := extremeVisualSpec("barGrouped", 1000, 1400000)
+	spec.Series = append(spec.Series, Series{Name: "另一组", Points: []Point{{Label: "P1", Value: 1400000}, {Label: "P2", Value: 1000}}})
+	svg, metrics := renderVisualSVG(spec)
+	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
+	assertVisualTextWithinViewBox(t, svg, 360)
 }
