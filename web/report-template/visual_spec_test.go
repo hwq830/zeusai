@@ -362,3 +362,19 @@ func TestVisualGroupedBarLabelsStayInsideViewBox(t *testing.T) {
 	require.GreaterOrEqual(t, metrics.PlotLeft, metrics.WidestYAxisLabel+visualYAxisGap+visualLeftPad)
 	assertVisualTextWithinViewBox(t, svg, 360)
 }
+
+func TestRenderVisualSpecPaletteChangesColors(t *testing.T) {
+	spec := extremeVisualSpec("bar", 1000, 1400000)
+	green, err := RenderVisualSpec(spec, VisualPalette{Accent: "#B8D94B", Deep: "#0E2A21", Ink: "#14181B", Line: "#DFD9CB", Muted: "#7A8188"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blue, err := RenderVisualSpec(spec, VisualPalette{Accent: "#2952CC", Deep: "#101828", Ink: "#1B2332", Line: "#E2E7EF", Muted: "#5B6577"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	require.NotEqual(t, green, blue)
+	require.Contains(t, green, "#B8D94B")
+	require.NotContains(t, green, "#2952CC")
+	require.Contains(t, blue, "#2952CC")
+}

@@ -26,6 +26,18 @@ var page = template.Must(template.New("report").Funcs(template.FuncMap{
 
 var md = goldmark.New(goldmark.WithExtensions(extension.Table, extension.Strikethrough))
 
+// reportVisualPalette is the page shell's chart palette. The renderer owns the
+// colors; the template layer only supplies tokens, never post-render string
+// replacement.
+var reportVisualPalette = VisualPalette{
+	Accent: "#B8D94B",
+	Deep:   "#0E2A21",
+	Ink:    "#14181B",
+	Line:   "#DFD9CB",
+	Muted:  "#7A8188",
+	Series: []string{"#0E2A21", "#2C5F49", "#9A6A1E"},
+}
+
 type Source struct {
 	Index    int
 	URL      string
@@ -67,6 +79,21 @@ var labels = map[string]Labels{
 // citeRe matches [n] citations; goldmark leaves unmatched [n] as literal text.
 var citeRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 var conclusionLabel = regexp.MustCompile(`(?i)<strong>(事实|判断|建议|事實|判斷|建議|fact|analysis|recommendation)</strong>`)
+
+var (
+	reportTableRe = regexp.MustCompile(`(?s)<table>.*?</table>`)
+	reportNumRe   = regexp.MustCompile(`<td>([0-9][0-9,.]*(?:亿元|%)(?:[^<]*)?|[0-9][0-9,.]*)</td>`)
+)
+
+// wrapReportTables gives every Markdown table the horizontal-scroll container
+// and marks numeric cells for tabular alignment, without changing table text.
+func wrapReportTables(markup string) string {
+	return reportTableRe.ReplaceAllStringFunc(markup, func(table string) string {
+		table = strings.ReplaceAll(table, `<th>数值</th>`, `<th class="num">数值</th>`)
+		table = reportNumRe.ReplaceAllString(table, `<td class="num">$1</td>`)
+		return `<div class="tw">` + table + `</div>`
+	})
+}
 
 // TrimLeadingTitle removes a leading H1 only when its text is the same as the
 // report title. A different leading H1 is intentional content and is preserved.
@@ -133,7 +160,7 @@ func Render(d Data) ([]byte, error) {
 		}
 		raw := d.Markdown[match[2]:match[3]]
 		if spec, ok := parseVisualSpec(raw); ok {
-			if rendered, err := RenderVisualSpec(spec); err == nil {
+			if rendered, err := RenderVisualSpec(spec, reportVisualPalette); err == nil {
 				body.WriteString(rendered)
 			}
 		} else if chart, ok := parseChart(raw, valid); ok {
@@ -153,6 +180,6 @@ func Render(d Data) ([]byte, error) {
 		Data
 		L    Labels
 		Body template.HTML
-	}{d, l, template.HTML(body.String())}) // #nosec G203 -- goldmark output with raw HTML disabled
+	}{d, l, template.HTML(wrapReportTables(body.String()))}) // #nosec G203 -- goldmark output with raw HTML disabled
 	return out.Bytes(), err
 }

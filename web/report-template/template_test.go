@@ -104,3 +104,46 @@ func TestRenderKeepsDifferentLeadingH1(t *testing.T) {
 		t.Fatalf("different leading H1 rendered %d h1 elements, want 2", got)
 	}
 }
+
+func TestRenderShareKeepsCTAAndCitationAnchors(t *testing.T) {
+	out, err := Render(Data{
+		Title: "Shared report", Share: true, AppURL: "https://app.example/report",
+		Sources:  []Source{{Index: 1, URL: "https://a.example/1", Title: "One"}},
+		Markdown: "Fact [1].",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	for _, want := range []string{`class="cta"`, `href="https://app.example/report"`, `id="src-1"`, `href="#src-1"`, `AI-GENERATED`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
+
+func TestRenderSerifFontOrder(t *testing.T) {
+	out, err := Render(Data{Title: "Font", Markdown: "Text."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	noto := strings.Index(html, `"Noto Serif CJK SC","Noto Serif SC"`)
+	song := strings.Index(html, `"Songti SC"`)
+	if noto < 0 || song < 0 || noto > song {
+		t.Fatalf("Noto Serif must lead the serif stack; noto=%d songti=%d", noto, song)
+	}
+}
+
+func TestRenderWrapsTables(t *testing.T) {
+	out, err := Render(Data{Title: "Table", Markdown: "| 指标 | 数值 |\n| --- | --- |\n| 豆包 | 5998 |\n| 商汤 | 13.8% |\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	for _, want := range []string{`<div class="tw"><table>`, `<th class="num">数值</th>`, `<td class="num">5998</td>`, `<td class="num">13.8%</td>`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}

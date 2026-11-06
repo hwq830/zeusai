@@ -65,6 +65,52 @@ const (
 	visualTitleFont    = 14
 )
 
+// VisualPalette lets the page shell theme server-rendered SVG without
+// string-replacing colors after rendering. Accent/Deep/Ink/Line/Muted are the
+// five shared tokens; Series is an optional override for multi-series colors.
+type VisualPalette struct {
+	Accent string
+	Deep   string
+	Ink    string
+	Line   string
+	Muted  string
+	Series []string
+}
+
+// DefaultVisualPalette preserves the pre-theme chart colors for callers that
+// do not pass a palette.
+var DefaultVisualPalette = VisualPalette{
+	Accent: "#2952cc",
+	Deep:   "#1b2332",
+	Ink:    "#1b2332",
+	Line:   "#e2e7ef",
+	Muted:  "#5b6577",
+	Series: []string{"#2952cc", "#0f766e", "#b45309", "#7c3aed", "#be123c"},
+}
+
+func normalizeVisualPalette(p VisualPalette) VisualPalette {
+	d := DefaultVisualPalette
+	if p.Accent == "" {
+		p.Accent = d.Accent
+	}
+	if p.Deep == "" {
+		p.Deep = d.Deep
+	}
+	if p.Ink == "" {
+		p.Ink = d.Ink
+	}
+	if p.Line == "" {
+		p.Line = d.Line
+	}
+	if p.Muted == "" {
+		p.Muted = d.Muted
+	}
+	if len(p.Series) == 0 {
+		p.Series = []string{p.Accent, p.Deep, p.Muted, p.Ink, p.Line}
+	}
+	return p
+}
+
 var visualReferencePattern = regexp.MustCompile(`\[[0-9]+(?:\s*,\s*[0-9]+)*\]`)
 
 // ValidateVisualSpec checks one spec. The rules are deliberately explicit:
@@ -233,16 +279,20 @@ type visualRenderMetrics struct {
 // RenderVisualSpec validates and renders one self-contained figure. The visible
 // L2/L3 badge is produced here, not read from the agent-written caption. The SVG
 // is mobile-first: viewBox width 360, bar height 240, line height 300.
-func RenderVisualSpec(spec VisualSpec) (string, error) {
+func RenderVisualSpec(spec VisualSpec, palettes ...VisualPalette) (string, error) {
 	if err := ValidateVisualSpec(spec); err != nil {
 		return "", err
 	}
-	svg, _ := renderVisualSVG(spec)
+	palette := DefaultVisualPalette
+	if len(palettes) > 0 {
+		palette = normalizeVisualPalette(palettes[0])
+	}
+	svg, _ := renderVisualSVG(spec, palette)
 	var b strings.Builder
 	fmt.Fprintf(&b, `<figure class="report-visual" data-level="%s" data-axis-truncated="%t">`, html.EscapeString(spec.Level), spec.AxisTruncated)
 	b.WriteString(svg)
 	if strings.TrimSpace(spec.Caption) != "" {
-		b.WriteString(`<figcaption class="visual-caption" style="font-size:12.8px;line-height:1.7;color:#5b6577;margin-top:10px">`)
+		b.WriteString(`<figcaption class="visual-caption" style="font-size:12.8px;line-height:1.7;color:` + palette.Muted + `;margin-top:10px">`)
 		b.WriteString(html.EscapeString(spec.Caption))
 		b.WriteString(`</figcaption>`)
 	}
@@ -250,7 +300,11 @@ func RenderVisualSpec(spec VisualSpec) (string, error) {
 	return b.String(), nil
 }
 
-func renderVisualSVG(spec VisualSpec) (string, visualRenderMetrics) {
+func renderVisualSVG(spec VisualSpec, palettes ...VisualPalette) (string, visualRenderMetrics) {
+	palette := DefaultVisualPalette
+	if len(palettes) > 0 {
+		palette = normalizeVisualPalette(palettes[0])
+	}
 	height := float64(visualBarHeight)
 	if spec.Type == "line" {
 		height = float64(visualLineHeight)
@@ -265,22 +319,22 @@ func renderVisualSVG(spec VisualSpec) (string, visualRenderMetrics) {
 	titleY := 24.0
 	if badge != "" {
 		titleY = 46
-		drawVisualBadge(&b, spec.Level, badge)
+		drawVisualBadge(&b, spec.Level, badge, palette)
 	}
 	titleLines := wrapVisualText(spec.Title, 22, 2)
 	titleBottom := titleY
 	for i, line := range titleLines {
 		y := titleY + float64(i)*18
-		fmt.Fprintf(&b, `<text x="16" y="%.1f" font-size="%s" font-weight="700" fill="#1b2332">%s</text>`, y, numberText(visualTitleFont), html.EscapeString(line))
+		fmt.Fprintf(&b, `<text x="16" y="%.1f" font-size="%s" font-weight="700" fill="%s">%s</text>`, y, numberText(visualTitleFont), palette.Ink, html.EscapeString(line))
 		titleBottom = y
 	}
 	unitY := titleBottom + 18
-	fmt.Fprintf(&b, `<text x="16" y="%.1f" font-size="%s" fill="#5b6577">单位：%s</text>`, unitY, numberText(visualFont), html.EscapeString(spec.Unit))
+	fmt.Fprintf(&b, `<text x="16" y="%.1f" font-size="%s" fill="%s">单位：%s</text>`, unitY, numberText(visualFont), palette.Muted, html.EscapeString(spec.Unit))
 
 	plotTop := unitY + 10
 	legendBottom := unitY
 	if len(spec.Series) > 1 {
-		legendBottom = drawVisualLegend(&b, spec, unitY+18)
+		legendBottom = drawVisualLegend(&b, spec, unitY+18, palette)
 		if legendBottom+10 > plotTop {
 			plotTop = legendBottom + 10
 		}
@@ -314,21 +368,21 @@ func renderVisualSVG(spec VisualSpec) (string, visualRenderMetrics) {
 		}
 		return plotBottom - (value-axisMin)/(axisMax-axisMin)*(plotBottom-plotTop)
 	}
-	drawVisualAxis(&b, plotLeft, plotTop, plotBottom, ticks, yFor)
+	drawVisualAxis(&b, plotLeft, plotTop, plotBottom, ticks, yFor, palette)
 
 	switch spec.Type {
 	case "line":
-		drawVisualLines(&b, spec, plotLeft, plotTop, plotBottom, yFor)
+		drawVisualLines(&b, spec, plotLeft, plotTop, plotBottom, yFor, palette)
 	case "barGrouped":
-		drawVisualBars(&b, spec, plotLeft, plotTop, plotBottom, yFor, true)
+		drawVisualBars(&b, spec, plotLeft, plotTop, plotBottom, yFor, true, palette)
 	default:
-		drawVisualBars(&b, spec, plotLeft, plotTop, plotBottom, yFor, false)
+		drawVisualBars(&b, spec, plotLeft, plotTop, plotBottom, yFor, false, palette)
 	}
 
 	// The x-axis labels are drawn after the marks so they stay legible.
-	drawVisualXLabels(&b, spec, plotLeft, height)
+	drawVisualXLabels(&b, spec, plotLeft, height, palette)
 	if spec.AxisTruncated {
-		drawVisualTruncatedMarker(&b, plotLeft, plotBottom)
+		drawVisualTruncatedMarker(&b, plotLeft, plotBottom, palette)
 	}
 	b.WriteString(`</svg>`)
 	return b.String(), visualRenderMetrics{PlotLeft: plotLeft, PlotRight: visualPlotRight, WidestYAxisLabel: widest}
@@ -386,20 +440,20 @@ func visualReferences(spec VisualSpec) []string {
 	return refs
 }
 
-func drawVisualBadge(b *strings.Builder, level, badge string) {
+func drawVisualBadge(b *strings.Builder, level, badge string, palette VisualPalette) {
 	width := estimateVisualTextWidth(badge, visualFont) + 20
 	if width > 328 {
 		width = 328
 	}
-	fill, stroke, textFill := "#e8edfb", "#c9d6fb", "#2952cc"
+	fill, stroke, textFill := palette.Line, palette.Accent, palette.Deep
 	if level == "L3" {
-		fill, stroke, textFill = "#fff7e8", "#f0d3a8", "#b45309"
+		fill, stroke, textFill = palette.Line, palette.Muted, palette.Ink
 	}
 	fmt.Fprintf(b, `<rect x="16" y="10" width="%.1f" height="20" rx="10" fill="%s" stroke="%s"/>`, width, fill, stroke)
 	fmt.Fprintf(b, `<text x="26" y="24" font-size="%s" font-weight="700" fill="%s">%s</text>`, numberText(visualFont), textFill, html.EscapeString(badge))
 }
 
-func drawVisualLegend(b *strings.Builder, spec VisualSpec, y float64) float64 {
+func drawVisualLegend(b *strings.Builder, spec VisualSpec, y float64, palette VisualPalette) float64 {
 	x := float64(visualMargin)
 	lineY := y
 	for i, series := range spec.Series {
@@ -416,36 +470,37 @@ func drawVisualLegend(b *strings.Builder, spec VisualSpec, y float64) float64 {
 			x = float64(visualMargin)
 			lineY += 16
 		}
-		color := visualSeriesColor(i)
+		color := visualSeriesColor(i, palette)
 		fmt.Fprintf(b, `<rect x="%.1f" y="%.1f" width="10" height="3" rx="1.5" fill="%s"/>`, x, lineY-4, color)
-		fmt.Fprintf(b, `<text x="%.1f" y="%.1f" font-size="%s" fill="#5b6577">%s</text>`, x+14, lineY, numberText(visualFont), html.EscapeString(label))
+		fmt.Fprintf(b, `<text x="%.1f" y="%.1f" font-size="%s" fill="%s">%s</text>`, x+14, lineY, numberText(visualFont), palette.Muted, html.EscapeString(label))
 		x += itemWidth
 	}
 	return lineY
 }
 
-func drawVisualAxis(b *strings.Builder, plotLeft, plotTop, plotBottom float64, ticks []visualTick, yFor func(float64) float64) {
-	fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%d" y2="%.1f" stroke="#c9d2e0" stroke-width="1.5"/>`, plotLeft, plotBottom, visualPlotRight, plotBottom)
-	fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%.2f" y2="%.1f" stroke="#c9d2e0" stroke-width="1.5"/>`, plotLeft, plotTop, plotLeft, plotBottom)
+func drawVisualAxis(b *strings.Builder, plotLeft, plotTop, plotBottom float64, ticks []visualTick, yFor func(float64) float64, palette VisualPalette) {
+	fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%d" y2="%.1f" stroke="%s" stroke-width="1.5"/>`, plotLeft, plotBottom, visualPlotRight, plotBottom, palette.Line)
+	fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%.2f" y2="%.1f" stroke="%s" stroke-width="1.5"/>`, plotLeft, plotTop, plotLeft, plotBottom, palette.Line)
 	for _, tick := range ticks {
 		y := yFor(tick.value)
-		fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%d" y2="%.1f" stroke="#e2e7ef" stroke-width="1"/>`, plotLeft, y, visualPlotRight, y)
-		fmt.Fprintf(b, `<text x="%.2f" y="%.1f" text-anchor="end" font-size="%s" fill="#5b6577">%s</text>`, plotLeft-visualYAxisGap, y+4, numberText(visualFont), html.EscapeString(tick.label))
+		fmt.Fprintf(b, `<line x1="%.2f" y1="%.1f" x2="%d" y2="%.1f" stroke="%s" stroke-width="1"/>`, plotLeft, y, visualPlotRight, y, palette.Line)
+		fmt.Fprintf(b, `<text x="%.2f" y="%.1f" text-anchor="end" font-size="%s" fill="%s">%s</text>`, plotLeft-visualYAxisGap, y+4, numberText(visualFont), palette.Muted, html.EscapeString(tick.label))
 	}
 }
 
-func drawVisualTruncatedMarker(b *strings.Builder, plotLeft, plotBottom float64) {
-	fmt.Fprintf(b, `<g class="axis-truncated"><path d="M%.1f,%.1f L%.1f,%.1f L%.1f,%.1f L%.1f,%.1f" fill="none" stroke="#b45309" stroke-width="1.8"/><text x="%.1f" y="%.1f" text-anchor="end" font-size="%s" fill="#b45309">轴不从 0 起</text></g>`,
+func drawVisualTruncatedMarker(b *strings.Builder, plotLeft, plotBottom float64, palette VisualPalette) {
+	fmt.Fprintf(b, `<g class="axis-truncated"><path d="M%.1f,%.1f L%.1f,%.1f L%.1f,%.1f L%.1f,%.1f" fill="none" stroke="%s" stroke-width="1.8"/><text x="%.1f" y="%.1f" text-anchor="end" font-size="%s" fill="%s">轴不从 0 起</text></g>`,
 		plotLeft-6, plotBottom+2,
 		plotLeft-1, plotBottom-4,
 		plotLeft+4, plotBottom+2,
 		plotLeft+9, plotBottom-4,
+		palette.Accent,
 		float64(visualPlotRight)-4, plotBottom-4,
-		numberText(visualFont),
+		numberText(visualFont), palette.Deep,
 	)
 }
 
-func drawVisualBars(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plotBottom float64, yFor func(float64) float64, grouped bool) {
+func drawVisualBars(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plotBottom float64, yFor func(float64) float64, grouped bool, palette VisualPalette) {
 	series := spec.Series
 	if !grouped {
 		series = series[:1]
@@ -485,7 +540,7 @@ func drawVisualBars(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plot
 				x = groupCenter - (barWidth*float64(len(series)))/2 + barWidth*float64(s)
 				labelX = x + barWidth/2
 			}
-			fmt.Fprintf(b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="3" fill="%s"/>`, x, y, barWidth, height, visualSeriesColor(s))
+			fmt.Fprintf(b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="3" fill="%s"/>`, x, y, barWidth, height, visualSeriesColor(s, palette))
 			if n*len(series) <= 8 {
 				text := visualNumber(value)
 				labelY := top - 4
@@ -493,7 +548,7 @@ func drawVisualBars(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plot
 					labelY = top + 12
 				}
 				labelX = visualCenteredLabelX(labelX, estimateVisualTextWidth(text, visualFont))
-				fmt.Fprintf(b, `<text x="%.2f" y="%.2f" text-anchor="middle" font-size="%s" fill="#1b2332">%s</text>`, labelX, labelY, numberText(visualFont), html.EscapeString(text))
+				fmt.Fprintf(b, `<text x="%.2f" y="%.2f" text-anchor="middle" font-size="%s" fill="%s">%s</text>`, labelX, labelY, numberText(visualFont), palette.Ink, html.EscapeString(text))
 			}
 		}
 	}
@@ -514,7 +569,7 @@ func visualCenteredLabelX(x, width float64) float64 {
 	return x
 }
 
-func drawVisualLines(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plotBottom float64, yFor func(float64) float64) {
+func drawVisualLines(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plotBottom float64, yFor func(float64) float64, palette VisualPalette) {
 	if len(spec.Series) == 0 {
 		return
 	}
@@ -531,17 +586,17 @@ func drawVisualLines(b *strings.Builder, spec VisualSpec, plotLeft, plotTop, plo
 			x := plotLeft + (visualPlotRight-plotLeft)*float64(i)/float64(n-1)
 			y := yFor(point.Value)
 			fmt.Fprintf(&points, "%.2f,%.2f ", x, y)
-			fmt.Fprintf(b, `<circle cx="%.2f" cy="%.2f" r="3" fill="#ffffff" stroke="%s" stroke-width="2"/>`, x, y, visualSeriesColor(s))
+			fmt.Fprintf(b, `<circle cx="%.2f" cy="%.2f" r="3" fill="#ffffff" stroke="%s" stroke-width="2"/>`, x, y, visualSeriesColor(s, palette))
 		}
-		fmt.Fprintf(b, `<polyline points="%s" fill="none" stroke="%s" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`, strings.TrimSpace(points.String()), visualSeriesColor(s))
+		fmt.Fprintf(b, `<polyline points="%s" fill="none" stroke="%s" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`, strings.TrimSpace(points.String()), visualSeriesColor(s, palette))
 		last := series.Points[len(series.Points)-1]
 		lastX := float64(visualPlotRight)
 		lastY := yFor(last.Value)
-		fmt.Fprintf(b, `<text x="%.2f" y="%.2f" text-anchor="end" font-size="%s" font-weight="700" fill="%s">%s</text>`, lastX-2, lastY-5, numberText(visualFont), visualSeriesColor(s), html.EscapeString(visualNumber(last.Value)))
+		fmt.Fprintf(b, `<text x="%.2f" y="%.2f" text-anchor="end" font-size="%s" font-weight="700" fill="%s">%s</text>`, lastX-2, lastY-5, numberText(visualFont), visualSeriesColor(s, palette), html.EscapeString(visualNumber(last.Value)))
 	}
 }
 
-func drawVisualXLabels(b *strings.Builder, spec VisualSpec, plotLeft, height float64) {
+func drawVisualXLabels(b *strings.Builder, spec VisualSpec, plotLeft, height float64, palette VisualPalette) {
 	if len(spec.Series) == 0 {
 		return
 	}
@@ -557,7 +612,7 @@ func drawVisualXLabels(b *strings.Builder, spec VisualSpec, plotLeft, height flo
 		x := plotLeft + (visualPlotRight-plotLeft)*float64(i)/float64(n-1)
 		label := shortVisualLabel(point.Label, 8)
 		x = visualCenteredLabelX(x, estimateVisualTextWidth(label, visualFont))
-		fmt.Fprintf(b, `<text x="%.2f" y="%.1f" text-anchor="middle" font-size="%s" fill="#1b2332">%s</text>`, x, height-24, numberText(visualFont), html.EscapeString(label))
+		fmt.Fprintf(b, `<text x="%.2f" y="%.1f" text-anchor="middle" font-size="%s" fill="%s">%s</text>`, x, height-24, numberText(visualFont), palette.Ink, html.EscapeString(label))
 	}
 }
 
@@ -646,9 +701,11 @@ func visualAxisScale(minValue, maxValue float64, truncated bool) (axisMin, axisM
 	return axisMin, axisMax, step
 }
 
-func visualSeriesColor(index int) string {
-	colors := []string{"#2952cc", "#0f766e", "#b45309", "#7c3aed", "#be123c"}
-	return colors[index%len(colors)]
+func visualSeriesColor(index int, palette VisualPalette) string {
+	if len(palette.Series) == 0 {
+		palette = normalizeVisualPalette(palette)
+	}
+	return palette.Series[index%len(palette.Series)]
 }
 
 func visualNumber(value float64) string {
