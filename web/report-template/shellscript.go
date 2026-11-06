@@ -1,7 +1,8 @@
 package reporttemplate
 
-// visualShellScript is the template's shell injection block. It is emitted as
-// trusted JS so the pinned CSP hash covers exactly these bytes.
+// visualShellScript is the template's shell injection block plus the report
+// source-panel glue. It is emitted as trusted JS so the pinned CSP hash covers
+// exactly these bytes.
 const visualShellScript = `/* 目录跳转 + 浮动目录抽屉（右侧固定，仅纵向拖动） */
 (function(){
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -113,7 +114,7 @@ const visualShellScript = `/* 目录跳转 + 浮动目录抽屉（右侧固定�
   }
 
   /* ---------- 纵向拖动（X 轴锁定在 CSS 的 right 上） ---------- */
-  var EDGE = 8, SIZE = 46, DEFAULT_B = 78;
+  var EDGE = 8, SIZE = 46, DEFAULT_B = 22;
   var lastDragEnd = 0;
 
   function clampB(b){
@@ -174,6 +175,18 @@ const visualShellScript = `/* 目录跳转 + 浮动目录抽屉（右侧固定�
   for (var m = 0; m < closers.length; m++) {
     closers[m].addEventListener('click', function(){ close(); });
   }
+
+  var topBtn = drawer.querySelector('[data-toc-top]');
+  if (topBtn) {
+    topBtn.addEventListener('click', function(){
+      close(false);
+      var root = document.documentElement, prev = root.style.scrollBehavior;
+      root.style.scrollBehavior = 'auto';
+      window.scrollTo(0, 0);
+      setTimeout(function(){ root.style.scrollBehavior = prev; }, 0);
+      try { history.replaceState(null, '', location.href.split('#')[0]); } catch(err){}
+    });
+  }
   document.addEventListener('keydown', function(e){
     if (isOpen && (e.key === 'Escape' || e.keyCode === 27)) close();
   });
@@ -182,6 +195,7 @@ const visualShellScript = `/* 目录跳转 + 浮动目录抽屉（右侧固定�
     setBottom(readBottom());
   });
 })();
-(function(){var panel=document.querySelector(".c-source-panel"),shade=document.querySelector(".c-source-shade"),close=document.querySelector(".c-source-close"),title=document.querySelector(".c-source-title"),meta=document.querySelector(".c-source-meta"),link=document.querySelector(".c-source-original");if(!panel||!shade||!close)return;function hide(){panel.hidden=true;shade.hidden=true}document.querySelectorAll(".refs a.t[data-source-url]").forEach(function(a){a.addEventListener("click",function(e){e.preventDefault();title.textContent=this.getAttribute("data-source-title")||this.textContent;meta.textContent=this.getAttribute("data-source-meta")||"";var u=this.getAttribute("data-source-url");link.hidden=!u;if(u)link.href=u;panel.hidden=false;shade.hidden=false;close.focus()})});close.addEventListener("click",hide);shade.addEventListener("click",hide);document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!panel.hidden)hide()})})();`
 
-const visualShellScriptHash = "PetDdrNm3NBk0v92TPCeK0vrKC8gtIJONnCvedw1Ff0="
+(function(){var panel=document.querySelector(".c-source-panel"),shade=document.querySelector(".c-source-shade"),close=document.querySelector(".c-source-close"),title=document.querySelector(".c-source-title"),meta=document.querySelector(".c-source-meta"),link=document.querySelector(".c-source-original");if(!panel||!shade||!close)return;function hide(){panel.hidden=true;shade.hidden=true}document.querySelectorAll(".refs a.t[data-source-url]").forEach(function(a){a.addEventListener("click",function(){title.textContent=this.getAttribute("data-source-title")||this.textContent;meta.textContent=this.getAttribute("data-source-meta")||"";var u=this.getAttribute("data-source-url");link.hidden=!u;if(u)link.href=u;panel.hidden=false;shade.hidden=false;close.focus()})});close.addEventListener("click",hide);shade.addEventListener("click",hide);document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!panel.hidden)hide()})})();`
+
+const visualShellScriptHash = "DRlIu9gJp7UmunxaRWTuJKquIO1Y3XE9TYmRn/hqGV4="
