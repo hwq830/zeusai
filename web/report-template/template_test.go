@@ -57,7 +57,7 @@ func TestContentsControls(t *testing.T) {
 			t.Fatal(err)
 		}
 		html := string(out)
-		if strings.Count(html, `id="tocFab"`) != 1 || strings.Count(html, `id="tocList"`) != 1 || strings.Contains(html, `toc-top`) {
+		if strings.Count(html, `id="tocFab"`) != 1 || strings.Count(html, `id="tocList"`) != 1 || strings.Count(html, `<button class="toc-top"`) != 1 {
 			t.Fatalf("wrong contents controls for %s", lang)
 		}
 	}
@@ -268,5 +268,28 @@ func TestOldReportWithoutKeyFiguresHasNoCover(t *testing.T) {
 	}
 	if strings.Contains(string(out), `class="cover-stats"`) {
 		t.Fatal("old report must not gain an empty KPI block")
+	}
+}
+
+func TestSourceLinksUseRealURLsAndPageAnchors(t *testing.T) {
+	out, err := Render(Data{Title: "Links", Markdown: "## 一、市场\n\n正文 [1]。", Sources: []Source{{Index: 1, Title: "来源一", URL: "https://example.com/report", SiteName: "example.com"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	if strings.Contains(html, `href="#"`) {
+		t.Fatal("must not emit href=# source links")
+	}
+	if !strings.Contains(html, `href="https://example.com/report" target="_blank" rel="noopener nofollow"`) {
+		t.Fatal("refs must link to the real source URL")
+	}
+	if !strings.Contains(html, `<sup class="cite"><a href="#ref-1">[1]</a></sup>`) {
+		t.Fatal("citation sup must remain an in-page anchor")
+	}
+	if strings.Contains(html, `<sup class="cite"><a href="#ref-1" target="_blank"`) {
+		t.Fatal("citation sup must not open a new tab")
+	}
+	if !strings.Contains(html, `class="c-source-original" target="_blank" rel="noopener nofollow" hidden`) {
+		t.Fatal("source panel original link must not start as href=#")
 	}
 }

@@ -49,6 +49,8 @@ a{color:inherit}
 
 /* ===== 封面 ===== */
 .cover{position:relative;overflow:hidden;background:var(--deep);color:#fff;padding:clamp(28px,5vw,52px) clamp(20px,5vw,72px) clamp(38px,6vw,68px)}
+.cover{padding-left:0;padding-right:0}
+.cover-inner{max-width:1250px;margin:0 auto;padding:0 clamp(18px,4vw,40px)}
 .cover::before{content:"";position:absolute;right:-14%;top:-32%;width:62vw;height:62vw;border-radius:50%;
   background:radial-gradient(circle at 35% 35%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 62%);pointer-events:none}
 .brandline{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.62)}
@@ -56,13 +58,14 @@ a{color:inherit}
 .brandline .dot b{width:12px;height:12px;border-radius:50%;background:var(--accent);display:inline-block}
 .cover h1{font-family:var(--serif);font-weight:700;font-size:clamp(38px,7vw,86px);line-height:1.05;letter-spacing:-.02em;margin:clamp(32px,5vw,58px) 0 0}
 .cover h1 em{font-style:normal;color:var(--accent)}
-.cover .sub{font-size:clamp(15px,1.9vw,20px);color:rgba(255,255,255,.8);max-width:36em;margin:22px 0 0;line-height:1.65}
+.cover .sub{font-size:clamp(15px,1.9vw,20px);color:rgba(255,255,255,.8);max-width:100%;margin:22px 0 0;line-height:1.65}
 .cover .meta{display:flex;gap:40px;flex-wrap:wrap;margin-top:clamp(34px,5vw,52px);padding-top:22px;border-top:1px solid rgba(255,255,255,.14);font-size:13px;color:rgba(255,255,255,.55)}
 .cover .meta div span{display:block;color:#fff;font-size:15px;margin-top:4px}
 .cover-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:rgba(255,255,255,.13);margin-top:clamp(30px,4vw,46px);border:1px solid rgba(255,255,255,.13)}
 .cover-stats div{background:var(--deep);padding:18px 20px}
 .cover-stats b{display:block;font-family:var(--mono);font-size:clamp(21px,2.7vw,30px);line-height:1.1;color:var(--accent);letter-spacing:-.02em}
 .cover-stats span{display:block;font-size:12px;color:rgba(255,255,255,.6);margin-top:7px;line-height:1.5}
+
 
 /* ===== 骨架：左侧目录 + 主内容 ===== */
 .shell{display:grid;grid-template-columns:238px minmax(0,1fr);gap:clamp(24px,4vw,64px);max-width:1250px;margin:0 auto;padding:0 clamp(18px,4vw,40px) 80px}
@@ -234,8 +237,6 @@ sup.cite{font-size:.68em;line-height:0;vertical-align:super}
 sup.cite a{font-family:var(--mono);color:var(--deep3);text-decoration:none;padding:0 2px}
 sup.cite a:hover{color:var(--accent-deep)}
 footer{border-top:1px solid var(--line);padding:26px 0 0;margin-top:8px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
-.up{position:fixed;right:22px;bottom:22px;width:42px;height:42px;border-radius:50%;background:var(--deep);color:var(--accent);border:none;cursor:pointer;font-size:16px;display:grid;place-items:center;opacity:0;pointer-events:none;transition:.25s;z-index:80;box-shadow:0 6px 20px rgba(14,42,33,.3)}
-.up.show{opacity:1;pointer-events:auto}
 code{font-family:var(--mono);font-size:12.5px;background:#EDE9DF;padding:1px 6px;border-radius:3px;color:#4A3F2A}
 pre{background:#1B211D;color:#D9E2DC;padding:16px 18px;border-radius:4px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.7;margin:16px 0}
 pre .c{color:#7E8C82}
@@ -263,10 +264,11 @@ pre .c{color:#7E8C82}
 @media print{
   /* 关键：强制打印背景色与背景图，否则深色封面会变成白底白字 */
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
-  .progress,nav.side,.up,.toc-fab,.toc-drawer{display:none!important}
+  .progress,nav.side,.toc-fab,.toc-drawer{display:none!important}
   body{background:#fff}
   .shell{display:block;max-width:none;padding:0}
-  .cover{break-after:page;padding:16mm 14mm 18mm}
+  .cover{break-after:page;padding:16mm 0 18mm}
+  .cover-inner{padding:0 14mm}
   /* 分页控制：标题不落单，图表/表格/卡片不跨页 */
   .sechead,h2,h3,h4{break-after:avoid}
   figure,.tw,table,.calc,.rec,.note,.card,.stat,.timeline,.funnel .tier{break-inside:avoid}
@@ -290,7 +292,7 @@ pre .c{color:#7E8C82}
 </head>
 <body>
 <div class="progress"><i id="bar"></i></div>
-<header class="cover">
+<header class="cover"><div class="cover-inner">
   <div class="brandline">
     <span class="dot"><b></b>{{.Kicker}}</span>
     <span>{{if .CompletedAt}}{{.CompletedAt}}{{end}}</span>
@@ -313,7 +315,7 @@ pre .c{color:#7E8C82}
     {{- if .SharedBy}}<div>分享<span>{{printf .L.SharedBy .SharedBy}}</span></div>{{end}}
     {{- if .Share}}<div><span class="c-ai-badge">{{.L.AILabel}}</span></div>{{end}}
   </div>
-</header>
+</div></header>
 <div class="shell">
   <nav class="side" id="nav">
     <div class="nt">{{.L.Contents}}</div>
@@ -336,11 +338,10 @@ pre .c{color:#7E8C82}
       <button class="c-source-close" type="button" aria-label="{{.L.Sources}}">×</button>
       <h3 class="c-source-title"></h3>
       <p class="c-source-meta"></p>
-      <a class="c-source-original" href="#" target="_blank" rel="noopener nofollow">{{.L.Sources}} ↗</a>
+      <a class="c-source-original" target="_blank" rel="noopener nofollow" hidden>{{.L.Sources}} ↗</a>
     </aside>
   </main>
 </div>
-<button class="up" id="up" aria-label="{{.L.Contents}}">↑</button>
 <button class="toc-button" type="button" hidden aria-hidden="true"></button>
 <a href="#src-1" hidden aria-hidden="true"></a>
 <template class="c-legacy-table"><table></table></template>
@@ -351,15 +352,17 @@ pre .c{color:#7E8C82}
 {{- end}}
 <style>
 /* ===== 浮动目录按钮（<=900px）：图标态、右侧固定、仅纵向拖动 ===== */
-.toc-fab{position:fixed;right:22px;bottom:78px;width:46px;height:46px;z-index:86;
+.toc-fab{position:fixed;right:22px;bottom:22px;width:46px;height:46px;z-index:86;
   display:none;align-items:center;justify-content:center;
   background:rgba(14,42,33,.94);border:1px solid rgba(255,255,255,.14);border-radius:50%;
   padding:0;cursor:ns-resize;touch-action:none;user-select:none;-webkit-user-select:none;
   -webkit-tap-highlight-color:transparent;
   box-shadow:0 8px 24px rgba(14,42,33,.3);
-  transition:transform .16s,box-shadow .16s;backdrop-filter:blur(6px)}
+  opacity:.55;transition:transform .16s,box-shadow .16s,opacity .2s;backdrop-filter:blur(6px)}
 .toc-fab.dragging{cursor:grabbing;transition:none;box-shadow:0 14px 34px rgba(14,42,33,.45)}
 .toc-fab:active{transform:scale(.94)}
+/* 空闲半透明，悬停/聚焦/拖动时恢复不透明 */
+.toc-fab:hover,.toc-fab:focus-visible,.toc-fab:active,.toc-fab.dragging{opacity:1}
 .toc-fab .bars{display:flex;flex-direction:column;gap:3px;pointer-events:none}
 .toc-fab .bars i{display:block;width:16px;height:2px;background:var(--accent);border-radius:1px}
 .toc-fab .bars i:nth-child(2){width:12px}
@@ -385,7 +388,13 @@ pre .c{color:#7E8C82}
 .toc-close:active{opacity:.9}
 .toc-close:focus-visible{outline:2px solid var(--accent-deep);outline-offset:2px}
 .toc-list a:focus-visible{outline:2px solid var(--accent-deep);outline-offset:-2px}
-.toc-list{flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:10px 12px 24px}
+.toc-top{display:flex;align-items:baseline;gap:12px;width:100%;flex:none;
+  background:none;border:0;border-top:1px solid var(--line-soft);font:inherit;font-size:14.5px;
+  color:var(--ink2);padding:14px 22px calc(14px + env(safe-area-inset-bottom,0px));
+  cursor:pointer;text-align:left}
+.toc-top i{font-style:normal;font-family:var(--mono);font-size:13px;color:var(--accent-deep);flex:none}
+.toc-top:active{background:rgba(14,42,33,.05)}
+.toc-list{flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:10px 12px 8px}
 .toc-list a{display:flex;gap:12px;align-items:baseline;text-decoration:none;color:var(--ink2);
   font-size:14.5px;padding:13px 12px;border-radius:5px;border-left:2px solid transparent}
 .toc-list a i{font-family:var(--mono);font-size:11px;color:var(--muted);font-style:normal;
@@ -404,6 +413,7 @@ body.toc-locked{overflow:hidden}
   <aside class="toc-panel" role="dialog" aria-modal="true" aria-label="{{.L.Contents}}">
     <div class="toc-head"><span>{{.L.Contents}}</span><button class="toc-close" type="button" data-toc-close aria-label="{{.L.Close}}">×</button></div>
     <nav class="toc-list" id="tocList"></nav>
+    <button class="toc-top" type="button" data-toc-top><i>↑</i><span>{{.L.BackToTop}}</span></button>
   </aside>
 </div>
 <script>{{.ShellScript}}</script>
