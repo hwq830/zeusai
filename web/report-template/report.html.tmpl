@@ -307,7 +307,7 @@ pre .c{color:#7E8C82}
   <div class="cover-stats">
     {{- range .KeyFigures}}
     <div><b>{{.Value}}<u class="c-kpi-unit">{{.Unit}}</u></b><span>{{.Label}}</span>
-      {{- if and .Cite (le .Cite $.SourceCount)}}<span class="c-kpi-cite"><a href="#ref-{{.Cite}}">[{{.Cite}}]</a></span>{{end}}
+      {{- if and .Cite (le .Cite $.SourceCount)}}{{$cite := .Cite}}{{$source := index $.SourcesByIndex $cite}}<span class="c-kpi-cite">{{if $source.URL}}<a href="#ref-{{$cite}}" data-source-url="{{$source.URL}}" data-source-title="{{$source.Title}}" data-source-site="{{$source.SiteName}}" data-source-meta="{{$source.SiteName}}">[{{$cite}}]</a>{{else}}<a href="#ref-{{$cite}}">[{{$cite}}]</a>{{end}}</span>{{end}}
     </div>
     {{- end}}
   </div>
@@ -356,7 +356,7 @@ pre .c{color:#7E8C82}
 {{- end}}
 <style>
 /* ===== 浮动目录按钮（<=900px）：图标态、右侧固定、仅纵向拖动 ===== */
-.toc-fab{position:fixed;right:22px;bottom:22px;width:46px;height:46px;z-index:86;
+.toc-fab{position:fixed;right:22px;bottom:calc(22px + var(--app-bottom-inset,0px));width:46px;height:46px;z-index:86;
   display:none;align-items:center;justify-content:center;
   background:rgba(14,42,33,.94);border:1px solid rgba(255,255,255,.14);border-radius:50%;
   padding:0;cursor:ns-resize;touch-action:none;user-select:none;-webkit-user-select:none;
@@ -374,11 +374,11 @@ pre .c{color:#7E8C82}
 @media(max-width:420px){.toc-fab{right:16px}}
 
 /* ===== 抽屉：浅色、从右侧滑出 ===== */
-.toc-drawer{position:fixed;inset:0;z-index:96;visibility:hidden;pointer-events:none}
+.toc-drawer{position:fixed;inset:0;z-index:96;visibility:hidden;pointer-events:none;padding-bottom:calc(var(--app-bottom-inset,0px) + 16px)}
 .toc-drawer.open{visibility:visible;pointer-events:auto}
 .toc-backdrop{position:absolute;inset:0;background:rgba(10,26,20,.45);opacity:0;transition:opacity .24s}
 .toc-drawer.open .toc-backdrop{opacity:1}
-.toc-panel{position:absolute;right:0;top:0;bottom:0;width:min(82vw,320px);
+.toc-panel{position:absolute;right:0;top:0;bottom:calc(var(--app-bottom-inset,0px));width:min(82vw,320px);
   background:var(--card);color:var(--ink);
   display:flex;flex-direction:column;transform:translateX(102%);
   transition:transform .28s cubic-bezier(.22,.85,.3,1);
@@ -394,11 +394,11 @@ pre .c{color:#7E8C82}
 .toc-list a:focus-visible{outline:2px solid var(--accent-deep);outline-offset:-2px}
 .toc-top{display:flex;align-items:baseline;gap:12px;width:100%;flex:none;
   background:none;border:0;border-top:1px solid var(--line-soft);font:inherit;font-size:14.5px;
-  color:var(--ink2);padding:14px 22px calc(14px + env(safe-area-inset-bottom,0px));
+  color:var(--ink2);padding:14px 22px calc(14px + var(--app-bottom-inset,0px) + env(safe-area-inset-bottom,0px));
   cursor:pointer;text-align:left}
 .toc-top i{font-style:normal;font-family:var(--mono);font-size:13px;color:var(--accent-deep);flex:none}
 .toc-top:active{background:rgba(14,42,33,.05)}
-.toc-list{flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:10px 12px 8px}
+.toc-list{flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:10px 12px calc(8px + var(--app-bottom-inset,0px) + 16px)}
 .toc-list a{display:flex;gap:12px;align-items:baseline;text-decoration:none;color:var(--ink2);
   font-size:14.5px;padding:13px 12px;border-radius:5px;border-left:2px solid transparent}
 .toc-list a i{font-family:var(--mono);font-size:11px;color:var(--muted);font-style:normal;
