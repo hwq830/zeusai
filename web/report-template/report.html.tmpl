@@ -251,12 +251,13 @@ pre .c{color:#7E8C82}
   .sechead .en{display:none}
   .sechead{align-items:flex-start}
   .cover-stats{grid-template-columns:1fr 1fr}
-  figure{padding:16px 13px 13px}
   .brief{font-size:12px}
   .brief .k{min-width:88px}
   .funnel .t2,.funnel .t3{width:100%}
-  #c1wrap,#c2wrap,#c3wrap,#c5wrap,#c6wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}
-  #c1 svg,#c2 svg,#c3 svg,#c5 svg,#c6 svg{min-width:470px}
+  /* 图表保留卡片留白；画布宽度已在 JS 侧按视口收窄，无需横滑或放大字号 */
+  figure{padding:16px 13px 13px}
+  #c1wrap,#c2wrap,#c3wrap,#c5wrap,#c6wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  #c1 svg,#c2 svg,#c3 svg,#c5 svg,#c6 svg{min-width:0}
 }
 @page{margin:14mm 12mm}
 @media print{
@@ -273,21 +274,14 @@ pre .c{color:#7E8C82}
   a{text-decoration:none;color:inherit}
   p,li{orphans:3;widows:3}
 }
-
-/* ===== c- additions: share / source / chart wrappers ===== */
+</style><style>
+/* ===== c- additions: share / source ===== */
 .c-cta{display:inline-block;margin-top:10px;padding:10px 18px;border-radius:22px;background:var(--accent);color:var(--deep);text-decoration:none;font-weight:650}
 .c-ai{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--accent-deep);text-transform:uppercase}
 .c-ai-badge{display:inline-block;border:1px solid rgba(255,255,255,.45);border-radius:20px;padding:3px 10px;font-size:11px;letter-spacing:.08em;color:rgba(255,255,255,.86)}
-.c-share-meta{color:rgba(255,255,255,.62)}
-.c-chart-wrap{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}
-.c-chart-wrap svg{min-width:470px;display:block;width:100%;height:auto;overflow:visible}
-@media(min-width:641px){.c-chart-wrap svg{min-width:0}}
-.c-chart-data{display:none}
 .c-source-panel{position:fixed;z-index:50;left:50%;bottom:0;transform:translateX(-50%);width:min(680px,100%);background:var(--card);border-radius:18px 18px 0 0;padding:20px;box-shadow:0 -4px 24px rgba(14,42,33,.25)}
 .c-source-shade{position:fixed;inset:0;background:rgba(10,26,20,.45);z-index:49}
-.c-source-panel h3{font-size:18px;margin:0 0 8px}
-.c-source-panel .c-source-meta{font-size:13px;color:var(--muted);margin-top:8px}
-.c-source-panel .c-source-close{float:right;border:0;background:none;font-size:24px;cursor:pointer}
+.c-source-panel h3{font-size:18px;margin:0 0 8px}.c-source-panel .c-source-meta{font-size:13px;color:var(--muted);margin-top:8px}.c-source-panel .c-source-close{float:right;border:0;background:none;font-size:24px;cursor:pointer}
 @media print{thead{display:table-header-group}tr{break-inside:avoid}.c-source-panel,.c-source-shade{display:none!important}}
 </style>
 </head>

@@ -12,6 +12,12 @@ const visualChartScript = `(function(){
     return (typeof c==="string"&&c.indexOf("var(")===0)?cssv(c.slice(4,-1)):c;
   }
   function svgIn(id,w,h){var s=mk("svg",{viewBox:"0 0 "+w+" "+h,role:"img"},host(id));return s;}
+  /* 画布宽度随视口收窄：手机上改 viewBox 宽度而不是放大字号 */
+  function chartW(base){
+    var vw = window.innerWidth || 1024;
+    return Math.max(360, Math.min(base, Math.round((vw - 62) * 1.27)));
+  }
+
   function niceMax(v){var p=Math.pow(10,Math.floor(Math.log10(v)));var n=Math.ceil(v/p*2)/2*p;return n;}
   function txt(s,x,y,cls,content,anchor){var t=mk("text",{x:x,y:y,class:cls},s);if(anchor)t.setAttribute("text-anchor",anchor);t.textContent=content;return t;}
 
@@ -19,7 +25,7 @@ const visualChartScript = `(function(){
      用法：chartBar('容器id', {data:[{label,value}], unit:'单位', highlight:'last'})
   */
   function chartBar(id,cfg){
-    var data=cfg.data, W=760, H=cfg.height||320, L=58, R=24, T=32, B=54;
+    var data=cfg.data, W=chartW(760), H=cfg.height||320, L=58, R=24, T=32, B=54;
     var s=svgIn(id,W,H);
     var max=cfg.max||niceMax(Math.max.apply(null,data.map(function(d){return d.value;})));
     var iw=W-L-R, ih=H-T-B, step=iw/data.length, bw=step*0.46;
@@ -46,7 +52,7 @@ const visualChartScript = `(function(){
      用法：chartHBar('容器id', {data:[{label,value,note}], unit:'单位'})
   */
   function chartHBar(id,cfg){
-    var data=cfg.data, W=760, H=30+data.length*42+46, L=cfg.labelWidth||200, R=70, T=28;
+    var data=cfg.data, W=chartW(760), H=30+data.length*42+46, L=cfg.labelWidth||200, R=70, T=28;
     var s=svgIn(id,W,H);
     var max=cfg.max||niceMax(Math.max.apply(null,data.map(function(d){return d.value;})));
     var x=function(v){return L+(v/max)*(W-L-R);};
@@ -69,7 +75,7 @@ const visualChartScript = `(function(){
      用法：chartQuadrant('容器id', {points:[{x:0~1,y:0~1,label,sub,color}], xLabel, yLabel, corners})
   */
   function chartQuadrant(id,cfg){
-    var W=760,H=440,L=82,R=34,T=44,B=64;
+    var W=chartW(760),H=440,L=82,R=34,T=44,B=64;
     var s=svgIn(id,W,H);
     var iw=W-L-R, ih=H-T-B, cx=L+iw/2, cy=T+ih/2;
     mk("rect",{x:L,y:T,width:iw/2,height:ih/2,fill:"#FBF3EE"},s);
@@ -149,7 +155,7 @@ const visualChartScript = `(function(){
       }];
     }
     var labels = cfg.labels || (cfg.data||[]).map(function(d){ return d.label; });
-    var W=760, H=cfg.height||330, L=58, R=24, T=cfg.series?44:34, B=54;
+    var W=chartW(760), H=cfg.height||330, L=58, R=24, T=cfg.series?44:34, B=54;
     var s=svgIn(id,W,H);
     var flat=[]; series.forEach(function(se){ flat=flat.concat(se.values); });
     var max=cfg.max||niceMax(Math.max.apply(null,flat));
@@ -278,4 +284,4 @@ const visualChartScript = `(function(){
 
 // visualChartScriptHash is pinned; TestVisualChartScriptHashIsPinned fails if
 // the script bytes change without updating this value.
-const visualChartScriptHash = "qPoPtHQO/O6utPDF/8Fpn+Yl0Jf2nEDR6Usmsw4bpJ4="
+const visualChartScriptHash = "TXOIX6Lw4Qklwas74G0PjC7tx7fZLPDfe4dhQbHzpwk="
