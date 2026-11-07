@@ -17,12 +17,14 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/adminapi"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/pagetemplate"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
+	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
 func main() {
@@ -63,6 +65,11 @@ func run(log *slog.Logger) error {
 	defer rdb.Close()
 
 	q := db.New(pool)
+	pageTemplates := pagetemplate.New(q, pool, providers.PDF(cfg))
+	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
+		log.Warn("page template bootstrap failed", "err", err)
+	}
+	reporttemplate.SetProvider(pageTemplates)
 	notifier, err := providers.Notifier(cfg, q, log)
 	if err != nil {
 		return err
@@ -87,6 +94,7 @@ func run(log *slog.Logger) error {
 		LLMProvider: cfg.LLMProvider, ModelGWConfig: cfg.ModelGWConfig, PublicBaseURL: cfg.PublicBaseURL,
 		SearchProvider: cfg.SearchProvider, Keys: keys,
 		StaticDir: cfg.AdminStaticDir, Blob: providers.Blob(cfg), Push: notifier, Notify: notifier,
+		PageTemplates: pageTemplates,
 	}
 	hs := &http.Server{Addr: cfg.AdminHTTPAddr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {

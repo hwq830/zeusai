@@ -16,11 +16,13 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/httpapi"
+	"github.com/hwq830/zeusai/server/internal/pagetemplate"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/workflows"
+	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
 func main() {
@@ -56,7 +58,14 @@ func run(log *slog.Logger) error {
 	}
 	defer tc.Close()
 
-	mod, err := providers.Moderation(cfg, db.New(pool), log)
+	q := db.New(pool)
+	pageTemplates := pagetemplate.New(q, pool, providers.PDF(cfg))
+	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
+		log.Warn("page template bootstrap failed", "err", err)
+	}
+	reporttemplate.SetProvider(pageTemplates)
+
+	mod, err := providers.Moderation(cfg, q, log)
 	if err != nil {
 		return err
 	}

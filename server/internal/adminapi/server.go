@@ -27,6 +27,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
+	"github.com/hwq830/zeusai/server/internal/pagetemplate"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
@@ -59,6 +60,8 @@ type Server struct {
 	Keys *secrets.Keys
 	// PublicBaseURL builds share links.
 	PublicBaseURL string
+	// PageTemplates stores and publishes page layouts; nil disables those endpoints.
+	PageTemplates *pagetemplate.Store
 	// StaticDir serves the built console; empty serves only the API.
 	StaticDir string
 	Now       func() time.Time
@@ -190,11 +193,13 @@ const (
 	PermContentRead = "content.read"
 	// Re-run briefings and reports, pause subscriptions, work the exception queue.
 	PermContentWrite = "content.write"
+	// Upload, validate, publish and roll back page templates.
+	PermPageTemplates = "page_templates.write"
 )
 
 var rolePerms = map[string][]string{
-	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys, PermModels, PermContentRead, PermContentWrite},
-	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig, PermContentRead, PermContentWrite},
+	"owner":     {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermAdmins, PermFeedback, PermCampaigns, PermCampaignsApprove, PermConfig, PermConfigManage, PermConfigApprove, PermProviderKeys, PermModels, PermContentRead, PermContentWrite, PermPageTemplates},
+	"operator":  {PermUsers, PermTemplates, PermConnectors, PermModeration, PermTasks, PermFeedback, PermCampaigns, PermConfig, PermContentRead, PermContentWrite, PermPageTemplates},
 	"moderator": {PermModeration, PermFeedback, PermContentRead},
 	"viewer":    {},
 }
