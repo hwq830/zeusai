@@ -2,6 +2,7 @@ package adminapi_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/adminapi"
 	"github.com/hwq830/zeusai/server/internal/db"
+	"github.com/hwq830/zeusai/server/internal/pagetemplate"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
@@ -136,4 +138,142 @@ func TestPageTemplateWriteNeedsPermission(t *testing.T) {
 	// Reads are open to every role; writes need page_templates.write.
 	h.do("GET", "/admin/v1/page-templates", nil, 200, nil)
 	h.do("POST", "/admin/v1/page-templates/x/versions", map[string]any{"files": map[string]string{"report.html.tmpl": "x"}}, 403, nil)
+}
+
+// gateVerifier lets a test force a verification outcome.
+type gateVerifier struct {
+	result pagetemplate.VerifyResult
+	err    error
+}
+
+func (g gateVerifier) Verify(context.Context, []byte) (pagetemplate.VerifyResult, error) {
+	return g.result, g.err
+}
+
+func okGate() pagetemplate.VerifyResult {
+	var r pagetemplate.VerifyResult
+	r.Viewport.OK, r.Viewport.ScrollWidth, r.Viewport.InnerWidth = true, 390, 390
+	r.PDF.OK, r.PDF.Bytes = true, 120000
+	return r
+}
+
+func uploadTemplateVersion(t *testing.T, h *harness, templateID, marker string) pageTemplateVersion {
+	t.Helper()
+	files := reporttemplate.BuiltinFiles()
+	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], ":root{", ":root{"+marker, 1)
+	var upload pageTemplateVersion
+	h.do("POST", "/admin/v1/page-templates/"+templateID+"/versions", map[string]any{"files": files}, 201, &upload)
+	return upload
+}
+
+func firstTemplateID(t *testing.T, h *harness) string {
+	t.Helper()
+	var list pageTemplateList
+	h.do("GET", "/admin/v1/page-templates", nil, 200, &list)
+	if len(list.Items) != 1 {
+		t.Fatalf("templates: %+v", list.Items)
+	}
+	return list.Items[0].Id
+}
+
+func TestPageTemplateGateFailsClosedWhenVerifierUnreachable(t *testing.T) {
+	h := setupWith(t, func(s *adminapi.Server) {
+		s.PageTemplates.Verifier = gateVerifier{err: errors.New("dial tcp 10.0.0.5:8090: connect: connection refused")}
+		s.PageTemplates.VerifyRequired = true
+	})
+	h.createOwner("owner@zeus.test", "correct-horse-battery")
+	h.login("owner@zeus.test", "correct-horse-battery")
+	templateID := firstTemplateID(t, h)
+	upload := uploadTemplateVersion(t, h, templateID, "--gate-closed:1;")
+
+	var validated pageTemplateVersion
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/validate", nil, 200, &validated)
+	if validated.Status != "draft" || validated.Validation == nil || validated.Validation.Passed {
+		t.Fatalf("validate: %+v", validated)
+	}
+	status := map[string]string{}
+	for _, c := range validated.Validation.Checks {
+		status[c.Id] = c.Status
+	}
+	if status["viewport"] != "failed" || status["pdf"] != "failed" {
+		t.Fatalf("checks: %+v", validated.Validation.Checks)
+	}
+	var e struct{ Code, Message string }
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/publish", nil, 400, &e)
+	if !strings.Contains(e.Message, "页面校验服务不可达") && !strings.Contains(e.Message, "校验") {
+		t.Fatalf("publish error: %+v", e)
+	}
+}
+
+func TestPageTemplateGateOptionalSkipsAndAudits(t *testing.T) {
+	h := setupWith(t, func(s *adminapi.Server) {
+		s.PageTemplates.Verifier = gateVerifier{err: errors.New("connection refused")}
+		s.PageTemplates.VerifyRequired = false
+	})
+	h.createOwner("owner@zeus.test", "correct-horse-battery")
+	h.login("owner@zeus.test", "correct-horse-battery")
+	templateID := firstTemplateID(t, h)
+	upload := uploadTemplateVersion(t, h, templateID, "--gate-optional:1;")
+
+	var validated pageTemplateVersion
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/validate", nil, 200, &validated)
+	if validated.Status != "validated" || validated.Validation == nil || !validated.Validation.Passed {
+		t.Fatalf("validate: %+v", validated)
+	}
+	status := map[string]string{}
+	for _, c := range validated.Validation.Checks {
+		status[c.Id] = c.Status
+	}
+	if status["viewport"] != "skipped" || status["pdf"] != "skipped" {
+		t.Fatalf("checks: %+v", validated.Validation.Checks)
+	}
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/publish", nil, 200, nil)
+
+	// The audit row records that verification was skipped.
+	var detail []byte
+	if err := h.pool.QueryRow(context.Background(),
+		"SELECT detail FROM page_template_audit WHERE action = 'publish' ORDER BY at DESC LIMIT 1").Scan(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(detail), "unverified") {
+		t.Fatalf("audit detail: %s", detail)
+	}
+}
+
+func TestPageTemplateGateRejectsOverflow(t *testing.T) {
+	h := setupWith(t, func(s *adminapi.Server) {
+		r := okGate()
+		r.Viewport.OK, r.Viewport.ScrollWidth, r.Viewport.InnerWidth = false, 520, 390
+		s.PageTemplates.Verifier = gateVerifier{result: r}
+	})
+	h.createOwner("owner@zeus.test", "correct-horse-battery")
+	h.login("owner@zeus.test", "correct-horse-battery")
+	templateID := firstTemplateID(t, h)
+	upload := uploadTemplateVersion(t, h, templateID, "--gate-overflow:1;")
+
+	var validated pageTemplateVersion
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/validate", nil, 200, &validated)
+	if validated.Validation == nil || validated.Validation.Passed {
+		t.Fatalf("validate: %+v", validated)
+	}
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/publish", nil, 400, nil)
+}
+
+func TestPageTemplateGateRejectsEmptyPDF(t *testing.T) {
+	h := setupWith(t, func(s *adminapi.Server) {
+		r := okGate()
+		r.PDF.OK, r.PDF.Error = false, "打印结果不是 PDF"
+		s.PageTemplates.Verifier = gateVerifier{result: r}
+	})
+	h.createOwner("owner@zeus.test", "correct-horse-battery")
+	h.login("owner@zeus.test", "correct-horse-battery")
+	templateID := firstTemplateID(t, h)
+	upload := uploadTemplateVersion(t, h, templateID, "--gate-pdf:1;")
+
+	var validated pageTemplateVersion
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/validate", nil, 200, &validated)
+	if validated.Validation == nil || validated.Validation.Passed {
+		t.Fatalf("validate: %+v", validated)
+	}
+	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/publish", nil, 400, nil)
 }

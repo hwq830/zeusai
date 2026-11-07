@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hwq830/zeusai/server/internal/pdf"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
@@ -73,7 +72,7 @@ func FixtureData() reporttemplate.Data {
 
 // RunGate executes the eight publish checks. A skipped check (no headless browser available)
 // is not a failure; any failed check blocks publishing.
-func RunGate(ctx context.Context, kind string, files map[string]string, hashes []string, pdfRenderer pdf.Renderer) (Validation, []string) {
+func RunGate(ctx context.Context, kind string, files map[string]string, hashes []string, verifier Verifier, verifyRequired bool) (Validation, []string) {
 	result := Validation{RenderedAt: time.Now().UTC()}
 	checks := make([]Check, 0, 8)
 	add := func(id, name, status, detail string) {
@@ -132,7 +131,8 @@ func RunGate(ctx context.Context, kind string, files map[string]string, hashes [
 		add("external", "无外链资源", CheckPassed, "未发现外部资源")
 	}
 
-	add("viewport", "390px 无横向溢出", CheckSkipped, "API 进程没有 headless 浏览器，跳过视口检查")
+	viewportCheck, pdfCheck := verifyPage(ctx, out, renderErr, verifier, verifyRequired)
+	add("viewport", viewportCheck.Name, viewportCheck.Status, viewportCheck.Detail)
 
 	if result.DurationMS >= 2000 {
 		add("budget", "渲染耗时与体积", CheckFailed, fmt.Sprintf("%d ms，超过 2s", result.DurationMS))
@@ -144,15 +144,7 @@ func RunGate(ctx context.Context, kind string, files map[string]string, hashes [
 		add("budget", "渲染耗时与体积", CheckFailed, "渲染失败")
 	}
 
-	if pdfRenderer == nil {
-		add("pdf", "PDF 渲染", CheckSkipped, "未配置 PDF 渲染器，跳过")
-	} else if renderErr != nil {
-		add("pdf", "PDF 渲染", CheckFailed, "网页渲染失败，无法打印")
-	} else if !validPDF(ctx, pdfRenderer, out) {
-		add("pdf", "PDF 渲染", CheckFailed, "打印结果为空或不是 PDF")
-	} else {
-		add("pdf", "PDF 渲染", CheckPassed, "PDF 非空")
-	}
+	add("pdf", pdfCheck.Name, pdfCheck.Status, pdfCheck.Detail)
 
 	// Structure is a warning: a new layout may legitimately change these counts, but a large
 	// drift is worth showing next to the version.
@@ -192,12 +184,56 @@ func renderWithTimeout(tpl *reporttemplate.Template, data reporttemplate.Data, t
 	}
 }
 
-func validPDF(ctx context.Context, renderer pdf.Renderer, html []byte) bool {
-	out, err := renderer.Render(ctx, html)
-	if err != nil || len(out) < 1000 {
-		return false
+// verifyPage asks the orchestrator (or an injected verifier) for the layout and print
+// checks. Fail closed by default: no verifier or an unreachable one blocks publishing unless
+// ZEUS_PAGE_TEMPLATE_VERIFY_REQUIRED=false was set explicitly.
+func verifyPage(ctx context.Context, page []byte, renderErr error, verifier Verifier, required bool) (Check, Check) {
+	viewport := Check{ID: "viewport", Name: "390px 无横向溢出"}
+	printed := Check{ID: "pdf", Name: "PDF 渲染"}
+	if renderErr != nil {
+		viewport.Status, viewport.Detail = CheckFailed, "网页渲染失败，无法校验视口"
+		printed.Status, printed.Detail = CheckFailed, "网页渲染失败，无法打印"
+		return viewport, printed
 	}
-	return strings.HasPrefix(string(out), "%PDF")
+	skipOrFail := func(detail string) {
+		if required {
+			viewport.Status, viewport.Detail = CheckFailed, detail+"（ZEUS_PAGE_TEMPLATE_VERIFY_REQUIRED=true，已阻断发布）"
+			printed.Status, printed.Detail = CheckFailed, detail+"（ZEUS_PAGE_TEMPLATE_VERIFY_REQUIRED=true，已阻断发布）"
+			return
+		}
+		viewport.Status, viewport.Detail = CheckSkipped, detail+"（ZEUS_PAGE_TEMPLATE_VERIFY_REQUIRED=false，跳过）"
+		printed.Status, printed.Detail = CheckSkipped, detail+"（ZEUS_PAGE_TEMPLATE_VERIFY_REQUIRED=false，跳过）"
+	}
+	if verifier == nil {
+		skipOrFail("未配置页面校验服务（ZEUS_PAGE_TEMPLATE_VERIFY_URL）")
+		return viewport, printed
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, VerifyTimeout)
+	defer cancel()
+	result, err := verifier.Verify(verifyCtx, page)
+	if err != nil {
+		skipOrFail("页面校验服务不可达：" + err.Error())
+		return viewport, printed
+	}
+	if result.Viewport.OK {
+		viewport.Status, viewport.Detail = CheckPassed, fmt.Sprintf("scrollWidth %d ≤ innerWidth %d（390px 视口）", result.Viewport.ScrollWidth, result.Viewport.InnerWidth)
+	} else {
+		viewport.Status = CheckFailed
+		viewport.Detail = fmt.Sprintf("390px 视口横向溢出：scrollWidth %d > innerWidth %d", result.Viewport.ScrollWidth, result.Viewport.InnerWidth)
+		if result.Viewport.Error != "" {
+			viewport.Detail += "；" + result.Viewport.Error
+		}
+	}
+	if result.PDF.OK && result.PDF.Bytes > 0 {
+		printed.Status, printed.Detail = CheckPassed, fmt.Sprintf("PDF %d 字节", result.PDF.Bytes)
+	} else {
+		printed.Status = CheckFailed
+		printed.Detail = "PDF 渲染失败"
+		if result.PDF.Error != "" {
+			printed.Detail += "：" + result.PDF.Error
+		}
+	}
+	return viewport, printed
 }
 
 // uncoveredScripts returns executable inline scripts whose hash is not allowed by the CSP.

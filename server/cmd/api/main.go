@@ -59,7 +59,7 @@ func run(log *slog.Logger) error {
 	defer tc.Close()
 
 	q := db.New(pool)
-	pageTemplates := pagetemplate.New(q, pool, providers.PDF(cfg))
+	pageTemplates := pagetemplate.New(q, pool, nil, true)
 	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
 		log.Warn("page template bootstrap failed", "err", err)
 	}

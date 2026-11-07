@@ -65,7 +65,11 @@ func run(log *slog.Logger) error {
 	defer rdb.Close()
 
 	q := db.New(pool)
-	pageTemplates := pagetemplate.New(q, pool, providers.PDF(cfg))
+	var verifier pagetemplate.Verifier
+	if cfg.PageTemplateVerifyURL != "" {
+		verifier = pagetemplate.NewRemoteVerifier(cfg.PageTemplateVerifyURL, cfg.PageTemplateVerifyToken)
+	}
+	pageTemplates := pagetemplate.New(q, pool, verifier, cfg.PageTemplateVerifyRequired)
 	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
 		log.Warn("page template bootstrap failed", "err", err)
 	}

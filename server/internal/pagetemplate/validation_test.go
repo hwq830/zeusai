@@ -33,7 +33,7 @@ func TestBuiltinImportRendersByteIdentical(t *testing.T) {
 
 func TestGatePassesBuiltinTemplate(t *testing.T) {
 	files, _ := builtinTemplate(t)
-	result, hashes := RunGate(context.Background(), KindReport, files, nil, nil)
+	result, hashes := RunGate(context.Background(), KindReport, files, nil, passingVerifier(), true)
 	require.True(t, result.Passed, "checks: %+v", result.Checks)
 	require.NotEmpty(t, hashes)
 	status := map[string]string{}
@@ -45,9 +45,9 @@ func TestGatePassesBuiltinTemplate(t *testing.T) {
 	require.Equal(t, CheckPassed, status["charts"])
 	require.Equal(t, CheckPassed, status["csp"])
 	require.Equal(t, CheckPassed, status["external"])
-	require.Equal(t, CheckSkipped, status["viewport"])
+	require.Equal(t, CheckPassed, status["viewport"])
 	require.Equal(t, CheckPassed, status["budget"])
-	require.Equal(t, CheckSkipped, status["pdf"])
+	require.Equal(t, CheckPassed, status["pdf"])
 	require.Equal(t, CheckPassed, status["structure"])
 }
 
@@ -55,7 +55,7 @@ func TestGateRejectsExternalResource(t *testing.T) {
 	files, _ := builtinTemplate(t)
 	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</head>",
 		`<script src="https://evil.test/x.js"></script></head>`, 1)
-	result, _ := RunGate(context.Background(), KindReport, files, nil, nil)
+	result, _ := RunGate(context.Background(), KindReport, files, nil, passingVerifier(), true)
 	require.False(t, result.Passed)
 	require.Equal(t, CheckFailed, checkStatus(result, "external"))
 }
@@ -65,7 +65,7 @@ func TestGateRejectsUnhashedInlineScript(t *testing.T) {
 	// A script whose body is template data cannot be hashed from the source (the executed
 	// value differs), so the gate must reject it.
 	files[reporttemplate.TemplateFile] = files[reporttemplate.TemplateFile] + "<script>{{.Title}}</script>"
-	result, _ := RunGate(context.Background(), KindReport, files, nil, nil)
+	result, _ := RunGate(context.Background(), KindReport, files, nil, passingVerifier(), true)
 	require.False(t, result.Passed)
 	require.Equal(t, CheckFailed, checkStatus(result, "csp"))
 }
@@ -73,7 +73,7 @@ func TestGateRejectsUnhashedInlineScript(t *testing.T) {
 func TestGateRejectsBrokenTemplate(t *testing.T) {
 	files, _ := builtinTemplate(t)
 	files[reporttemplate.TemplateFile] = "{{.Title"
-	result, _ := RunGate(context.Background(), KindReport, files, nil, nil)
+	result, _ := RunGate(context.Background(), KindReport, files, nil, passingVerifier(), true)
 	require.False(t, result.Passed)
 	require.Equal(t, CheckFailed, checkStatus(result, "render"))
 }
@@ -81,7 +81,7 @@ func TestGateRejectsBrokenTemplate(t *testing.T) {
 func TestGateRejectsMissingChartScript(t *testing.T) {
 	files, _ := builtinTemplate(t)
 	delete(files, reporttemplate.ChartScriptFile)
-	result, _ := RunGate(context.Background(), KindReport, files, nil, nil)
+	result, _ := RunGate(context.Background(), KindReport, files, nil, passingVerifier(), true)
 	require.False(t, result.Passed)
 }
 

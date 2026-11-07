@@ -17,7 +17,6 @@ import (
 
 	"github.com/hwq830/zeusai/server/internal/apperr"
 	"github.com/hwq830/zeusai/server/internal/db"
-	"github.com/hwq830/zeusai/server/internal/pdf"
 	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
@@ -46,9 +45,11 @@ type Store struct {
 	Pool interface {
 		Begin(ctx context.Context) (pgx.Tx, error)
 	}
-	// PDF runs the gate's print check; nil records it as skipped.
-	PDF pdf.Renderer
-	TTL time.Duration
+	// Verifier runs the layout and print checks; nil means they cannot run.
+	Verifier Verifier
+	// VerifyRequired makes a missing/unreachable verifier fail those checks (fail closed).
+	VerifyRequired bool
+	TTL            time.Duration
 
 	mu    sync.Mutex
 	cache map[string]cachedTemplate
@@ -62,8 +63,8 @@ type cachedTemplate struct {
 
 func New(q *db.Queries, pool interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
-}, pdfRenderer pdf.Renderer) *Store {
-	return &Store{Q: q, Pool: pool, PDF: pdfRenderer, TTL: DefaultTTL, cache: map[string]cachedTemplate{}}
+}, verifier Verifier, verifyRequired bool) *Store {
+	return &Store{Q: q, Pool: pool, Verifier: verifier, VerifyRequired: verifyRequired, TTL: DefaultTTL, cache: map[string]cachedTemplate{}}
 }
 
 // ReportTemplate implements reporttemplate.Provider. A missing binding returns (nil, nil) so
@@ -251,7 +252,7 @@ func (s *Store) Validate(ctx context.Context, versionID uuid.UUID) (db.PageTempl
 	if err != nil {
 		return v, err
 	}
-	result, cspHashes := RunGate(ctx, tpl.Kind, decodeFiles(v.Files), decodeHashes(v.CspHashes), s.PDF)
+	result, cspHashes := RunGate(ctx, tpl.Kind, decodeFiles(v.Files), decodeHashes(v.CspHashes), s.Verifier, s.VerifyRequired)
 	raw, _ := json.Marshal(result)
 	status := "draft"
 	if result.Passed {
@@ -295,9 +296,12 @@ func (s *Store) Publish(ctx context.Context, versionID, actor uuid.UUID) error {
 		if err := q.UpsertPageTemplateBinding(ctx, db.UpsertPageTemplateBindingParams{Kind: tpl.Kind, VersionID: v.ID, UpdatedBy: &actor}); err != nil {
 			return err
 		}
+		detail := map[string]any{"version": v.Version, "kind": tpl.Kind}
+		if unverified := skippedChecks(v.Validation); len(unverified) > 0 {
+			detail["unverified"] = unverified
+		}
 		return q.InsertPageTemplateAudit(ctx, db.InsertPageTemplateAuditParams{
-			ActorID: &actor, Action: "publish", TemplateID: &tpl.ID, VersionID: &v.ID,
-			Detail: mustJSON(map[string]any{"version": v.Version, "kind": tpl.Kind}),
+			ActorID: &actor, Action: "publish", TemplateID: &tpl.ID, VersionID: &v.ID, Detail: mustJSON(detail),
 		})
 	}); err != nil {
 		return err
@@ -463,6 +467,22 @@ func mustJSON(v any) json.RawMessage {
 func isUniqueViolation(err error) bool {
 	var pgErr interface{ SQLState() string }
 	return errors.As(err, &pgErr) && pgErr.SQLState() == "23505"
+}
+
+// skippedChecks names gate checks that were skipped, so the audit trail can show which
+// verification did not run when publishing was allowed without it.
+func skippedChecks(raw json.RawMessage) []string {
+	var v Validation
+	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	var out []string
+	for _, c := range v.Checks {
+		if c.Status == CheckSkipped && (c.ID == "viewport" || c.ID == "pdf") {
+			out = append(out, c.ID)
+		}
+	}
+	return out
 }
 
 func storedValidationPassed(raw json.RawMessage) bool {

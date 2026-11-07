@@ -79,6 +79,16 @@ func (f *fakeOrch) CancelTask(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// passingAdminVerifier stands in for the orchestrator in console tests.
+type passingAdminVerifier struct{}
+
+func (passingAdminVerifier) Verify(context.Context, []byte) (pagetemplate.VerifyResult, error) {
+	var r pagetemplate.VerifyResult
+	r.Viewport.OK, r.Viewport.ScrollWidth, r.Viewport.InnerWidth = true, 390, 390
+	r.PDF.OK, r.PDF.Bytes = true, 120000
+	return r, nil
+}
+
 type harness struct {
 	t      *testing.T
 	pool   *pgxpool.Pool
@@ -111,7 +121,7 @@ func setupWith(t *testing.T, adjust func(*adminapi.Server)) *harness {
 	files := &blob.Local{Dir: t.TempDir(), BaseURL: "https://api.zeus.test", Secret: []byte("files")}
 	pushes := &push.Log{}
 	rc := &remoteconfig.Cache{Q: q, Region: "china"}
-	pageTemplates := pagetemplate.New(q, pool, nil)
+	pageTemplates := pagetemplate.New(q, pool, passingAdminVerifier{}, true)
 	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +19,7 @@ import (
 	"github.com/hwq830/zeusai/server/internal/db"
 	"github.com/hwq830/zeusai/server/internal/events"
 	"github.com/hwq830/zeusai/server/internal/pagetemplate"
+	"github.com/hwq830/zeusai/server/internal/pdf"
 	"github.com/hwq830/zeusai/server/internal/platform/config"
 	"github.com/hwq830/zeusai/server/internal/platform/pg"
 	"github.com/hwq830/zeusai/server/internal/platform/providers"
@@ -60,7 +63,7 @@ func run(log *slog.Logger) error {
 	defer tc.Close()
 
 	q := db.New(pool)
-	pageTemplates := pagetemplate.New(q, pool, providers.PDF(cfg))
+	pageTemplates := pagetemplate.New(q, pool, nil, true)
 	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
 		log.Warn("page template bootstrap failed", "err", err)
 	}
@@ -102,6 +105,29 @@ func run(log *slog.Logger) error {
 		PDF: providers.PDF(cfg), Blob: providers.Blob(cfg), Push: notifier, Notify: notifier,
 		Quota: &quota.Service{Q: q, Config: rc},
 	})
+	// Internal page-template verification: layout at 390px plus one PDF print. The admin
+	// process calls this before publishing; it is not exposed publicly.
+	if cfg.PageTemplateVerifyAddr != "" {
+		verifier := pagetemplate.ChromiumVerifier{Chromium: pdf.Chromium{
+			Path: cfg.ChromiumPath, NoSandbox: cfg.ChromiumNoSandbox, Timeout: pagetemplate.VerifyTimeout,
+		}}
+		mux := http.NewServeMux()
+		mux.Handle("/internal/page-template-verify", pagetemplate.VerifyHandler(cfg.PageTemplateVerifyToken, q, verifier))
+		verifyServer := &http.Server{Addr: cfg.PageTemplateVerifyAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			if err := verifyServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("page template verify server failed", "addr", cfg.PageTemplateVerifyAddr, "err", err)
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = verifyServer.Shutdown(sctx)
+		}()
+		log.Info("page template verify listening", "addr", cfg.PageTemplateVerifyAddr)
+	}
+
 	// Quiet-hours pushes are sent when the window ends.
 	go notifier.Run(ctx, time.Minute)
 	log.Info("orchestrator started", "queue", cfg.TaskQueue)
