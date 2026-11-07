@@ -99,7 +99,12 @@ type Input struct {
 }
 
 type Service struct {
-	Q     *db.Queries
+	Q *db.Queries
+	// Pool is used by follow-up attach so the appendix and attached_at commit together.
+	// Nil is tolerated (no transaction) for tests and read-only callers.
+	Pool interface {
+		Begin(ctx context.Context) (pgx.Tx, error)
+	}
 	Quota *quota.Service
 	Orch  orch.Client
 	Mod   moderation.Checker

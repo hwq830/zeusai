@@ -37,3 +37,21 @@ UPDATE reports SET pdf_status = $3, pdf_key = $4 WHERE id = $1 AND user_id = $2;
 -- name: DeleteReport :execrows
 DELETE FROM reports WHERE id = $1 AND user_id = $2;
 
+
+-- name: CreateReportFollowup :one
+INSERT INTO report_followups (report_id, user_id, task_id, question, answer, sources)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: ListReportFollowups :many
+SELECT * FROM report_followups
+WHERE report_id = $1 AND user_id = $2
+ORDER BY created_at DESC;
+
+-- name: GetReportFollowup :one
+SELECT * FROM report_followups WHERE id = $1 AND report_id = $2 AND user_id = $3;
+
+-- name: AttachReportFollowup :one
+UPDATE report_followups SET attached_at = now()
+WHERE id = $1 AND report_id = $2 AND user_id = $3 AND attached_at IS NULL
+RETURNING *;
