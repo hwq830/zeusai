@@ -27,6 +27,7 @@ type Task struct {
 	ReportID       *string         `json:"reportId,omitempty"`
 	BriefingID     *string         `json:"briefingId,omitempty"`
 	SubscriptionID *string         `json:"subscriptionId,omitempty"`
+	FollowupID     *string         `json:"followupId,omitempty"`
 	Plan           []events.Step   `json:"plan,omitempty"`
 	CurrentStep    *events.Step    `json:"currentStep,omitempty"`
 	PendingConfirm *events.Confirm `json:"pendingConfirm,omitempty"`
@@ -93,6 +94,41 @@ func (s *Service) Get(ctx context.Context, userID uuid.UUID, id string) (db.Task
 		return t, apperr.Internal(err)
 	}
 	return t, nil
+}
+
+// FillFollowupIDs sets FollowupID on follow-up task responses. The record is created when the
+// answer is stored, so it is absent while the answer is still streaming, for other task kinds,
+// and if the record was deleted (report_followups.task_id is ON DELETE SET NULL). A missing
+// record is not an error.
+func (s *Service) FillFollowupIDs(ctx context.Context, userID uuid.UUID, tasks []Task) error {
+	ids := make([]uuid.UUID, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Kind != "followup" {
+			continue
+		}
+		if id, err := uuid.Parse(t.ID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.Q.ListReportFollowupIDsByTaskIDs(ctx, db.ListReportFollowupIDsByTaskIDsParams{TaskIds: ids, UserID: userID})
+	if err != nil {
+		return apperr.Internal(err)
+	}
+	byTask := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if row.TaskID != nil {
+			byTask[row.TaskID.String()] = row.ID.String()
+		}
+	}
+	for i := range tasks {
+		if id, ok := byTask[tasks[i].ID]; ok {
+			tasks[i].FollowupID = &id
+		}
+	}
+	return nil
 }
 
 func (s *Service) List(ctx context.Context, userID uuid.UUID, activeOnly bool, limit, offset int) ([]db.Task, error) {

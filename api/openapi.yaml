@@ -2116,6 +2116,10 @@ components:
         reportId: { type: string }
         briefingId: { type: string }
         subscriptionId: { type: string }
+        followupId:
+          type: string
+          format: uuid
+          description: 追问任务对应的 report_followups 记录；非追问任务省略。答案写入后才会出现，完成前或记录已删除时省略
         plan:
           type: array
           description: 计划确定后的全部步骤（与 plan 事件一致），计划未定时为空
