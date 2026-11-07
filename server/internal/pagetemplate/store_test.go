@@ -68,7 +68,7 @@ func TestPublishAndRollbackThroughStore(t *testing.T) {
 	admin := testAdmin(t, q)
 
 	files := reporttemplate.BuiltinFiles()
-	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</head>", "<!--page-template-v2--></head>", 1)
+	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</style>", "/*page-template-v2*/</style>", 1)
 	version, err := store.Upload(ctx, tplRow.ID, admin.ID, files, "")
 	require.NoError(t, err)
 	require.Equal(t, "draft", version.Status)

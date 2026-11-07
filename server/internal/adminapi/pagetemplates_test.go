@@ -67,7 +67,7 @@ func TestPageTemplateLifecycle(t *testing.T) {
 	}
 
 	files := reporttemplate.BuiltinFiles()
-	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</head>", "<!--page-template-admin-v2--></head>", 1)
+	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</style>", "/*page-template-admin-v2*/</style>", 1)
 	var upload pageTemplateVersion
 	h.do("POST", "/admin/v1/page-templates/"+templateID+"/versions", map[string]any{"files": files}, 201, &upload)
 	if upload.Version != 2 || upload.Status != "draft" {
