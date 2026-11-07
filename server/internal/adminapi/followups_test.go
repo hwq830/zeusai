@@ -192,8 +192,14 @@ func TestAdminFollowupsList(t *testing.T) {
 		t.Fatalf("page 1: %+v", page)
 	}
 	h.do("GET", "/admin/v1/followups?limit=2&cursor="+*page.NextCursor, nil, 200, &page)
-	if len(page.Items) != 2 || page.NextCursor != nil {
+	if len(page.Items) != 2 {
 		t.Fatalf("page 2: %+v", page)
+	}
+	// The cursor is offset-based like the rest of the console, so a full page keeps a cursor
+	// even when the next page turns out empty.
+	h.do("GET", "/admin/v1/followups?limit=2&cursor="+*page.NextCursor, nil, 200, &page)
+	if len(page.Items) != 0 || page.NextCursor != nil {
+		t.Fatalf("page 3: %+v", page)
 	}
 }
 
