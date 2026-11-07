@@ -385,3 +385,54 @@ func TestPanelSourceDataOnlyOnInteractiveCitations(t *testing.T) {
 		}
 	}
 }
+
+func renderMarkdownBody(t *testing.T, markdown string) string {
+	t.Helper()
+	out, err := Render(Data{Title: "Lead", Markdown: markdown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+func TestLeadOnlyWhenDocumentStartsWithParagraph(t *testing.T) {
+	cases := []struct {
+		name     string
+		markdown string
+		want     int
+	}{
+		{"paragraph", "导语段落。\n\n## 一、章节\n\n正文。", 1},
+		{"heading", "## 一、章节\n\n正文。", 0},
+		{"list", "- 事实一\n- 事实二\n\n## 一、章节\n\n正文。", 0},
+		{"table", "| A | B |\n|---|---|\n| 1 | 2 |\n\n## 一、章节\n\n正文。", 0},
+		{"heading only", "## 只有标题", 0},
+		{"paragraph then heading", "导语。\n\n## 一、章节\n\n正文。\n\n## 二、章节\n\n正文。", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderMarkdownBody(t, tc.markdown)
+			if got := strings.Count(html, `class="lead"`); got != tc.want {
+				t.Fatalf("lead count=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLeadIgnoresPriorFigureAndKeepsKPICommentTransparent(t *testing.T) {
+	if got := addLead("<figure><svg></svg></figure><p>正文</p>"); strings.Contains(got, `class="lead"`) {
+		t.Fatal("figure before paragraph must not become lead")
+	}
+	figures := []KeyFigure{{Label: "规模", Value: "47.9", Unit: "亿元"}}
+	withComment := AttachKeyFigures("导语段落。\n\n## 一、章节\n\n正文。", figures)
+	html := renderMarkdownBody(t, withComment)
+	if strings.Count(html, `class="lead"`) != 1 {
+		t.Fatal("KPI comment must be removed before the first-block check")
+	}
+	if strings.Contains(html, "zeus-key-figures") {
+		t.Fatal("KPI comment leaked into rendered HTML")
+	}
+	withHeading := AttachKeyFigures("## 一、章节\n\n正文。", figures)
+	if strings.Contains(renderMarkdownBody(t, withHeading), `class="lead"`) {
+		t.Fatal("heading first must not get a lead even with a KPI comment")
+	}
+}

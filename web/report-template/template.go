@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -149,11 +150,12 @@ func TrimLeadingTitle(markdown, title string) string {
 }
 
 func addLead(body string) string {
-	loc := regexp.MustCompile(`<p>`).FindStringIndex(body)
-	if loc == nil {
+	trimmed := strings.TrimLeftFunc(body, unicode.IsSpace)
+	if !strings.HasPrefix(trimmed, "<p>") {
 		return body
 	}
-	return body[:loc[0]] + `<p class="lead">` + body[loc[1]:]
+	offset := len(body) - len(trimmed)
+	return body[:offset] + `<p class="lead">` + body[offset+len("<p>"):]
 }
 
 func wrapTables(markup string) string {
@@ -533,7 +535,7 @@ func Render(d Data) ([]byte, error) {
 				Num:   fmt.Sprintf("%02d", len(sections)),
 				Title: title,
 				EN:    "SECTION",
-				Body:  template.HTML(addLead(htmlBody[m[1]:end])),
+				Body:  template.HTML(htmlBody[m[1]:end]),
 			}
 			sections = append(sections, sec)
 			_ = start
