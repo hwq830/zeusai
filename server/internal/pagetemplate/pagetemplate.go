@@ -346,7 +346,8 @@ func (s *Store) Rollback(ctx context.Context, kind string, actor uuid.UUID) (db.
 		return db.PageTemplateVersion{}, err
 	}
 	s.Invalidate(kind)
-	return prev, nil
+	// Re-read: the row fetched before the transaction still carries its retired status.
+	return s.Version(ctx, prev.ID)
 }
 
 // Preview renders one version with the caller's data.
