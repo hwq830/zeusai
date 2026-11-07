@@ -55,3 +55,7 @@ SELECT * FROM report_followups WHERE id = $1 AND report_id = $2 AND user_id = $3
 UPDATE report_followups SET attached_at = now()
 WHERE id = $1 AND report_id = $2 AND user_id = $3 AND attached_at IS NULL
 RETURNING *;
+
+-- name: ListReportFollowupIDsByTaskIDs :many
+SELECT task_id, id FROM report_followups
+WHERE task_id = ANY(sqlc.arg(task_ids)::uuid[]) AND user_id = sqlc.arg(user_id);

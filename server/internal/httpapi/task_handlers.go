@@ -24,6 +24,9 @@ func (s *Server) ListTasks(ctx context.Context, req gen.ListTasksRequestObject) 
 	for _, r := range rows {
 		items = append(items, task.FromRow(r))
 	}
+	if err := s.Tasks.FillFollowupIDs(ctx, userID(ctx), items); err != nil {
+		return nil, err
+	}
 	return gen.ListTasks200JSONResponse{Items: recode[[]gen.Task](items), NextCursor: nextCursor(len(items), lim, off)}, nil
 }
 
@@ -32,7 +35,11 @@ func (s *Server) GetTask(ctx context.Context, req gen.GetTaskRequestObject) (gen
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetTask200JSONResponse(recode[gen.Task](task.FromRow(t))), nil
+	items := []task.Task{task.FromRow(t)}
+	if err := s.Tasks.FillFollowupIDs(ctx, userID(ctx), items); err != nil {
+		return nil, err
+	}
+	return gen.GetTask200JSONResponse(recode[gen.Task](items[0])), nil
 }
 
 func (s *Server) CancelTask(ctx context.Context, req gen.CancelTaskRequestObject) (gen.CancelTaskResponseObject, error) {

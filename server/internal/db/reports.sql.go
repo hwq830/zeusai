@@ -317,6 +317,41 @@ func (q *Queries) GetReportFollowup(ctx context.Context, arg GetReportFollowupPa
 	return i, err
 }
 
+const listReportFollowupIDsByTaskIDs = `-- name: ListReportFollowupIDsByTaskIDs :many
+SELECT task_id, id FROM report_followups
+WHERE task_id = ANY($1::uuid[]) AND user_id = $2
+`
+
+type ListReportFollowupIDsByTaskIDsParams struct {
+	TaskIds []uuid.UUID
+	UserID  uuid.UUID
+}
+
+type ListReportFollowupIDsByTaskIDsRow struct {
+	TaskID *uuid.UUID
+	ID     uuid.UUID
+}
+
+func (q *Queries) ListReportFollowupIDsByTaskIDs(ctx context.Context, arg ListReportFollowupIDsByTaskIDsParams) ([]ListReportFollowupIDsByTaskIDsRow, error) {
+	rows, err := q.db.Query(ctx, listReportFollowupIDsByTaskIDs, arg.TaskIds, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReportFollowupIDsByTaskIDsRow{}
+	for rows.Next() {
+		var i ListReportFollowupIDsByTaskIDsRow
+		if err := rows.Scan(&i.TaskID, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReportFollowups = `-- name: ListReportFollowups :many
 SELECT id, report_id, user_id, task_id, question, answer, sources, attached_at, created_at FROM report_followups
 WHERE report_id = $1 AND user_id = $2

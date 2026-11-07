@@ -622,11 +622,23 @@ func TestReportEndToEnd(t *testing.T) {
 	if len(list.Items) != 1 {
 		t.Fatalf("list: %+v", list)
 	}
+	var taskProbe map[string]any
+	h.do("GET", "/v1/tasks/"+tk.ID, nil, 200, &taskProbe)
+	if _, ok := taskProbe["followupId"]; ok {
+		t.Fatalf("report task carries followupId: %v", taskProbe["followupId"])
+	}
 
 	// A follow-up is answered and stored on its own; the report body stays untouched until
 	// the user attaches it.
 	bodyBefore := page
 	h.do("POST", "/v1/reports/"+rep.ID+"/followups", map[string]string{"question": "欧洲市场的关税影响多大？"}, 202, &tk)
+	followupTaskID := tk.ID
+	// The record does not exist until the answer is stored, so the field is still absent here.
+	var pendingProbe map[string]any
+	h.do("GET", "/v1/tasks/"+followupTaskID, nil, 200, &pendingProbe)
+	if _, ok := pendingProbe["followupId"]; ok {
+		t.Fatalf("followupId before the answer is stored: %v", pendingProbe["followupId"])
+	}
 	answer := ""
 	for _, ev := range h.streamEvents(tk.ID, 0) {
 		answer += ev.Delta
@@ -648,6 +660,10 @@ func TestReportEndToEnd(t *testing.T) {
 	h.do("GET", "/v1/reports/"+rep.ID+"/followups", nil, 200, &fus)
 	if len(fus.Items) != 1 || fus.Items[0].Question != "欧洲市场的关税影响多大？" || fus.Items[0].AttachedAt != nil {
 		t.Fatalf("followups before attach: %+v", fus.Items)
+	}
+	h.do("GET", "/v1/tasks/"+followupTaskID, nil, 200, &pendingProbe)
+	if pendingProbe["followupId"] != fus.Items[0].ID {
+		t.Fatalf("task followupId = %v, list id = %s", pendingProbe["followupId"], fus.Items[0].ID)
 	}
 	var attached struct {
 		ID         string     `json:"id"`
@@ -709,6 +725,7 @@ func TestReportEndToEnd(t *testing.T) {
 	h.login(randomPhone())
 	h.do("GET", "/v1/reports/"+rep.ID+"/followups", nil, 404, nil)
 	h.do("POST", "/v1/reports/"+rep.ID+"/followups/"+fus.Items[1].ID+"/attach", nil, 404, nil)
+	h.do("GET", "/v1/tasks/"+followupTaskID, nil, 404, nil)
 	h.token = mine
 	now := time.Now()
 	if _, err := h.q.AdminSetReportHidden(context.Background(), db.AdminSetReportHiddenParams{
