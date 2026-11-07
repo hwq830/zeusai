@@ -67,7 +67,7 @@ func TestPageTemplateLifecycle(t *testing.T) {
 	}
 
 	files := reporttemplate.BuiltinFiles()
-	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "ZEUS / RESEARCH", "ZEUS / RESEARCH admin-v2", 1)
+	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</head>", "<!--page-template-admin-v2--></head>", 1)
 	var upload pageTemplateVersion
 	h.do("POST", "/admin/v1/page-templates/"+templateID+"/versions", map[string]any{"files": files}, 201, &upload)
 	if upload.Version != 2 || upload.Status != "draft" {
@@ -80,8 +80,12 @@ func TestPageTemplateLifecycle(t *testing.T) {
 		t.Fatalf("validate: %+v", validated)
 	}
 
-	// Preview returns HTML for the fixed fixture.
-	h.do("GET", "/admin/v1/page-template-versions/"+upload.Id+"/preview", nil, 200, nil)
+	// Preview returns the rendered HTML for the fixed fixture.
+	var preview struct{ Html string }
+	h.do("GET", "/admin/v1/page-template-versions/"+upload.Id+"/preview", nil, 200, &preview)
+	if !strings.Contains(preview.Html, "页面模板校验样例") || !strings.Contains(preview.Html, "page-template-admin-v2") {
+		t.Fatalf("preview: %.200s", preview.Html)
+	}
 
 	var published pageTemplateVersion
 	h.do("POST", "/admin/v1/page-template-versions/"+upload.Id+"/publish", nil, 200, &published)
@@ -89,7 +93,7 @@ func TestPageTemplateLifecycle(t *testing.T) {
 		t.Fatalf("publish: %+v", published)
 	}
 	out, err := reporttemplate.Render(reporttemplate.Data{Title: "x", Markdown: "正文", Lang: "zh"})
-	if err != nil || !strings.Contains(string(out), "ZEUS / RESEARCH admin-v2") {
+	if err != nil || !strings.Contains(string(out), "page-template-admin-v2") {
 		t.Fatalf("published template not used: %v", err)
 	}
 
@@ -99,7 +103,7 @@ func TestPageTemplateLifecycle(t *testing.T) {
 		t.Fatalf("rollback: %+v", rolled)
 	}
 	out, err = reporttemplate.Render(reporttemplate.Data{Title: "x", Markdown: "正文", Lang: "zh"})
-	if err != nil || strings.Contains(string(out), "admin-v2") {
+	if err != nil || strings.Contains(string(out), "page-template-admin-v2") {
 		t.Fatalf("rollback did not restore the old template: %v", err)
 	}
 

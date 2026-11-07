@@ -68,7 +68,7 @@ func TestPublishAndRollbackThroughStore(t *testing.T) {
 	admin := testAdmin(t, q)
 
 	files := reporttemplate.BuiltinFiles()
-	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "ZEUS / RESEARCH", "ZEUS / RESEARCH v2", 1)
+	files[reporttemplate.TemplateFile] = strings.Replace(files[reporttemplate.TemplateFile], "</head>", "<!--page-template-v2--></head>", 1)
 	version, err := store.Upload(ctx, tplRow.ID, admin.ID, files, "")
 	require.NoError(t, err)
 	require.Equal(t, "draft", version.Status)
@@ -87,7 +87,7 @@ func TestPublishAndRollbackThroughStore(t *testing.T) {
 	require.NoError(t, err)
 	out, err := tpl.Render(FixtureData())
 	require.NoError(t, err)
-	require.Contains(t, string(out), "ZEUS / RESEARCH v2")
+	require.Contains(t, string(out), "page-template-v2")
 
 	rolled, err := store.Rollback(ctx, KindReport, admin.ID)
 	require.NoError(t, err)

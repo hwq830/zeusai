@@ -1,7 +1,6 @@
 package adminapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 
@@ -144,7 +143,7 @@ func (s *Server) PreviewPageTemplateVersion(ctx context.Context, req gen.Preview
 	if err != nil {
 		return nil, err
 	}
-	return gen.PreviewPageTemplateVersion200TexthtmlResponse{Body: bytes.NewReader(html), ContentLength: int64(len(html))}, nil
+	return gen.PreviewPageTemplateVersion200JSONResponse{Html: string(html)}, nil
 }
 
 func toPageTemplateVersion(v db.PageTemplateVersion) gen.PageTemplateVersion {

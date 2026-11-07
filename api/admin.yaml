@@ -2202,15 +2202,15 @@ paths:
     get:
       tags: [content]
       operationId: previewPageTemplateVersion
-      summary: 用固定样例或指定报告的实时数据渲染该版本，返回 HTML
+      summary: 用固定样例或指定报告的实时数据渲染该版本，返回 HTML 文本
       parameters:
         - { name: reportId, in: query, schema: { type: string } }
       responses:
         '200':
           description: OK
           content:
-            text/html:
-              schema: { type: string }
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplatePreview' }
         default: { $ref: '#/components/responses/Error' }
 
 components:
@@ -3021,6 +3021,11 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/PageTemplateVersion' }
+    PageTemplatePreview:
+      type: object
+      required: [html]
+      properties:
+        html: { type: string }
     PageTemplateUpload:
       type: object
       required: [files]
