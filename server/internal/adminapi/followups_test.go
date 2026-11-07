@@ -148,11 +148,11 @@ func TestAdminFollowupsList(t *testing.T) {
 	if page.Items[0].Id != f.items[3].ID.String() || page.Items[3].Id != f.items[0].ID.String() {
 		t.Fatalf("newest first: %+v", page.Items)
 	}
-	if page.Items[0].ReportHidden || !page.Items[2].ReportHidden {
+	if page.Items[0].ReportHidden || !page.Items[1].ReportHidden || page.Items[2].ReportHidden {
 		t.Fatalf("reportHidden: %+v", page.Items)
 	}
-	if page.Items[2].ReportTitle != "已下架报告" || page.Items[2].UserId != f.items[2].UserID.String() {
-		t.Fatalf("row metadata: %+v", page.Items[2])
+	if page.Items[1].ReportTitle != "已下架报告" || page.Items[1].UserId != f.items[2].UserID.String() {
+		t.Fatalf("row metadata: %+v", page.Items[1])
 	}
 	if !page.Items[3].AnswerTruncated || len([]rune(page.Items[3].Answer)) != 500 {
 		t.Fatalf("truncated: %+v", page.Items[3])
