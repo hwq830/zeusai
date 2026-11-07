@@ -588,6 +588,44 @@ paths:
               schema: { $ref: '#/components/schemas/RefundResult' }
         default: { $ref: '#/components/responses/Error' }
 
+  /admin/v1/reports/{reportId}/followups:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      tags: [content]
+      operationId: listReportFollowups
+      summary: 某份报告的追问历史（新到旧），只读。需要 content.read；报告不存在返回 404
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReportFollowupPage' }
+        default: { $ref: '#/components/responses/Error' }
+  /admin/v1/followups:
+    get:
+      tags: [content]
+      operationId: listFollowups
+      summary: 全部追问（新到旧），含报告标题与是否已下架，只读。需要 content.read
+      parameters:
+        - name: attached
+          in: query
+          description: 不传为全部；true 只看已加入报告的
+          schema: { type: boolean }
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: q, in: query, description: 搜问题与答案；% 和 _ 按字面匹配, schema: { type: string } }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminFollowupPage' }
+        default: { $ref: '#/components/responses/Error' }
   /admin/v1/subscriptions:
     get:
       tags: [content]
@@ -2793,6 +2831,46 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/AdminReportRow' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    AdminReportFollowup:
+      type: object
+      required: [id, question, answer, answerTruncated, createdAt]
+      properties:
+        id: { type: string }
+        question: { type: string }
+        answer: { type: string, description: 列表接口截断到 500 字符 }
+        answerTruncated: { type: boolean }
+        attachedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AdminReportFollowupPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminReportFollowup' }
+        nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    AdminFollowup:
+      type: object
+      required: [id, reportId, reportTitle, reportHidden, userId, question, answer, answerTruncated, createdAt]
+      properties:
+        id: { type: string }
+        reportId: { type: string }
+        reportTitle: { type: string }
+        reportHidden: { type: boolean, description: 所属报告已下架 }
+        userId: { type: string }
+        question: { type: string }
+        answer: { type: string, description: 列表接口截断到 500 字符 }
+        answerTruncated: { type: boolean }
+        attachedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AdminFollowupPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminFollowup' }
         nextCursor: { $ref: '#/components/schemas/NextCursor' }
     ContentFeedback:
       type: object

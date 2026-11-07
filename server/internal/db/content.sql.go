@@ -529,6 +529,74 @@ func (q *Queries) AdminListBriefings(ctx context.Context, arg AdminListBriefings
 	return items, nil
 }
 
+const adminListFollowups = `-- name: AdminListFollowups :many
+SELECT f.id, f.report_id, r.title AS report_title, (r.hidden_at IS NOT NULL)::boolean AS report_hidden,
+       f.user_id, f.question, f.answer, f.attached_at, f.created_at
+FROM report_followups f
+JOIN reports r ON r.id = f.report_id
+WHERE ($1::boolean IS NULL OR (f.attached_at IS NOT NULL) = $1)
+  AND ($2::uuid IS NULL OR f.user_id = $2)
+  AND ($3::text IS NULL OR f.question ILIKE $3 ESCAPE '\' OR f.answer ILIKE $3 ESCAPE '\')
+ORDER BY f.created_at DESC
+LIMIT $5 OFFSET $4
+`
+
+type AdminListFollowupsParams struct {
+	Attached *bool
+	UserID   *uuid.UUID
+	Q        *string
+	Off      int32
+	Lim      int32
+}
+
+type AdminListFollowupsRow struct {
+	ID           uuid.UUID
+	ReportID     uuid.UUID
+	ReportTitle  string
+	ReportHidden bool
+	UserID       uuid.UUID
+	Question     string
+	Answer       string
+	AttachedAt   *time.Time
+	CreatedAt    time.Time
+}
+
+func (q *Queries) AdminListFollowups(ctx context.Context, arg AdminListFollowupsParams) ([]AdminListFollowupsRow, error) {
+	rows, err := q.db.Query(ctx, adminListFollowups,
+		arg.Attached,
+		arg.UserID,
+		arg.Q,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AdminListFollowupsRow{}
+	for rows.Next() {
+		var i AdminListFollowupsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.ReportTitle,
+			&i.ReportHidden,
+			&i.UserID,
+			&i.Question,
+			&i.Answer,
+			&i.AttachedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const adminListReportTasks = `-- name: AdminListReportTasks :many
 SELECT t.id, t.user_id, t.kind, t.status, t.title, t.subtitle, t.input, t.subscription_id, t.report_id, t.briefing_id, t.plan, t.current_step, t.pending_confirm, t.last_event_id, t.error, t.prompt_version, t.created_at, t.started_at, t.finished_at, t.admin_id, coalesce((SELECT sum(m.cost_micros) FROM model_usage m WHERE m.task_id = t.id), 0)::bigint AS cost_micros,
        coalesce((SELECT sum(m.billed_tokens) FROM model_usage m WHERE m.task_id = t.id), 0)::bigint AS billed_tokens
@@ -926,6 +994,51 @@ func (q *Queries) AdminListSubscriptions(ctx context.Context, arg AdminListSubsc
 			&i.RecentReady,
 			&i.RecentRead,
 			&i.RecentFailed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminReportFollowups = `-- name: AdminReportFollowups :many
+
+SELECT id, report_id, user_id, task_id, question, answer, sources, attached_at, created_at FROM report_followups
+WHERE report_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type AdminReportFollowupsParams struct {
+	ReportID uuid.UUID
+	Limit    int32
+	Offset   int32
+}
+
+// ------------------------------------------------------------------ report follow-ups
+func (q *Queries) AdminReportFollowups(ctx context.Context, arg AdminReportFollowupsParams) ([]ReportFollowup, error) {
+	rows, err := q.db.Query(ctx, adminReportFollowups, arg.ReportID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportFollowup{}
+	for rows.Next() {
+		var i ReportFollowup
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReportID,
+			&i.UserID,
+			&i.TaskID,
+			&i.Question,
+			&i.Answer,
+			&i.Sources,
+			&i.AttachedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

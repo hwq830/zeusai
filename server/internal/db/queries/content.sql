@@ -291,3 +291,22 @@ ON CONFLICT (target_type, target_id, kind) DO UPDATE SET note = excluded.note, r
 
 -- name: ReopenContentIssue :execrows
 DELETE FROM content_issue_resolutions WHERE target_type = $1 AND target_id = $2 AND kind = $3;
+
+-- ------------------------------------------------------------------ report follow-ups
+
+-- name: AdminReportFollowups :many
+SELECT * FROM report_followups
+WHERE report_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: AdminListFollowups :many
+SELECT f.id, f.report_id, r.title AS report_title, (r.hidden_at IS NOT NULL)::boolean AS report_hidden,
+       f.user_id, f.question, f.answer, f.attached_at, f.created_at
+FROM report_followups f
+JOIN reports r ON r.id = f.report_id
+WHERE (sqlc.narg(attached)::boolean IS NULL OR (f.attached_at IS NOT NULL) = sqlc.narg(attached))
+  AND (sqlc.narg(user_id)::uuid IS NULL OR f.user_id = sqlc.narg(user_id))
+  AND (sqlc.narg(q)::text IS NULL OR f.question ILIKE sqlc.narg(q) ESCAPE '\' OR f.answer ILIKE sqlc.narg(q) ESCAPE '\')
+ORDER BY f.created_at DESC
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
