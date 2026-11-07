@@ -35,7 +35,7 @@ func TestFillFollowupIDs(t *testing.T) {
 	user := newUser(t, q)
 
 	report, err := q.CreateReport(ctx, db.CreateReportParams{
-		UserID: user.ID, Title: "r", Topic: "t", Depth: "quick", Language: "zh",
+		UserID: user.ID, Title: "r", Topic: "t", Depth: "quick", Focuses: []string{}, Language: "zh",
 	})
 	require.NoError(t, err)
 	followupTask := newTask(t, q, user.ID, "followup")
