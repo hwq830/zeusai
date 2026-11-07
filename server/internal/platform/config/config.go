@@ -75,25 +75,36 @@ type Config struct {
 	AdminTokenTTL  time.Duration `koanf:"admin_token_ttl"`
 	// AdminStaticDir serves the built console (zeusai-admin dist/) next to /admin/v1; optional.
 	AdminStaticDir string `koanf:"admin_static_dir"`
+
+	// Page template verification: the orchestrator runs layout + PDF checks behind an
+	// internal endpoint; the admin process calls it before publishing. Publishing fails
+	// closed unless VERIFY_REQUIRED is explicitly set to false.
+	PageTemplateVerifyURL      string `koanf:"page_template_verify_url"`
+	PageTemplateVerifyToken    string `koanf:"page_template_verify_token"`
+	PageTemplateVerifyRequired bool   `koanf:"page_template_verify_required"`
+	// PageTemplateVerifyAddr is the orchestrator's listen address for that endpoint; empty
+	// disables it.
+	PageTemplateVerifyAddr string `koanf:"page_template_verify_addr"`
 }
 
 func defaults() Config {
 	return Config{
-		Env:               "dev",
-		Region:            "china",
-		HTTPAddr:          ":8080",
-		PublicBaseURL:     "http://localhost:8080",
-		DatabaseURL:       "postgres://zeus:zeus@localhost:5432/zeus?sslmode=disable",
-		RedisURL:          "redis://localhost:6379/0",
-		TemporalHost:      "localhost:7233",
-		TemporalNamespace: "default",
-		TaskQueue:         "zeus-tasks",
-		AccessTTL:         15 * time.Minute,
-		RefreshTTL:        30 * 24 * time.Hour,
-		LLMProvider:       "mock",
-		SearchProvider:    "mock",
-		AdminHTTPAddr:     ":8081",
-		AdminTokenTTL:     12 * time.Hour,
+		Env:                        "dev",
+		Region:                     "china",
+		HTTPAddr:                   ":8080",
+		PublicBaseURL:              "http://localhost:8080",
+		DatabaseURL:                "postgres://zeus:zeus@localhost:5432/zeus?sslmode=disable",
+		RedisURL:                   "redis://localhost:6379/0",
+		TemporalHost:               "localhost:7233",
+		TemporalNamespace:          "default",
+		TaskQueue:                  "zeus-tasks",
+		AccessTTL:                  15 * time.Minute,
+		RefreshTTL:                 30 * 24 * time.Hour,
+		LLMProvider:                "mock",
+		SearchProvider:             "mock",
+		AdminHTTPAddr:              ":8081",
+		AdminTokenTTL:              12 * time.Hour,
+		PageTemplateVerifyRequired: true,
 	}
 }
 

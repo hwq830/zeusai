@@ -428,6 +428,46 @@ type NotificationPref struct {
 	UpdatedAt        time.Time
 }
 
+type PageTemplate struct {
+	ID          uuid.UUID
+	Kind        string
+	Name        string
+	Description string
+	CreatedAt   time.Time
+	ArchivedAt  *time.Time
+}
+
+type PageTemplateAudit struct {
+	ID         int64
+	ActorID    *uuid.UUID
+	Action     string
+	TemplateID *uuid.UUID
+	VersionID  *uuid.UUID
+	Detail     json.RawMessage
+	At         time.Time
+}
+
+type PageTemplateBinding struct {
+	Kind      string
+	VersionID uuid.UUID
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
+}
+
+type PageTemplateVersion struct {
+	ID              uuid.UUID
+	TemplateID      uuid.UUID
+	Version         int32
+	Status          string
+	Files           json.RawMessage
+	ContractVersion string
+	CspHashes       json.RawMessage
+	Validation      json.RawMessage
+	CreatedBy       *uuid.UUID
+	CreatedAt       time.Time
+	PublishedAt     *time.Time
+}
+
 type ProviderKey struct {
 	ID                uuid.UUID
 	Provider          string

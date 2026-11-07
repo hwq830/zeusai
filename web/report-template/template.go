@@ -435,7 +435,7 @@ func stripSectionNumber(title string) string {
 	return original
 }
 
-func Render(d Data) ([]byte, error) {
+func renderWith(t *template.Template, d Data, chartScript, shellScript, csp string) ([]byte, error) {
 	cleaned, storedFigures := extractKeyFigures(d.Markdown)
 	d.Markdown = cleaned
 	if len(d.KeyFigures) == 0 {
@@ -577,7 +577,7 @@ func Render(d Data) ([]byte, error) {
 		chartData, _ = json.Marshal(chartJSON)
 	}
 	var out bytes.Buffer
-	err := page.Execute(&out, struct {
+	err := t.Execute(&out, struct {
 		Data
 		L            Labels
 		Sections     []Section
@@ -588,7 +588,7 @@ func Render(d Data) ([]byte, error) {
 		Kicker       string
 		ChartCount   int
 		SectionCount int
-	}{d, l, sections, template.JS(chartData), template.JS(visualChartScript), template.JS(visualShellScript), visualCSP, "ZEUS / RESEARCH", len(chartJSON), len(sections)})
+	}{d, l, sections, template.JS(chartData), template.JS(chartScript), template.JS(shellScript), csp, "ZEUS / RESEARCH", len(chartJSON), len(sections)})
 	return out.Bytes(), err
 }
 

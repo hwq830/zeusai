@@ -29,12 +29,14 @@ import (
 	"github.com/hwq830/zeusai/server/internal/moderation"
 	"github.com/hwq830/zeusai/server/internal/notify"
 	"github.com/hwq830/zeusai/server/internal/orch"
+	"github.com/hwq830/zeusai/server/internal/pagetemplate"
 	"github.com/hwq830/zeusai/server/internal/platform/testdb"
 	"github.com/hwq830/zeusai/server/internal/push"
 	"github.com/hwq830/zeusai/server/internal/quota"
 	"github.com/hwq830/zeusai/server/internal/remoteconfig"
 	"github.com/hwq830/zeusai/server/internal/schedule"
 	"github.com/hwq830/zeusai/server/internal/template"
+	reporttemplate "github.com/hwq830/zeusai/web/report-template"
 )
 
 // fakeOrch records the calls the admin API makes to Temporal.
@@ -77,6 +79,16 @@ func (f *fakeOrch) CancelTask(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// passingAdminVerifier stands in for the orchestrator in console tests.
+type passingAdminVerifier struct{}
+
+func (passingAdminVerifier) Verify(context.Context, []byte) (pagetemplate.VerifyResult, error) {
+	var r pagetemplate.VerifyResult
+	r.Viewport.OK, r.Viewport.ScrollWidth, r.Viewport.InnerWidth = true, 390, 390
+	r.PDF.OK, r.PDF.Bytes = true, 120000
+	return r, nil
+}
+
 type harness struct {
 	t      *testing.T
 	pool   *pgxpool.Pool
@@ -109,11 +121,18 @@ func setupWith(t *testing.T, adjust func(*adminapi.Server)) *harness {
 	files := &blob.Local{Dir: t.TempDir(), BaseURL: "https://api.zeus.test", Secret: []byte("files")}
 	pushes := &push.Log{}
 	rc := &remoteconfig.Cache{Q: q, Region: "china"}
+	pageTemplates := pagetemplate.New(q, pool, passingAdminVerifier{}, true)
+	if err := pagetemplate.EnsureBuiltin(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	reporttemplate.SetProvider(pageTemplates)
+	t.Cleanup(func() { reporttemplate.SetProvider(nil) })
 	srv := &adminapi.Server{
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Q: q, Tokens: adminapi.NewTokens("test", time.Hour),
 		Quota: &quota.Service{Q: q, Config: rc}, Orch: fo, LLMProvider: "gateway", ModelGWConfig: "../../../deploy/modelgw.example.yaml",
 		PublicBaseURL: "https://zeus.test", Blob: files, Push: pushes, Notify: &notify.Service{Q: q, Sender: pushes}, Region: "china",
-		Releases: &remoteconfig.Releases{Pool: pool, RequireApproval: true},
+		Releases:      &remoteconfig.Releases{Pool: pool, RequireApproval: true},
+		PageTemplates: pageTemplates,
 	}
 	if adjust != nil {
 		adjust(srv)
@@ -202,7 +221,7 @@ func TestAdminConsole(t *testing.T) {
 	h.do("POST", "/admin/v1/auth/login", map[string]string{"email": "owner@zeus.test", "password": "wrong-password"}, 401, nil)
 	h.do("GET", "/admin/v1/me", nil, 401, nil)
 	lr := h.login("owner@zeus.test", "correct-horse-battery")
-	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 16 {
+	if lr.Admin.Role != "owner" || len(lr.Admin.Permissions) != 17 {
 		t.Fatalf("login admin = %+v", lr.Admin)
 	}
 

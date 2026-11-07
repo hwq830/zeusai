@@ -2102,6 +2102,117 @@ paths:
               schema: { $ref: '#/components/schemas/ExternalCallList' }
         default: { $ref: '#/components/responses/Error' }
 
+  /admin/v1/page-templates:
+    get:
+      tags: [content]
+      operationId: listPageTemplates
+      summary: 页面模板列表（含当前 active 版本）。只读
+      parameters:
+        - { name: kind, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplateList' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/page-templates/{pageTemplateId}/versions:
+    parameters:
+      - $ref: '#/components/parameters/PageTemplateId'
+    get:
+      tags: [content]
+      operationId: listPageTemplateVersions
+      summary: 版本列表（新到旧），含状态与校验报告
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplateVersionList' }
+        default: { $ref: '#/components/responses/Error' }
+    post:
+      tags: [content]
+      operationId: uploadPageTemplateVersion
+      summary: 上传新版本（draft）。文件白名单：report.html.tmpl / chartscript.js / usage.md / notices.md；每次写入审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PageTemplateUpload' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplateVersion' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/page-template-versions/{versionId}/validate:
+    parameters:
+      - $ref: '#/components/parameters/PageTemplateVersionId'
+    post:
+      tags: [content]
+      operationId: validatePageTemplateVersion
+      summary: 跑发布闸门（8 项校验），结果写入版本；通过后状态变为 validated
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplateVersion' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/page-template-versions/{versionId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/PageTemplateVersionId'
+    post:
+      tags: [content]
+      operationId: publishPageTemplateVersion
+      summary: 发布已验证的版本（绑定到该 kind，立即生效）。写入审计
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplateVersion' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/page-templates/{kind}/rollback:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [content]
+      operationId: rollbackPageTemplate
+      summary: 回退到上一个发布过的版本（按 kind）。写入审计
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplateVersion' }
+        default: { $ref: '#/components/responses/Error' }
+
+  /admin/v1/page-template-versions/{versionId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/PageTemplateVersionId'
+    get:
+      tags: [content]
+      operationId: previewPageTemplateVersion
+      summary: 用固定样例或指定报告的实时数据渲染该版本，返回 HTML 文本
+      parameters:
+        - { name: reportId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTemplatePreview' }
+        default: { $ref: '#/components/responses/Error' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -2124,6 +2235,16 @@ components:
       schema: { type: string }
     TemplateId:
       name: templateId
+      in: path
+      required: true
+      schema: { type: string }
+    PageTemplateId:
+      name: pageTemplateId
+      in: path
+      required: true
+      schema: { type: string }
+    PageTemplateVersionId:
+      name: versionId
       in: path
       required: true
       schema: { type: string }
@@ -2832,6 +2953,88 @@ components:
           type: array
           items: { $ref: '#/components/schemas/AdminReportRow' }
         nextCursor: { $ref: '#/components/schemas/NextCursor' }
+    PageTemplate:
+      type: object
+      required: [id, kind, name, description, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        name: { type: string }
+        description: { type: string }
+        createdAt: { type: string, format: date-time }
+        archivedAt: { type: string, format: date-time, nullable: true }
+        activeVersionId: { type: string, nullable: true }
+        activeVersion: { type: integer, nullable: true }
+        activePublishedAt: { type: string, format: date-time, nullable: true }
+    PageTemplateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PageTemplate' }
+    PageTemplateCheck:
+      type: object
+      required: [id, name, status, detail]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [passed, failed, skipped, warning] }
+        detail: { type: string }
+    PageTemplateValidation:
+      type: object
+      required: [passed, checks, renderedAt]
+      properties:
+        passed: { type: boolean }
+        checks:
+          type: array
+          items: { $ref: '#/components/schemas/PageTemplateCheck' }
+        durationMs: { type: integer, format: int64 }
+        bytes: { type: integer }
+        renderedAt: { type: string, format: date-time }
+    PageTemplateFile:
+      type: object
+      required: [name, bytes]
+      properties:
+        name: { type: string }
+        bytes: { type: integer }
+    PageTemplateVersion:
+      type: object
+      required: [id, templateId, version, status, contractVersion, createdAt]
+      properties:
+        id: { type: string }
+        templateId: { type: string }
+        version: { type: integer }
+        status: { type: string, enum: [draft, validated, published, retired] }
+        contractVersion: { type: string }
+        createdAt: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        createdBy: { type: string, nullable: true }
+        validation: { $ref: '#/components/schemas/PageTemplateValidation' }
+        files:
+          type: array
+          items: { $ref: '#/components/schemas/PageTemplateFile' }
+    PageTemplateVersionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PageTemplateVersion' }
+    PageTemplatePreview:
+      type: object
+      required: [html]
+      properties:
+        html: { type: string }
+    PageTemplateUpload:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: object
+          additionalProperties: { type: string }
+          description: 文件名 → 文本内容；只允许 report.html.tmpl / chartscript.js / usage.md / notices.md
+        contractVersion: { type: string }
     AdminReportFollowup:
       type: object
       required: [id, question, answer, answerTruncated, createdAt]
