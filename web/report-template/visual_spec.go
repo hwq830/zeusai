@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // ErrInvalidVisualSpec is returned by ValidateVisualSpec and
@@ -19,6 +20,10 @@ var ErrInvalidVisualSpec = errors.New("invalid visual spec")
 type Point struct {
 	Label string  `json:"label"`
 	Value float64 `json:"value"`
+	X     float64 `json:"x,omitempty"`
+	Y     float64 `json:"y,omitempty"`
+	Sub   string  `json:"sub,omitempty"`
+	Note  string  `json:"note,omitempty"`
 }
 
 // Series is one line or one bar group. A bar/line chart usually has one
@@ -52,6 +57,14 @@ type VisualSpec struct {
 	// Order is an optional rendering hint; only "as-is" is recognized and
 	// suppresses the default category-axis descending sort.
 	Order string `json:"order,omitempty"`
+	// New chart metadata. hbar can set label_width; donut uses center_big /
+	// center_small; quadrant requires both axis names and can set four corners.
+	LabelWidth  int      `json:"label_width,omitempty"`
+	CenterBig   string   `json:"center_big,omitempty"`
+	CenterSmall string   `json:"center_small,omitempty"`
+	XLabel      string   `json:"x_label,omitempty"`
+	YLabel      string   `json:"y_label,omitempty"`
+	Corners     []string `json:"corners,omitempty"`
 }
 
 var visualReferencePattern = regexp.MustCompile(`\[[0-9]+(?:\s*,\s*[0-9]+)*\]`)
@@ -66,9 +79,9 @@ func ValidateVisualSpec(s VisualSpec) error {
 		return visualSpecError("level must be L1, L2 or L3")
 	}
 	switch s.Type {
-	case "bar", "line", "barGrouped":
+	case "bar", "line", "barGrouped", "hbar", "donut", "quadrant":
 	default:
-		return visualSpecError("type must be bar, line or barGrouped")
+		return visualSpecError("type must be bar, line, barGrouped, hbar, donut or quadrant")
 	}
 	if strings.TrimSpace(s.Anchor) == "" {
 		return visualSpecError("anchor is required")
@@ -95,6 +108,56 @@ func ValidateVisualSpec(s VisualSpec) error {
 			}
 			if math.IsNaN(point.Value) || math.IsInf(point.Value, 0) {
 				return visualSpecError("series %d point %d has a non-finite value", i+1, j+1)
+			}
+		}
+	}
+	switch s.Type {
+	case "hbar":
+		if len(s.Series) != 1 {
+			return visualSpecError("hbar 只允许单序列")
+		}
+		points := s.Series[0].Points
+		if len(points) < 2 || len(points) > 10 {
+			return visualSpecError("hbar 需要 2–10 个点")
+		}
+		for i, p := range points {
+			if utf8.RuneCountInString(strings.TrimSpace(p.Label)) > 40 {
+				return visualSpecError("hbar 第 %d 个标签超过 40 字", i+1)
+			}
+			if i > 0 && points[i-1].Value < p.Value {
+				return visualSpecError("hbar 必须按 value 降序排列")
+			}
+		}
+	case "donut":
+		if len(s.Series) != 1 {
+			return visualSpecError("donut 只允许单序列")
+		}
+		points := s.Series[0].Points
+		if len(points) < 2 || len(points) > 5 {
+			return visualSpecError("donut 需要 2–5 个数据段")
+		}
+		for i, p := range points {
+			if p.Value <= 0 {
+				return visualSpecError("donut 第 %d 个值必须大于 0", i+1)
+			}
+		}
+	case "quadrant":
+		if len(s.Series) != 1 {
+			return visualSpecError("quadrant 只允许单序列")
+		}
+		points := s.Series[0].Points
+		if len(points) < 4 || len(points) > 8 {
+			return visualSpecError("quadrant 需要 4–8 个点")
+		}
+		if strings.TrimSpace(s.XLabel) == "" || strings.TrimSpace(s.YLabel) == "" {
+			return visualSpecError("quadrant 必须提供 x_label 和 y_label 两条轴名")
+		}
+		for i, p := range points {
+			if utf8.RuneCountInString(strings.TrimSpace(p.Label)) > 12 {
+				return visualSpecError("quadrant 第 %d 个标签超过 12 字", i+1)
+			}
+			if math.IsNaN(p.X) || math.IsInf(p.X, 0) || math.IsNaN(p.Y) || math.IsInf(p.Y, 0) || p.X < 0 || p.X > 1 || p.Y < 0 || p.Y > 1 {
+				return visualSpecError("quadrant 第 %d 个点的 x/y 必须在 0–1 之间", i+1)
 			}
 		}
 	}

@@ -24,9 +24,10 @@ const visualPlanningSystem = `你是报告插图规划器。只规划 1–6 个�
 - 同一章节最多 1 张图；不同图的 anchor 可以相同，但总图数最多 6。
 
 输出 JSON，不要 markdown：
-{"visuals":[{"anchor":"章节标题","type":"bar|line|barGrouped","title":"图标题","unit":"单位","level":"L1|L2|L3","series":[{"name":"系列名","points":[{"label":"2024","value":100}]}],"formula":"L2/L3 必填","inputs":["[1] ...","[3] ..."],"assumptions":["L3 假设1","L3 假设2"],"metric_definition":"这个数到底是什么","caption":"图下说明","axis_truncated":false}]}
+{"visuals":[{"anchor":"章节标题","type":"bar|hbar|donut|quadrant|line|barGrouped","title":"图标题","unit":"单位","level":"L1|L2|L3","series":[{"name":"系列名","points":[{"label":"2024","value":100}]}],"x_label":"quadrant 必填","y_label":"quadrant 必填","center_big":"donut 可选","center_small":"donut 可选","label_width":200,"corners":["左上","右上","左下","右下"],"formula":"L2/L3 必填","inputs":["[1] ...","[3] ..."],"assumptions":["L3 假设1","L3 假设2"],"metric_definition":"这个数到底是什么","caption":"图下说明","axis_truncated":false}]}
 
-字段要求：series 至少 1 条、每条至少 2 个点；L2/L3 必须有 formula 和 inputs；L3 必须有至少 2 条 assumptions 和 metric_definition；L1 不强制 formula。证据不足返回 {"visuals":[]}。`
+字段要求：series 至少 1 条、每条至少 2 个点；L2/L3 必须有 formula 和 inputs；L3 必须有至少 2 条 assumptions 和 metric_definition；L1 不强制 formula。
+图表选型：分类标签长或类别多 → hbar（单序列、2–10 点、按 value 降序、label ≤40 字）；构成与占比（前 N 名）→ donut（2–5 段、value 全为正）；两个维度的定位（竞争格局、优先级）→ quadrant（4–8 点、x/y ∈ [0,1]、每点 label ≤12 字、必须给 x_label 和 y_label）；时间序列 → line；常规比较 → bar。宁可不配图，也不要为了用某种图生造数据。证据不足返回 {"visuals":[]}。`
 
 // maxVisualAttempts bounds visual planning retries. One retry absorbs a
 // truncated or malformed model response without turning a report into a

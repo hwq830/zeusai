@@ -278,10 +278,11 @@ const visualChartScript = `(function(){
   }
   var d=document.getElementById("zeus-chart-data");
   if(d){var items;try{items=JSON.parse(d.textContent)}catch(e){return}
-    for(var i=0;i<items.length;i++){var it=items[i],fn=it.renderType==="line"?chartLine:chartBar;if(fn)fn("c"+i,it.config)}
+    var fns={line:chartLine,hbar:chartHBar,donut:chartDonut,quadrant:chartQuadrant};
+    for(var i=0;i<items.length;i++){var it=items[i],fn=fns[it.renderType]||chartBar;if(fn)fn("c"+i,it.config)}
   }
 })();`
 
 // visualChartScriptHash is pinned; TestVisualChartScriptHashIsPinned fails if
 // the script bytes change without updating this value.
-const visualChartScriptHash = "TXOIX6Lw4Qklwas74G0PjC7tx7fZLPDfe4dhQbHzpwk="
+const visualChartScriptHash = "9xBUbcvmxtcTSMjOWWE1ZxYfLQETUGT4A81QDQq9g4c="

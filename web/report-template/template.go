@@ -291,6 +291,46 @@ func chartConfig(spec VisualSpec) preparedChart {
 		return cfg, original[hi].Label
 	}
 	switch spec.Type {
+	case "hbar":
+		points := spec.Series[0].Points
+		data := make([]map[string]any, 0, len(points))
+		for _, p := range points {
+			item := map[string]any{"label": p.Label, "value": p.Value}
+			if p.Note != "" {
+				item["note"] = p.Note
+			}
+			data = append(data, item)
+		}
+		width := spec.LabelWidth
+		if width <= 0 {
+			width = 200
+		}
+		return preparedChart{renderType: "hbar", config: map[string]any{"data": data, "unit": spec.Unit, "labelWidth": width}, ok: true}
+	case "donut":
+		points := spec.Series[0].Points
+		data := make([]map[string]any, 0, len(points))
+		for i, p := range points {
+			data = append(data, map[string]any{"label": p.Label, "value": p.Value, "color": colors[i%len(colors)]})
+		}
+		cfg := map[string]any{"data": data}
+		if strings.TrimSpace(spec.CenterBig) != "" || strings.TrimSpace(spec.CenterSmall) != "" {
+			cfg["center"] = map[string]any{"big": spec.CenterBig, "small": spec.CenterSmall}
+		}
+		return preparedChart{renderType: "donut", config: cfg, ok: true}
+	case "quadrant":
+		points := make([]map[string]any, 0, len(spec.Series[0].Points))
+		for _, p := range spec.Series[0].Points {
+			item := map[string]any{"x": p.X, "y": p.Y, "label": p.Label}
+			if p.Sub != "" {
+				item["sub"] = p.Sub
+			}
+			points = append(points, item)
+		}
+		cfg := map[string]any{"points": points, "xLabel": spec.XLabel, "yLabel": spec.YLabel}
+		if len(spec.Corners) >= 4 {
+			cfg["corners"] = map[string]string{"tl": spec.Corners[0], "tr": spec.Corners[1], "bl": spec.Corners[2], "br": spec.Corners[3]}
+		}
+		return preparedChart{renderType: "quadrant", config: cfg, ok: true}
 	case "bar":
 		order := categoryOrder(spec.Series[0].Points, spec.Order)
 		cfg, hi := barHighlight(spec.Series[0].Points, order)
